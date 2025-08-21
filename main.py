@@ -172,11 +172,11 @@ async def send_alarm(alarm_request: AlarmRequest):
     # Event API 요청 데이터 구성
     event_data = EventAPIRequest(
         event=Event(
-            name="kt_alarm",  # 카카오 관리자센터에서 설정한 이벤트 이름
+            name="morning_demo_alarm",  # 카카오 관리자센터에서 설정한 이벤트 이름
             data=EventData(text=alarm_request.message)
         ),
         user=[EventUser(
-            type="botUserKey",
+            type="appUserId",  # open_id는 appUserId로 전송
             id=alarm_request.user_id
         )],
         params={
@@ -309,10 +309,10 @@ async def send_alarm_to_all(message: str):
         # Event API 요청 데이터 구성
         event_data = EventAPIRequest(
             event=Event(
-                name="kt_alarm",
+                name="morning_demo_alarm",
                 data=EventData(text=message)
             ),
-            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
+            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "broadcast": "true",
                 "timestamp": str(int(__import__('time').time()))
@@ -446,10 +446,10 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
         # Event API 요청 데이터 구성
         event_data = EventAPIRequest(
             event=Event(
-                name="kt_alarm",
+                name="morning_demo_alarm",
                 data=EventData(text=alarm_request.message)
             ),
-            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
+            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "filtered": "true",
                 "location_filter": alarm_request.location_filter or "",
