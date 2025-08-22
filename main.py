@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from pydantic import BaseModel, Field
 import logging
 import httpx
@@ -8,6 +8,7 @@ import json
 from typing import List, Optional
 import sqlite3
 import os
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -46,6 +47,15 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+# DB 의존성 주입 함수
+def get_db():
+    """데이터베이스 연결을 위한 의존성 주입 함수"""
+    db = sqlite3.connect(DATABASE_PATH)
+    try:
+        yield db
+    finally:
+        db.close()
 
 # 앱 시작시 DB 초기화
 init_db()
@@ -181,7 +191,7 @@ async def send_alarm(alarm_request: AlarmRequest):
         )],
         params={
             "location": alarm_request.location or "",
-            "timestamp": str(int(__import__('time').time()))
+            "timestamp": str(int(time.time()))
         }
     )
     
@@ -198,7 +208,7 @@ async def send_alarm(alarm_request: AlarmRequest):
             response = await client.post(
                 url,
                 headers=headers,
-                json=event_data.dict()
+                json=event_data.model_dump()
             )
             
             if response.status_code == 200:
@@ -251,12 +261,11 @@ async def check_alarm_status(task_id: str):
         raise HTTPException(status_code=500, detail=f"상태 확인 중 오류: {str(e)}")
 
 @app.get("/users")
-async def get_all_users():
+async def get_all_users(db: sqlite3.Connection = Depends(get_db)):
     """
     등록된 모든 사용자 목록을 조회하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    cursor = db.cursor()
     
     cursor.execute('''
         SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active 
@@ -266,7 +275,6 @@ async def get_all_users():
     ''')
     
     users = cursor.fetchall()
-    conn.close()
     
     return {
         "total_users": len(users),
@@ -315,7 +323,7 @@ async def send_alarm_to_all(message: str):
             user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "broadcast": "true",
-                "timestamp": str(int(__import__('time').time()))
+                "timestamp": str(int(time.time()))
             }
         )
         
@@ -332,7 +340,7 @@ async def send_alarm_to_all(message: str):
                 response = await client.post(
                     url,
                     headers=headers,
-                    json=event_data.dict()
+                    json=event_data.model_dump()
                 )
                 
                 if response.status_code == 200:
@@ -453,7 +461,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
             params={
                 "filtered": "true",
                 "location_filter": alarm_request.location_filter or "",
-                "timestamp": str(int(__import__('time').time()))
+                "timestamp": str(int(time.time()))
             }
         )
         
@@ -470,7 +478,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
                 response = await client.post(
                     url,
                     headers=headers,
-                    json=event_data.dict()
+                    json=event_data.model_dump()
                 )
                 
                 if response.status_code == 200:
@@ -528,6 +536,11 @@ async def kakao_channel_webhook(request: Request):
     updated_at = body.get("updated_at")
     
     logger.info(f"웹훅 수신: event={event}, user_id={user_id}, id_type={id_type}")
+    
+    # id_type 검증 - 보안 강화
+    if id_type != "app_user_id":
+        logger.warning(f"Unsupported id_type '{id_type}' received from webhook for user {user_id}")
+        return {"status": "ignored", "reason": "unsupported id_type"}
     
     # DB에서 사용자 상태 업데이트
     conn = sqlite3.connect(DATABASE_PATH)
