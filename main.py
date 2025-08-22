@@ -40,15 +40,77 @@ def init_db():
             location TEXT,
             categories TEXT,  -- JSON 형태로 관심 카테고리 저장
             preferences TEXT, -- JSON 형태로 기타 설정 저장
-            active BOOLEAN DEFAULT TRUE
+            active BOOLEAN DEFAULT TRUE,
+            departure_name TEXT,
+            departure_address TEXT,
+            departure_x REAL,
+            departure_y REAL,
+            arrival_name TEXT,
+            arrival_address TEXT,
+            arrival_x REAL,
+            arrival_y REAL,
+            route_updated_at DATETIME
         )
     ''')
+    
+    # 기존 테이블에 새 컬럼 추가 (마이그레이션)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_name TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_address TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_x REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_y REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_name TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_address TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_x REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_y REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN route_updated_at DATETIME')
+        logger.info("경로 정보 컬럼들이 성공적으로 추가되었습니다.")
+    except sqlite3.OperationalError:
+        # 컬럼이 이미 존재하는 경우
+        logger.info("경로 정보 컬럼들이 이미 존재합니다.")
     
     conn.commit()
     conn.close()
 
 # 앱 시작시 DB 초기화
 init_db()
+
+# --------------------------
+# 카카오 지도 API 함수
+# --------------------------
+async def get_location_info(query: str):
+    """
+    카카오 지도 API를 사용하여 검색어를 장소 정보로 변환
+    """
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    params = {"query": query}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("documents"):
+                    doc = data["documents"][0]  # 첫 번째 검색 결과 사용
+                    return {
+                        "name": doc["place_name"],
+                        "address": doc.get("road_address_name") or doc.get("address_name"),
+                        "x": float(doc["x"]),  # 경도
+                        "y": float(doc["y"])   # 위도
+                    }
+                else:
+                    logger.warning(f"검색 결과가 없습니다: {query}")
+                    return None
+            else:
+                logger.error(f"카카오 지도 API 호출 실패: {response.status_code}")
+                return None
+                
+    except Exception as e:
+        logger.error(f"카카오 지도 API 호출 중 오류: {str(e)}")
+        return None
 
 # --- Pydantic 모델 정의 ---
 # 카카오톡 챗봇이 보내주는 데이터 구조를 클래스로 정의합니다.
