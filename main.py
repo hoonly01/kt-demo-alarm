@@ -370,7 +370,9 @@ async def get_all_users():
     cursor = conn.cursor()
     
     cursor.execute('''
-        SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active 
+        SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active,
+               departure_name, departure_address, departure_x, departure_y,
+               arrival_name, arrival_address, arrival_x, arrival_y, route_updated_at
         FROM users 
         WHERE active = 1
         ORDER BY last_message_at DESC
@@ -388,7 +390,20 @@ async def get_all_users():
                 "last_message_at": user[2], 
                 "message_count": user[3],
                 "location": user[4],
-                "active": user[5]
+                "active": user[5],
+                "route_info": {
+                    "departure": {
+                        "name": user[6],
+                        "address": user[7],
+                        "coordinates": {"x": user[8], "y": user[9]} if user[8] and user[9] else None
+                    },
+                    "arrival": {
+                        "name": user[10],
+                        "address": user[11], 
+                        "coordinates": {"x": user[12], "y": user[13]} if user[12] and user[13] else None
+                    },
+                    "updated_at": user[14]
+                } if user[6] or user[10] else None
             }
             for user in users
         ]
