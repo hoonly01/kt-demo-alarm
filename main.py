@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 import logging
 import httpx
@@ -41,9 +41,34 @@ def init_db():
             location TEXT,
             categories TEXT,  -- JSON 형태로 관심 카테고리 저장
             preferences TEXT, -- JSON 형태로 기타 설정 저장
-            active BOOLEAN DEFAULT TRUE
+            active BOOLEAN DEFAULT TRUE,
+            departure_name TEXT,
+            departure_address TEXT,
+            departure_x REAL,
+            departure_y REAL,
+            arrival_name TEXT,
+            arrival_address TEXT,
+            arrival_x REAL,
+            arrival_y REAL,
+            route_updated_at DATETIME
         )
     ''')
+    
+    # 기존 테이블에 새 컬럼 추가 (마이그레이션)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_name TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_address TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_x REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN departure_y REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_name TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_address TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_x REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN arrival_y REAL')
+        cursor.execute('ALTER TABLE users ADD COLUMN route_updated_at DATETIME')
+        logger.info("경로 정보 컬럼들이 성공적으로 추가되었습니다.")
+    except sqlite3.OperationalError:
+        # 컬럼이 이미 존재하는 경우
+        logger.info("경로 정보 컬럼들이 이미 존재합니다.")
     
     conn.commit()
     conn.close()
@@ -59,6 +84,92 @@ def get_db():
 
 # 앱 시작시 DB 초기화
 init_db()
+
+# --------------------------
+# 카카오 지도 API 함수
+# --------------------------
+async def get_location_info(query: str):
+    """
+    카카오 지도 API를 사용하여 검색어를 장소 정보로 변환
+    """
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    params = {"query": query}
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if data.get("documents"):
+                    doc = data["documents"][0]  # 첫 번째 검색 결과 사용
+                    return {
+                        "name": doc["place_name"],
+                        "address": doc.get("road_address_name") or doc.get("address_name"),
+                        "x": float(doc["x"]),  # 경도
+                        "y": float(doc["y"])   # 위도
+                    }
+                else:
+                    logger.warning(f"검색 결과가 없습니다: {query}")
+                    return None
+            else:
+                logger.error(f"카카오 지도 API 호출 실패: {response.status_code}")
+                return None
+                
+    except Exception as e:
+        logger.error(f"카카오 지도 API 호출 중 오류: {str(e)}")
+        return None
+
+# --------------------------
+# 경로 정보 저장 함수
+# --------------------------
+async def save_route_to_db(user_id: str, departure: str, arrival: str):
+    """
+    사용자 경로 정보를 데이터베이스에 저장
+    """
+    try:
+        # 카카오 지도 API로 위치 정보 조회
+        dep_info = await get_location_info(departure) if departure else None
+        arr_info = await get_location_info(arrival) if arrival else None
+        
+        # 데이터베이스 업데이트
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        now = datetime.now()
+        
+        # 사용자 경로 정보 업데이트
+        cursor.execute('''
+            UPDATE users 
+            SET departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
+                arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
+                route_updated_at = ?
+            WHERE bot_user_key = ?
+        ''', (
+            dep_info["name"] if dep_info else departure,
+            dep_info["address"] if dep_info else None,
+            dep_info["x"] if dep_info else None,
+            dep_info["y"] if dep_info else None,
+            arr_info["name"] if arr_info else arrival,
+            arr_info["address"] if arr_info else None,
+            arr_info["x"] if arr_info else None,
+            arr_info["y"] if arr_info else None,
+            now,
+            user_id
+        ))
+        
+        if cursor.rowcount > 0:
+            logger.info(f"사용자 {user_id} 경로 정보 업데이트 완료: {departure} → {arrival}")
+        else:
+            logger.warning(f"사용자 {user_id}를 찾을 수 없어 경로 정보 업데이트 실패")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"경로 정보 저장 중 오류 발생: {str(e)}")
 
 # --- Pydantic 모델 정의 ---
 # 카카오톡 챗봇이 보내주는 데이터 구조를 클래스로 정의합니다.
@@ -268,7 +379,9 @@ async def get_all_users(db: sqlite3.Connection = Depends(get_db)):
     cursor = db.cursor()
     
     cursor.execute('''
-        SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active 
+        SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active,
+               departure_name, departure_address, departure_x, departure_y,
+               arrival_name, arrival_address, arrival_x, arrival_y, route_updated_at
         FROM users 
         WHERE active = 1
         ORDER BY last_message_at DESC
@@ -285,7 +398,20 @@ async def get_all_users(db: sqlite3.Connection = Depends(get_db)):
                 "last_message_at": user[2], 
                 "message_count": user[3],
                 "location": user[4],
-                "active": user[5]
+                "active": user[5],
+                "route_info": {
+                    "departure": {
+                        "name": user[6],
+                        "address": user[7],
+                        "coordinates": {"x": user[8], "y": user[9]} if user[8] and user[9] else None
+                    },
+                    "arrival": {
+                        "name": user[10],
+                        "address": user[11], 
+                        "coordinates": {"x": user[12], "y": user[13]} if user[12] and user[13] else None
+                    },
+                    "updated_at": user[14]
+                } if user[6] or user[10] else None
             }
             for user in users
         ]
@@ -576,3 +702,43 @@ async def kakao_channel_webhook(request: Request):
     
     # 성공 응답 (3초 내 2XX 응답 필요)
     return {"status": "ok", "processed_event": event, "user_id": user_id}
+
+@app.post("/save_user_info")
+async def save_user_info(request: Request, background_tasks: BackgroundTasks):
+    """
+    카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
+    """
+    body = await request.json()
+    
+    # 카카오톡에서 온 요청인지 확인
+    if 'userRequest' in body:
+        user_id = body['userRequest']['user']['id']
+    else:  # 로컬 테스트용
+        user_id = body.get('userId', 'test-user')
+    
+    # 출발지와 도착지 정보 추출
+    departure = body.get('action', {}).get('params', {}).get('departure', '')
+    arrival = body.get('action', {}).get('params', {}).get('arrival', '')
+    
+    # 백그라운드에서 경로 정보 저장
+    background_tasks.add_task(save_route_to_db, user_id, departure, arrival)
+    
+    # 즉시 응답 (사용자 대기 시간 단축)
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "simpleText": {
+                        "text": (
+                            f"📍 출발지: {departure}\n"
+                            f"📍 도착지: {arrival}\n\n"
+                            "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
+                            "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                        )
+                    }
+                }
+            ]
+        }
+    }
