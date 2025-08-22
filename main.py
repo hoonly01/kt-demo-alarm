@@ -8,6 +8,7 @@ import json
 from typing import List, Optional
 import sqlite3
 import os
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -292,7 +293,7 @@ async def send_alarm(alarm_request: AlarmRequest):
         )],
         params={
             "location": alarm_request.location or "",
-            "timestamp": str(int(__import__('time').time()))
+            "timestamp": str(int(time.time()))
         }
     )
     
@@ -309,7 +310,7 @@ async def send_alarm(alarm_request: AlarmRequest):
             response = await client.post(
                 url,
                 headers=headers,
-                json=event_data.dict()
+                json=event_data.model_dump()
             )
             
             if response.status_code == 200:
@@ -441,7 +442,7 @@ async def send_alarm_to_all(message: str):
             user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "broadcast": "true",
-                "timestamp": str(int(__import__('time').time()))
+                "timestamp": str(int(time.time()))
             }
         )
         
@@ -458,7 +459,7 @@ async def send_alarm_to_all(message: str):
                 response = await client.post(
                     url,
                     headers=headers,
-                    json=event_data.dict()
+                    json=event_data.model_dump()
                 )
                 
                 if response.status_code == 200:
@@ -579,7 +580,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
             params={
                 "filtered": "true",
                 "location_filter": alarm_request.location_filter or "",
-                "timestamp": str(int(__import__('time').time()))
+                "timestamp": str(int(time.time()))
             }
         )
         
@@ -596,7 +597,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
                 response = await client.post(
                     url,
                     headers=headers,
-                    json=event_data.dict()
+                    json=event_data.model_dump()
                 )
                 
                 if response.status_code == 200:
@@ -654,6 +655,11 @@ async def kakao_channel_webhook(request: Request):
     updated_at = body.get("updated_at")
     
     logger.info(f"웹훅 수신: event={event}, user_id={user_id}, id_type={id_type}")
+    
+    # id_type 검증 - 보안 강화
+    if id_type != "app_user_id":
+        logger.warning(f"Unsupported id_type '{id_type}' received from webhook for user {user_id}")
+        return {"status": "ignored", "reason": "unsupported id_type"}
     
     # DB에서 사용자 상태 업데이트
     conn = sqlite3.connect(DATABASE_PATH)
