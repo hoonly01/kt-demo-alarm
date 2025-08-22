@@ -98,8 +98,31 @@ uvicorn main:app --reload --port 8000
 - **시스템 연동**: /users API에 구조화된 route_info 객체 포함
 - **실환경 검증**: 로컬 테스트 및 API 호출 성공 확인
 
+## Compressed Work History (Memory)
+
+### Completed Tasks Summary
+- **Phase 1-3**: 기본 FastAPI 서버, 카카오톡 콜백, SQLite 사용자 관리 시스템
+- **Phase 4-6**: ngrok 연동, Event API 알림 시스템, 필터링/배치 처리, 실환경 검증 
+- **Phase 7 (Issue #2)**: 동료 Firebase 코드를 SQLite로 통합, 카카오 지도 API 경로 등록 구현
+  - 9개 경로 컬럼 추가, /save_user_info API, BackgroundTasks 비동기 처리
+  - 전체 시스템 테스트 완료, feature/route-integration 브랜치 작업
+
+### Architecture Decisions Made
+- **Database**: SQLite 선택 (PostgreSQL/Firebase 대신) - 현재 요구사항에 충분
+- **Pattern**: 현재 monolithic FastAPI, 향후 Router-Service-Repository 리팩토링 예정
+- **Async**: BackgroundTasks로 사용자 응답 최적화, httpx로 외부 API 호출
+
+### Key APIs Implemented
+- `/kakao/chat` (폴백), `/save_user_info` (스킬), `/send-alarm*` (알림), `/users` (조회)
+- 카카오 지도 API 통합, Event API 알림 시스템, 웹훅 처리
+
+### Current Status
+- 코드 측면: 모든 기능 완성, 로컬 테스트 검증 완료
+- 배포 상태: feature/route-integration 브랜치, main 머지 대기
+- 남은 작업: 카카오톡 관리자센터 스킬 블록 설정만 남음
+
 ## Phase 8: Next Development (TODO)
-- **카카오톡 스킬 블록 설정**: 실제 카카오톡에서 경로 등록 기능 활성화
+- **카카오톡 스킬 블록 설정**: 실제 카카오톡에서 경로 등록 기능 활성화 (URGENT)
 - **사용자 메시지 처리 로직**: 명령어 파싱, 자동 응답, 데이터 수집, 개인화 설정
 - **MVC 구조 리팩토링**: Router-Service-Repository 패턴으로 코드 분리
 
