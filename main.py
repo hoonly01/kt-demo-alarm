@@ -1035,7 +1035,7 @@ async def check_user_route_events(user_id: str, db: sqlite3.Connection = Depends
     if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
         raise HTTPException(status_code=404, detail="사용자의 경로 정보를 찾을 수 없습니다.")
     
-    dep_lat, dep_lon, arr_lat, arr_lon = user_row[2], user_row[3], user_row[6], user_row[7]
+    dep_lon, dep_lat, arr_lon, arr_lat = user_row[2], user_row[3], user_row[6], user_row[7]
     
     # 활성 집회 목록 조회
     cursor.execute('''
