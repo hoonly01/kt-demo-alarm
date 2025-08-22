@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 import logging
 import httpx
@@ -111,6 +111,55 @@ async def get_location_info(query: str):
     except Exception as e:
         logger.error(f"카카오 지도 API 호출 중 오류: {str(e)}")
         return None
+
+# --------------------------
+# 경로 정보 저장 함수
+# --------------------------
+async def save_route_to_db(user_id: str, departure: str, arrival: str):
+    """
+    사용자 경로 정보를 데이터베이스에 저장
+    """
+    try:
+        # 카카오 지도 API로 위치 정보 조회
+        dep_info = await get_location_info(departure) if departure else None
+        arr_info = await get_location_info(arrival) if arrival else None
+        
+        # 데이터베이스 업데이트
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        now = datetime.now()
+        
+        # 사용자 경로 정보 업데이트
+        cursor.execute('''
+            UPDATE users 
+            SET departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
+                arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
+                route_updated_at = ?
+            WHERE bot_user_key = ?
+        ''', (
+            dep_info["name"] if dep_info else departure,
+            dep_info["address"] if dep_info else None,
+            dep_info["x"] if dep_info else None,
+            dep_info["y"] if dep_info else None,
+            arr_info["name"] if arr_info else arrival,
+            arr_info["address"] if arr_info else None,
+            arr_info["x"] if arr_info else None,
+            arr_info["y"] if arr_info else None,
+            now,
+            user_id
+        ))
+        
+        if cursor.rowcount > 0:
+            logger.info(f"사용자 {user_id} 경로 정보 업데이트 완료: {departure} → {arrival}")
+        else:
+            logger.warning(f"사용자 {user_id}를 찾을 수 없어 경로 정보 업데이트 실패")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"경로 정보 저장 중 오류 발생: {str(e)}")
 
 # --- Pydantic 모델 정의 ---
 # 카카오톡 챗봇이 보내주는 데이터 구조를 클래스로 정의합니다.
@@ -625,3 +674,43 @@ async def kakao_channel_webhook(request: Request):
     
     # 성공 응답 (3초 내 2XX 응답 필요)
     return {"status": "ok", "processed_event": event, "user_id": user_id}
+
+@app.post("/save_user_info")
+async def save_user_info(request: Request, background_tasks: BackgroundTasks):
+    """
+    카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
+    """
+    body = await request.json()
+    
+    # 카카오톡에서 온 요청인지 확인
+    if 'userRequest' in body:
+        user_id = body['userRequest']['user']['id']
+    else:  # 로컬 테스트용
+        user_id = body.get('userId', 'test-user')
+    
+    # 출발지와 도착지 정보 추출
+    departure = body.get('action', {}).get('params', {}).get('departure', '')
+    arrival = body.get('action', {}).get('params', {}).get('arrival', '')
+    
+    # 백그라운드에서 경로 정보 저장
+    background_tasks.add_task(save_route_to_db, user_id, departure, arrival)
+    
+    # 즉시 응답 (사용자 대기 시간 단축)
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "simpleText": {
+                        "text": (
+                            f"📍 출발지: {departure}\n"
+                            f"📍 도착지: {arrival}\n\n"
+                            "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
+                            "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                        )
+                    }
+                }
+            ]
+        }
+    }
