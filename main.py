@@ -950,6 +950,84 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
 # Phase 9: 집회 관리 API
 # --------------------------
 
+async def auto_notify_route_events(user_id: str, events_found: List[EventResponse]):
+    """
+    감지된 집회를 사용자에게 자동으로 알림 전송
+    
+    Args:
+        user_id: 사용자 ID  
+        events_found: 감지된 집회 목록
+    """
+    if not events_found:
+        return
+    
+    # 알림 메시지 구성
+    event_count = len(events_found)
+    message_lines = [f"🚨 출퇴근 경로에 {event_count}개의 집회가 예정되어 있습니다.\n"]
+    
+    for event in events_found:
+        start_date = event.start_date.strftime('%m월 %d일 %H:%M')
+        severity = "🔴 높음" if event.severity_level == 3 else "🟡 보통" if event.severity_level == 2 else "🟢 낮음"
+        
+        message_lines.append(f"📍 {event.title}")
+        message_lines.append(f"📅 {start_date}")
+        message_lines.append(f"🏢 {event.location_name}")
+        message_lines.append(f"⚠️ 심각도: {severity}")
+        message_lines.append("─" * 20)
+    
+    message_lines.append("💡 교통 상황을 미리 확인하시고 우회 경로를 고려해보세요!")
+    
+    message = "\n".join(message_lines)
+    
+    # Event API 요청 데이터 구성
+    event_data = EventAPIRequest(
+        event=Event(
+            name="route_rally_alert",  # 경로 집회 알림 이벤트
+            data=EventData(text=message)
+        ),
+        user=[EventUser(
+            type="appUserId",
+            id=user_id
+        )],
+        params={
+            "alert_type": "route_events",
+            "event_count": event_count,
+            "timestamp": str(int(time.time()))
+        }
+    )
+    
+    # 카카오 Event API 호출
+    headers = {
+        "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    url = f"https://bot-api.kakao.com/v2/bots/{BOT_ID}/talk"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                json=event_data.model_dump()
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(f"자동 집회 알림 전송 성공: {user_id}, {event_count}개 집회")
+                return {
+                    "success": True,
+                    "task_id": result.get("taskId"),
+                    "event_count": event_count
+                }
+            else:
+                logger.error(f"자동 집회 알림 전송 실패: {response.status_code}, {response.text}")
+                return {"success": False, "error": response.text}
+                
+    except Exception as e:
+        logger.error(f"자동 집회 알림 전송 중 오류: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 @app.post("/events", response_model=EventResponse)
 async def create_event(event: EventCreate, db: sqlite3.Connection = Depends(get_db)):
     """새로운 집회 정보를 등록"""
@@ -1020,7 +1098,11 @@ async def get_events(
     return events
 
 @app.get("/check-route-events/{user_id}", response_model=RouteEventCheck)
-async def check_user_route_events(user_id: str, db: sqlite3.Connection = Depends(get_db)):
+async def check_user_route_events(
+    user_id: str, 
+    auto_notify: bool = False,  # 자동 알림 여부
+    db: sqlite3.Connection = Depends(get_db)
+):
     """사용자의 경로상에 있는 집회들을 확인"""
     cursor = db.cursor()
     
@@ -1083,9 +1165,76 @@ async def check_user_route_events(user_id: str, db: sqlite3.Connection = Depends
         "arrival": {"name": user_row[4], "address": user_row[5], "lat": arr_lat, "lon": arr_lon}
     }
     
+    # 자동 알림 전송 (옵션)
+    if auto_notify and route_events:
+        await auto_notify_route_events(user_id, route_events)
+        logger.info(f"사용자 {user_id}에게 {len(route_events)}개 집회 자동 알림 전송")
+    
     return RouteEventCheck(
         user_id=user_id,
         events_found=route_events,
         route_info=route_info,
         total_events=len(route_events)
     )
+
+@app.post("/auto-check-all-routes")
+async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
+    """
+    모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
+    Phase 9.4: 자동화 시스템의 핵심 API
+    """
+    cursor = db.cursor()
+    
+    # 경로 정보가 등록된 모든 활성 사용자 조회
+    cursor.execute('''
+        SELECT bot_user_key FROM users 
+        WHERE active = 1 
+        AND departure_x IS NOT NULL 
+        AND departure_y IS NOT NULL
+        AND arrival_x IS NOT NULL 
+        AND arrival_y IS NOT NULL
+    ''')
+    
+    users = cursor.fetchall()
+    results = []
+    
+    logger.info(f"경로 기반 집회 확인 시작: {len(users)}명 사용자")
+    
+    for user_row in users:
+        user_id = user_row[0]
+        
+        try:
+            # 각 사용자의 경로 확인 (자동 알림 포함)
+            result = await check_user_route_events(user_id, auto_notify=True, db=db)
+            
+            results.append({
+                "user_id": user_id,
+                "events_found": len(result.events_found),
+                "auto_notified": len(result.events_found) > 0,
+                "status": "success"
+            })
+            
+            if result.events_found:
+                logger.info(f"사용자 {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
+                
+        except Exception as e:
+            logger.error(f"사용자 {user_id} 경로 확인 실패: {str(e)}")
+            results.append({
+                "user_id": user_id,
+                "events_found": 0,
+                "auto_notified": False,
+                "status": "failed",
+                "error": str(e)
+            })
+    
+    summary = {
+        "total_users": len(users),
+        "successful_checks": len([r for r in results if r["status"] == "success"]),
+        "users_with_events": len([r for r in results if r["events_found"] > 0]),
+        "total_notifications_sent": len([r for r in results if r["auto_notified"]]),
+        "results": results
+    }
+    
+    logger.info(f"경로 기반 집회 확인 완료: {summary['users_with_events']}명에게 알림 전송")
+    
+    return summary
