@@ -1,6 +1,6 @@
 # main.py
 
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 import logging
 import httpx
@@ -72,6 +72,15 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+# DB 의존성 주입 함수
+def get_db():
+    """데이터베이스 연결을 위한 의존성 주입 함수"""
+    db = sqlite3.connect(DATABASE_PATH)
+    try:
+        yield db
+    finally:
+        db.close()
 
 # 앱 시작시 DB 초기화
 init_db()
@@ -363,12 +372,11 @@ async def check_alarm_status(task_id: str):
         raise HTTPException(status_code=500, detail=f"상태 확인 중 오류: {str(e)}")
 
 @app.get("/users")
-async def get_all_users():
+async def get_all_users(db: sqlite3.Connection = Depends(get_db)):
     """
     등록된 모든 사용자 목록을 조회하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    cursor = db.cursor()
     
     cursor.execute('''
         SELECT bot_user_key, first_message_at, last_message_at, message_count, location, active,
@@ -380,7 +388,6 @@ async def get_all_users():
     ''')
     
     users = cursor.fetchall()
-    conn.close()
     
     return {
         "total_users": len(users),
