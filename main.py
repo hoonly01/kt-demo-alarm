@@ -212,6 +212,84 @@ async def get_location_info(query: str):
         logger.error(f"카카오 지도 API 호출 중 오류: {str(e)}")
         return None
 
+async def get_route_coordinates(start_x: float, start_y: float, end_x: float, end_y: float):
+    """
+    카카오 Mobility API를 사용하여 실제 보행 경로 좌표를 가져옴
+    
+    Args:
+        start_x, start_y: 출발지 경도, 위도
+        end_x, end_y: 도착지 경도, 위도
+    
+    Returns:
+        List[Tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
+    """
+    url = f"https://apis-navi.kakaomobility.com/v1/directions"
+    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    params = {
+        "origin": f"{start_x},{start_y}",
+        "destination": f"{end_x},{end_y}",
+        "priority": "RECOMMEND"  # 추천 경로
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, params=params)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "routes" in data and len(data["routes"]) > 0:
+                    route = data["routes"][0]
+                    coordinates = []
+                    
+                    # 경로의 모든 섹션에서 좌표 추출
+                    for section in route["sections"]:
+                        for road in section["roads"]:
+                            vertexes = road["vertexes"]
+                            # vertexes는 [경도, 위도, 경도, 위도, ...] 형태
+                            for i in range(0, len(vertexes), 2):
+                                if i + 1 < len(vertexes):
+                                    lon = vertexes[i]      # 경도
+                                    lat = vertexes[i + 1]  # 위도
+                                    coordinates.append((lat, lon))
+                    
+                    logger.info(f"경로 좌표 {len(coordinates)}개 추출 완료")
+                    return coordinates
+                else:
+                    logger.warning("경로를 찾을 수 없습니다")
+                    return []
+            else:
+                logger.error(f"카카오 Mobility API 호출 실패: {response.status_code}, {response.text}")
+                return []
+                
+    except Exception as e:
+        logger.error(f"카카오 Mobility API 호출 중 오류: {str(e)}")
+        return []
+
+def is_event_near_route_accurate(route_coordinates: list, event_lat: float, event_lon: float, threshold_meters: float = 500) -> bool:
+    """
+    실제 경로 좌표를 사용하여 집회가 경로 근처에 있는지 정확히 확인
+    
+    Args:
+        route_coordinates: 경로상의 (위도, 경도) 좌표 리스트
+        event_lat, event_lon: 집회 위치
+        threshold_meters: 임계거리 (미터)
+    
+    Returns:
+        bool: 경로 근처에 있으면 True
+    """
+    if not route_coordinates:
+        return False
+    
+    # 경로상의 각 점에서 집회까지의 거리 확인
+    for lat, lon in route_coordinates:
+        distance = haversine_distance(lat, lon, event_lat, event_lon)
+        if distance <= threshold_meters:
+            logger.info(f"집회가 경로에서 {distance:.0f}m 거리에 감지됨")
+            return True
+    
+    return False
+
 # --------------------------
 # 경로 정보 저장 함수
 # --------------------------
@@ -969,11 +1047,27 @@ async def check_user_route_events(user_id: str, db: sqlite3.Connection = Depends
     events_rows = cursor.fetchall()
     route_events = []
     
-    # 각 집회가 사용자 경로 근처에 있는지 확인
+    # 카카오 Mobility API로 실제 경로 좌표 가져오기
+    route_coordinates = await get_route_coordinates(dep_lon, dep_lat, arr_lon, arr_lat)
+    
+    # 각 집회가 실제 경로 근처에 있는지 정확히 확인
     for row in events_rows:
         event_lat, event_lon = row[5], row[6]
         
-        if is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
+        # 정확한 경로 기반 검사 (Mobility API 사용)
+        if route_coordinates and is_event_near_route_accurate(route_coordinates, event_lat, event_lon):
+            route_events.append(EventResponse(
+                id=row[0], title=row[1], description=row[2], location_name=row[3],
+                location_address=row[4], latitude=row[5], longitude=row[6],
+                start_date=datetime.fromisoformat(row[7]),
+                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
+                category=row[9], severity_level=row[10], status=row[11],
+                created_at=datetime.fromisoformat(row[12]),
+                updated_at=datetime.fromisoformat(row[13])
+            ))
+        # Mobility API 실패 시 기존 직선 방식으로 폴백
+        elif not route_coordinates and is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
+            logger.warning("Mobility API 실패로 직선 거리 방식 사용")
             route_events.append(EventResponse(
                 id=row[0], title=row[1], description=row[2], location_name=row[3],
                 location_address=row[4], latitude=row[5], longitude=row[6],
