@@ -12,6 +12,8 @@ import time
 import math
 from datetime import datetime
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # 환경변수 로드
 load_dotenv()
@@ -21,6 +23,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# 스케줄러 초기화
+scheduler = AsyncIOScheduler()
 
 # 카카오 API 설정
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
@@ -103,8 +108,82 @@ def get_db():
     finally:
         db.close()
 
-# 앱 시작시 DB 초기화
-init_db()
+# --------------------------
+# Phase 9.4: 스케줄링 시스템
+# --------------------------
+
+async def scheduled_route_check():
+    """
+    매일 아침 7시 자동 실행되는 경로 기반 집회 확인 함수
+    모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
+    """
+    logger.info("=== 정기 집회 확인 시작 ===")
+    
+    try:
+        # 데이터베이스 연결
+        db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        
+        # auto_check_all_routes 로직 실행
+        cursor = db.cursor()
+        cursor.execute('''
+            SELECT bot_user_key FROM users 
+            WHERE active = 1 
+            AND departure_x IS NOT NULL 
+            AND departure_y IS NOT NULL
+            AND arrival_x IS NOT NULL 
+            AND arrival_y IS NOT NULL
+        ''')
+        
+        users = cursor.fetchall()
+        total_notifications = 0
+        
+        logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
+        
+        for user_row in users:
+            user_id = user_row[0]
+            
+            try:
+                # 각 사용자의 경로 확인 (자동 알림 포함)
+                result = await check_user_route_events(user_id, auto_notify=True, db=db)
+                
+                if result.events_found:
+                    total_notifications += 1
+                    logger.info(f"✅ {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
+                    
+            except Exception as e:
+                logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(e)}")
+        
+        db.close()
+        
+        logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
+        
+    except Exception as e:
+        logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """앱 시작시 스케줄러 시작"""
+    # DB 초기화
+    init_db()
+    
+    # 매일 오전 7시에 정기 집회 확인 스케줄 추가
+    scheduler.add_job(
+        scheduled_route_check,
+        CronTrigger(hour=7, minute=0),  # 매일 07:00
+        id="daily_route_check",
+        name="Daily Route Rally Check",
+        replace_existing=True
+    )
+    
+    # 스케줄러 시작
+    scheduler.start()
+    logger.info("🚀 스케줄러 시작: 매일 오전 7시 자동 집회 확인 설정됨")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """앱 종료시 스케줄러 종료"""
+    scheduler.shutdown()
+    logger.info("🛑 스케줄러 종료")
 
 # --------------------------
 # 거리 계산 함수 (Phase 9)
@@ -1238,3 +1317,36 @@ async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
     logger.info(f"경로 기반 집회 확인 완료: {summary['users_with_events']}명에게 알림 전송")
     
     return summary
+
+@app.post("/manual-schedule-test")
+async def manual_schedule_test():
+    """
+    스케줄링 함수를 수동으로 실행하여 테스트
+    매일 7시 자동 실행과 동일한 로직
+    """
+    logger.info("📋 수동 스케줄 테스트 시작")
+    await scheduled_route_check()
+    return {"message": "스케줄 테스트 완료", "status": "success"}
+
+@app.get("/scheduler-status")
+async def get_scheduler_status():
+    """
+    스케줄러 상태 및 다음 실행 시간 확인
+    """
+    if not scheduler.running:
+        return {"status": "stopped", "message": "스케줄러가 실행 중이지 않습니다"}
+    
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "next_run_time": str(job.next_run_time) if job.next_run_time else None,
+            "trigger": str(job.trigger)
+        })
+    
+    return {
+        "status": "running",
+        "message": "스케줄러가 정상 동작 중입니다",
+        "jobs": jobs
+    }
