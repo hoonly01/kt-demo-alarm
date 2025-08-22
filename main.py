@@ -9,6 +9,7 @@ from typing import List, Optional
 import sqlite3
 import os
 import time
+import math
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -54,6 +55,26 @@ def init_db():
         )
     ''')
     
+    # events 테이블 생성 (Phase 9: 집회 데이터 저장)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            location_name TEXT NOT NULL,
+            location_address TEXT,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            start_date DATETIME NOT NULL,
+            end_date DATETIME,
+            category TEXT,
+            severity_level INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     # 기존 테이블에 새 컬럼 추가 (마이그레이션)
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN departure_name TEXT')
@@ -84,6 +105,75 @@ def get_db():
 
 # 앱 시작시 DB 초기화
 init_db()
+
+# --------------------------
+# 거리 계산 함수 (Phase 9)
+# --------------------------
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Haversine 공식을 사용하여 두 지점 간의 거리를 계산 (단위: 미터)
+    
+    Args:
+        lat1, lon1: 첫 번째 지점의 위도, 경도
+        lat2, lon2: 두 번째 지점의 위도, 경도
+    
+    Returns:
+        float: 두 지점 간의 거리 (미터)
+    """
+    # 지구의 반지름 (미터)
+    R = 6371000
+    
+    # 위도와 경도를 라디안으로 변환
+    lat1_rad = math.radians(lat1)
+    lon1_rad = math.radians(lon1)
+    lat2_rad = math.radians(lat2)
+    lon2_rad = math.radians(lon2)
+    
+    # 위도와 경도의 차이
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    # Haversine 공식
+    a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # 거리 계산
+    distance = R * c
+    
+    return distance
+
+def is_point_near_route(start_lat: float, start_lon: float, end_lat: float, end_lon: float, 
+                       point_lat: float, point_lon: float, threshold_meters: float = 500) -> bool:
+    """
+    한 점이 두 지점을 잇는 직선 경로 근처에 있는지 확인
+    
+    Args:
+        start_lat, start_lon: 출발지 좌표
+        end_lat, end_lon: 도착지 좌표
+        point_lat, point_lon: 확인할 점의 좌표
+        threshold_meters: 임계거리 (미터, 기본값: 500m)
+    
+    Returns:
+        bool: 경로 근처에 있으면 True
+    """
+    # 출발지와 도착지에서 점까지의 거리 계산
+    dist_to_start = haversine_distance(start_lat, start_lon, point_lat, point_lon)
+    dist_to_end = haversine_distance(end_lat, end_lon, point_lat, point_lon)
+    
+    # 출발지와 도착지 사이의 거리
+    route_distance = haversine_distance(start_lat, start_lon, end_lat, end_lon)
+    
+    # 만약 점이 출발지나 도착지에서 임계거리 내에 있다면 True
+    if dist_to_start <= threshold_meters or dist_to_end <= threshold_meters:
+        return True
+    
+    # 삼각형 부등식을 이용한 간단한 경로 근처 판별
+    # 만약 (출발지->점->도착지)의 거리가 직선거리와 크게 차이나지 않으면 경로 근처
+    triangle_distance = dist_to_start + dist_to_end
+    deviation = triangle_distance - route_distance
+    
+    # 편차가 임계값보다 작으면 경로 근처로 판단
+    return deviation <= threshold_meters * 2
 
 # --------------------------
 # 카카오 지도 API 함수
@@ -220,6 +310,41 @@ class UserPreferences(BaseModel):
     location: Optional[str] = None
     categories: Optional[List[str]] = None
     preferences: Optional[dict] = None
+
+# Phase 9: 집회 관련 Pydantic 모델
+class EventCreate(BaseModel):
+    title: str = Field(..., description="집회 제목")
+    description: Optional[str] = Field(None, description="집회 설명")
+    location_name: str = Field(..., description="집회 장소명")
+    location_address: Optional[str] = Field(None, description="집회 주소")
+    latitude: float = Field(..., description="위도")
+    longitude: float = Field(..., description="경도")
+    start_date: datetime = Field(..., description="시작 일시")
+    end_date: Optional[datetime] = Field(None, description="종료 일시")
+    category: Optional[str] = Field(None, description="집회 카테고리")
+    severity_level: int = Field(1, description="심각도 (1: 낮음, 2: 보통, 3: 높음)")
+
+class EventResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    location_name: str
+    location_address: Optional[str]
+    latitude: float
+    longitude: float
+    start_date: datetime
+    end_date: Optional[datetime]
+    category: Optional[str]
+    severity_level: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+class RouteEventCheck(BaseModel):
+    user_id: str
+    events_found: List[EventResponse]
+    route_info: dict
+    total_events: int
 
 @app.get("/")
 def read_root():
@@ -742,3 +867,131 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
             ]
         }
     }
+
+# --------------------------
+# Phase 9: 집회 관리 API
+# --------------------------
+
+@app.post("/events", response_model=EventResponse)
+async def create_event(event: EventCreate, db: sqlite3.Connection = Depends(get_db)):
+    """새로운 집회 정보를 등록"""
+    cursor = db.cursor()
+    
+    cursor.execute('''
+        INSERT INTO events (title, description, location_name, location_address, 
+                          latitude, longitude, start_date, end_date, category, severity_level)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        event.title, event.description, event.location_name, event.location_address,
+        event.latitude, event.longitude, event.start_date, event.end_date,
+        event.category, event.severity_level
+    ))
+    
+    event_id = cursor.lastrowid
+    db.commit()
+    
+    # 생성된 집회 정보 반환
+    cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
+    row = cursor.fetchone()
+    
+    return EventResponse(
+        id=row[0], title=row[1], description=row[2], location_name=row[3],
+        location_address=row[4], latitude=row[5], longitude=row[6],
+        start_date=datetime.fromisoformat(row[7]),
+        end_date=datetime.fromisoformat(row[8]) if row[8] else None,
+        category=row[9], severity_level=row[10], status=row[11],
+        created_at=datetime.fromisoformat(row[12]),
+        updated_at=datetime.fromisoformat(row[13])
+    )
+
+@app.get("/events", response_model=List[EventResponse])
+async def get_events(
+    status: str = "active",
+    category: Optional[str] = None,
+    limit: int = 100,
+    db: sqlite3.Connection = Depends(get_db)
+):
+    """집회 목록 조회 (필터링 지원)"""
+    cursor = db.cursor()
+    
+    query = "SELECT * FROM events WHERE status = ?"
+    params = [status]
+    
+    if category:
+        query += " AND category = ?"
+        params.append(category)
+    
+    query += " ORDER BY start_date DESC LIMIT ?"
+    params.append(limit)
+    
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    
+    events = []
+    for row in rows:
+        events.append(EventResponse(
+            id=row[0], title=row[1], description=row[2], location_name=row[3],
+            location_address=row[4], latitude=row[5], longitude=row[6],
+            start_date=datetime.fromisoformat(row[7]),
+            end_date=datetime.fromisoformat(row[8]) if row[8] else None,
+            category=row[9], severity_level=row[10], status=row[11],
+            created_at=datetime.fromisoformat(row[12]),
+            updated_at=datetime.fromisoformat(row[13])
+        ))
+    
+    return events
+
+@app.get("/check-route-events/{user_id}", response_model=RouteEventCheck)
+async def check_user_route_events(user_id: str, db: sqlite3.Connection = Depends(get_db)):
+    """사용자의 경로상에 있는 집회들을 확인"""
+    cursor = db.cursor()
+    
+    # 사용자 경로 정보 조회
+    cursor.execute('''
+        SELECT departure_name, departure_address, departure_x, departure_y,
+               arrival_name, arrival_address, arrival_x, arrival_y
+        FROM users WHERE bot_user_key = ?
+    ''', (user_id,))
+    
+    user_row = cursor.fetchone()
+    if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
+        raise HTTPException(status_code=404, detail="사용자의 경로 정보를 찾을 수 없습니다.")
+    
+    dep_lat, dep_lon, arr_lat, arr_lon = user_row[2], user_row[3], user_row[6], user_row[7]
+    
+    # 활성 집회 목록 조회
+    cursor.execute('''
+        SELECT * FROM events 
+        WHERE status = 'active' AND start_date > datetime('now')
+        ORDER BY start_date
+    ''')
+    
+    events_rows = cursor.fetchall()
+    route_events = []
+    
+    # 각 집회가 사용자 경로 근처에 있는지 확인
+    for row in events_rows:
+        event_lat, event_lon = row[5], row[6]
+        
+        if is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
+            route_events.append(EventResponse(
+                id=row[0], title=row[1], description=row[2], location_name=row[3],
+                location_address=row[4], latitude=row[5], longitude=row[6],
+                start_date=datetime.fromisoformat(row[7]),
+                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
+                category=row[9], severity_level=row[10], status=row[11],
+                created_at=datetime.fromisoformat(row[12]),
+                updated_at=datetime.fromisoformat(row[13])
+            ))
+    
+    route_info = {
+        "departure": {"name": user_row[0], "address": user_row[1], "lat": dep_lat, "lon": dep_lon},
+        "arrival": {"name": user_row[4], "address": user_row[5], "lat": arr_lat, "lon": arr_lon}
+    }
+    
+    return RouteEventCheck(
+        user_id=user_id,
+        events_found=route_events,
+        route_info=route_info,
+        total_events=len(route_events)
+    )
