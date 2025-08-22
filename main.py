@@ -29,7 +29,7 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "users.db")
 
 # 데이터베이스 초기화
 def init_db():
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -97,7 +97,7 @@ def init_db():
 # DB 의존성 주입 함수
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수"""
-    db = sqlite3.connect(DATABASE_PATH)
+    db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     try:
         yield db
     finally:
@@ -303,7 +303,7 @@ async def save_route_to_db(user_id: str, departure: str, arrival: str):
         arr_info = await get_location_info(arrival) if arrival else None
         
         # 데이터베이스 업데이트
-        conn = sqlite3.connect(DATABASE_PATH)
+        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
         cursor = conn.cursor()
         
         now = datetime.now()
@@ -431,7 +431,7 @@ def read_root():
 
 def save_or_update_user(bot_user_key: str, message: str = ""):
     """사용자 정보를 DB에 저장하거나 업데이트"""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     now = datetime.now()
@@ -625,7 +625,7 @@ async def send_alarm_to_all(message: str):
     """
     모든 등록된 사용자에게 알림을 전송하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     cursor.execute('SELECT bot_user_key FROM users WHERE active = 1')
@@ -707,7 +707,7 @@ async def update_user_preferences(user_id: str, preferences: UserPreferences):
     """
     사용자 설정 업데이트 (지역, 카테고리 등)
     """
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     # 기존 사용자 확인
@@ -738,7 +738,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
     """
     필터링된 사용자들에게 알림을 전송하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     # 쿼리 구성
@@ -872,7 +872,7 @@ async def kakao_channel_webhook(request: Request):
         return {"status": "ignored", "reason": "unsupported id_type"}
     
     # DB에서 사용자 상태 업데이트
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     cursor = conn.cursor()
     
     if event == "added":
