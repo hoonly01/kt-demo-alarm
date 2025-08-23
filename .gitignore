@@ -29,9 +29,6 @@ replay_pid*
 ### dotenv ###
 .env
 
-# Claude Code personal development notes
-CLAUDE.md
-
 ### Git ###
 # Created by git for backups. To disable backups in Git:
 # $ git config --global mergetool.keepBackup false
