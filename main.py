@@ -558,7 +558,12 @@ async def kakao_chat_callback(request: KakaoRequest):
             "outputs": [
                 {
                     "simpleText": {
-                        "text": f"안녕하세요! 당신의 사용자 ID는 '{user_key}' 입니다. 알림 서비스에 등록되었습니다."
+                        "text": (
+                            "안녕하세요! KT 종로구 집회 알림 서비스입니다.\n\n"
+                            "📢 서비스가 정상적으로 활성화되었습니다.\n"
+                            "🚗 출퇴근 경로를 등록하시면 경로상 집회 정보를 안내해드립니다.\n\n"
+                            "💡 [🚗 출퇴근 경로 등록하기] 버튼을 눌러 시작해보세요!"
+                        )
                     }
                 }
             ]
@@ -579,7 +584,7 @@ async def send_alarm(alarm_request: AlarmRequest):
             data=EventData(text=alarm_request.message)
         ),
         user=[EventUser(
-            type="appUserId",  # open_id는 appUserId로 전송
+            type="botUserKey",  # open_id는 appUserId로 전송
             id=alarm_request.user_id
         )],
         params={
@@ -728,7 +733,7 @@ async def send_alarm_to_all(message: str):
                 name="morning_demo_alarm",
                 data=EventData(text=message)
             ),
-            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
+            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
             params={
                 "broadcast": "true",
                 "timestamp": str(int(time.time()))
@@ -865,7 +870,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
                 name="morning_demo_alarm",
                 data=EventData(text=alarm_request.message)
             ),
-            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
+            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
             params={
                 "filtered": "true",
                 "location_filter": alarm_request.location_filter or "",
@@ -945,8 +950,8 @@ async def kakao_channel_webhook(request: Request):
     
     logger.info(f"웹훅 수신: event={event}, user_id={user_id}, id_type={id_type}")
     
-    # id_type 검증 - 보안 강화
-    if id_type != "app_user_id":
+    # id_type 검증 - app_user_id와 open_id 지원
+    if id_type not in ["app_user_id", "open_id"]:
         logger.warning(f"Unsupported id_type '{id_type}' received from webhook for user {user_id}")
         return {"status": "ignored", "reason": "unsupported id_type"}
     
@@ -998,6 +1003,10 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
     else:  # 로컬 테스트용
         user_id = body.get('userId', 'test-user')
     
+    # botUserKey를 받은 경우 사용자 생성/업데이트
+    if 'userRequest' in body:
+        save_or_update_user(user_id, f"경로 등록: {body.get('action', {}).get('params', {}).get('departure', '')} → {body.get('action', {}).get('params', {}).get('arrival', '')}")
+    
     # 출발지와 도착지 정보 추출
     departure = body.get('action', {}).get('params', {}).get('departure', '')
     arrival = body.get('action', {}).get('params', {}).get('arrival', '')
@@ -1042,35 +1051,47 @@ async def auto_notify_route_events(user_id: str, events_found: List[EventRespons
     
     # 알림 메시지 구성
     event_count = len(events_found)
-    message_lines = [f"🚨 출퇴근 경로에 {event_count}개의 집회가 예정되어 있습니다.\n"]
     
-    for event in events_found:
+    if event_count == 1:
+        event = events_found[0]
         start_date = event.start_date.strftime('%m월 %d일 %H:%M')
-        severity = "🔴 높음" if event.severity_level == 3 else "🟡 보통" if event.severity_level == 2 else "🟢 낮음"
         
-        message_lines.append(f"📍 {event.title}")
-        message_lines.append(f"📅 {start_date}")
-        message_lines.append(f"🏢 {event.location_name}")
-        message_lines.append(f"⚠️ 심각도: {severity}")
-        message_lines.append("─" * 20)
-    
-    message_lines.append("💡 교통 상황을 미리 확인하시고 우회 경로를 고려해보세요!")
+        message_lines = [
+            f"🚨 설정하신 출퇴근 경로에 집회가 예정되어 있습니다!\n",
+            f"📍 {event.title}",
+            f"📅 {start_date}",
+            f"📍 위치: {event.location_name}\n",
+            "⚠️ 교통 지연이 예상되니 우회 경로를 고려해보세요!",
+            "🕐 평소보다 10-15분 일찍 출발하시길 권합니다."
+        ]
+    else:
+        message_lines = [
+            f"🚨 설정하신 출퇴근 경로에 {event_count}개의 집회가 예정되어 있습니다!\n"
+        ]
+        
+        for i, event in enumerate(events_found, 1):
+            start_date = event.start_date.strftime('%m월 %d일 %H:%M')
+            message_lines.append(f"{i}. {event.title} ({start_date})")
+        
+        message_lines.extend([
+            "\n⚠️ 교통 지연이 예상되니 우회 경로를 고려해보세요!",
+            "🕐 평소보다 15-20분 일찍 출발하시길 권합니다."
+        ])
     
     message = "\n".join(message_lines)
     
     # Event API 요청 데이터 구성
     event_data = EventAPIRequest(
         event=Event(
-            name="route_rally_alert",  # 경로 집회 알림 이벤트
+            name="morning_demo_alarm",  # 기존 등록된 이벤트 사용
             data=EventData(text=message)
         ),
         user=[EventUser(
-            type="appUserId",
+            type="botUserKey",
             id=user_id
         )],
         params={
-            "alert_type": "route_events",
-            "event_count": event_count,
+            "location": "",
             "timestamp": str(int(time.time()))
         }
     )
@@ -1084,6 +1105,12 @@ async def auto_notify_route_events(user_id: str, events_found: List[EventRespons
     url = f"https://bot-api.kakao.com/v2/bots/{BOT_ID}/talk"
     
     try:
+        # 디버그: Event API 요청 데이터 로깅
+        logger.info(f"🔍 Event API 요청 - 사용자: {user_id}")
+        logger.info(f"🔍 이벤트명: {event_data.event.name}")  
+        logger.info(f"🔍 메시지 길이: {len(message)}자")
+        logger.info(f"🔍 메시지 미리보기: {message[:100]}...")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
@@ -1091,12 +1118,22 @@ async def auto_notify_route_events(user_id: str, events_found: List[EventRespons
                 json=event_data.model_dump()
             )
             
+            logger.info(f"🔍 Event API 응답: {response.status_code}")
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"자동 집회 알림 전송 성공: {user_id}, {event_count}개 집회")
+                task_id = result.get("taskId")
+                status = result.get("status")
+                
+                if status == "SUCCESS":
+                    logger.info(f"자동 집회 알림 요청 성공: {user_id}, {event_count}개 집회, taskId: {task_id}")
+                    # TODO: taskId로 실제 발송 결과 확인 로직 추가 필요
+                else:
+                    logger.warning(f"자동 집회 알림 요청 실패: {user_id}, status: {status}")
+                
                 return {
-                    "success": True,
-                    "task_id": result.get("taskId"),
+                    "success": status == "SUCCESS",
+                    "task_id": task_id,
+                    "status": status,
                     "event_count": event_count
                 }
             else:
