@@ -116,59 +116,15 @@ uvicorn main:app --reload --port 8000
 - `/kakao/chat` (폴백), `/save_user_info` (스킬), `/send-alarm*` (알림), `/users` (조회)
 - 카카오 지도 API 통합, Event API 알림 시스템, 웹훅 처리
 
-### Current Status (Updated: 2025-08-23)
-- ✅ **완전한 시스템 구축**: Phase 1-9 모든 기능 구현 및 실환경 검증 완료
-- ✅ **Issue #6 완료**: 경로 기반 집회 감지 시스템 구축 완료
-- ✅ **Event API 완전 구현**: 실시간 집회 알림 시스템 정상 동작
-- ✅ **실제 카카오톡 알림**: 집회 감지 시 자동 푸시 알림 성공
-- 🚀 **Production Ready**: 실제 서비스 운영 가능한 완전한 MVP
+### Current Status
+- 코드 측면: 모든 기능 완성, 로컬 테스트 검증 완료
+- 배포 상태: feature/route-integration 브랜치, main 머지 대기
+- 남은 작업: 카카오톡 관리자센터 스킬 블록 설정만 남음
 
-## Phase 8: 카카오톡 스킬 블록 설정 ✅ COMPLETED
-- ✅ **카카오톡 관리자센터**: 경로 등록 스킬 블록 설정 완료
-- ✅ **실환경 테스트**: 수원역 → 광화문역 경로 등록 성공
-- ✅ **사용자 식별**: 웹훅과 스킬 블록 간 botUserKey 매핑 확인
-- ✅ **데이터 저장**: 카카오 지도 API로 좌표 변환 후 SQLite 저장 완료
-
-## Phase 9: 경로 기반 집회 감지 시스템 ✅ COMPLETED
-### Phase 9.1-9.3: 기본 구조 및 API 구현 ✅
-- ✅ **집회 데이터 관리**: SQLite events 테이블 구현 및 CRUD API
-- ✅ **Haversine 알고리즘**: 정확한 지구 곡면 거리 계산 구현
-- ✅ **경로 집회 감지**: 직선 거리 기반 기본 감지 시스템
-
-### Phase 9.4: 카카오 Mobility API 통합 ✅
-- ✅ **실제 보행 경로**: 카카오 Mobility API로 정확한 경로 좌표 추출 (500+ 좌표)
-- ✅ **정밀 감지**: 경로상 각 좌표에서 집회와의 거리 계산 (500m 이내)
-- ✅ **Event API 자동 알림**: 집회 감지 시 카카오톡 자동 푸시 알림
-
-### Phase 9.5: 스케줄링 및 자동화 ✅
-- ✅ **APScheduler**: 매일 오전 7시 자동 집회 확인 스케줄링
-- ✅ **배치 처리**: 모든 등록 사용자 경로 자동 확인 및 알림
-- ✅ **수동 테스트**: `/manual-schedule-test` 엔드포인트로 즉시 테스트
-
-### Phase 9.6: Event API 완전 구현 ✅
-- ✅ **사용자 타입 수정**: appUserId → botUserKey 변경으로 전송 성공
-- ✅ **메시지 템플릿**: 사용자 친화적이고 실용적인 집회 알림 메시지
-- ✅ **이벤트 블록**: 카카오 관리자센터에서 morning_demo_alarm 이벤트 설정
-- ✅ **실시간 파싱**: DB의 실제 집회 데이터를 동적으로 메시지 구성
-
-## Git & PR Management Summary
-- **Issue #1**: 카카오톡 Event API 기반 알림 시스템 → PR #3 생성
-- **Issue #2**: 카카오 지도 API 경로 등록 시스템 → PR #4 생성  
-- **Issue #5**: 코드 품질 개선 및 기술부채 관리 → High Priority 완료
-- **Issue #6**: 경로 기반 집회 감지 시스템 → feature/route-based-detection 브랜치 완료
-- **충돌 해결**: PR #3과 #4 통합하여 단일 PR #4로 merge
-- **main 브랜치**: 깨끗한 초기 상태에서 완전한 시스템으로 업데이트
-
-## Code Quality Improvements Completed
-### High Priority (보안/안정성) ✅
-- 웹훅 ID 타입 검증 강화 (보안 취약점 해결)
-- 데이터베이스 연결 관리 개선 (/users 엔드포인트 의존성 주입)
-- 파이썬 코딩 스타일 개선 (import time, .model_dump())
-
-### Medium Priority (진행 중)
-- 비동기 처리 완전 개선 (aiosqlite 도입 예정)
-- API 일관성 개선 (/send-alarm-to-all 등)
-- 공통 헬퍼 함수 분리 (Event API 호출 로직)
+## Phase 8: Next Development (TODO)
+- **카카오톡 스킬 블록 설정**: 실제 카카오톡에서 경로 등록 기능 활성화 (URGENT)
+- **사용자 메시지 처리 로직**: 명령어 파싱, 자동 응답, 데이터 수집, 개인화 설정
+- **MVC 구조 리팩토링**: Router-Service-Repository 패턴으로 코드 분리
 
 ## Technical Notes
 
@@ -187,36 +143,12 @@ uvicorn main:app --reload --port 8000
 - **사용자 응답 최적화**: 즉시 응답 후 백그라운드 작업
 - **배치 처리**: 최대 100명씩 알림 전송
 
-### Testing Status ✅ ALL COMPLETED
+### Testing Status
 - ✅ 서버 테스트 완료: 로컬 8000번 포트에서 정상 동작
 - ✅ 카카오 지도 API: 실제 좌표 변환 성공 확인  
 - ✅ 경로 저장: 데이터베이스 저장 및 조회 검증
 - ✅ API 엔드포인트: 모든 기능 로컬 테스트 완료
-- ✅ 카카오톡 통합 테스트: 스킬 블록에서 실제 경로 등록 성공
-- ✅ End-to-End 검증: 강남역 → 광화문역 전체 플로우 완료
-
-## Project Completion Summary
-
-### ✅ MVP 시스템 (2025-08-22 완성)
-**완전한 KT 종로구 집회 알림 시스템**이 구현되어 실제 운영 가능한 상태입니다.
-
-#### 구현된 핵심 기능:
-1. **사용자 관리**: 카카오톡 채널 추가/차단 실시간 동기화
-2. **경로 등록**: 카카오톡에서 출발지/도착지 입력 → 좌표 변환 저장
-3. **알림 전송**: 관리자가 개별/전체/필터링 알림 전송 가능
-4. **데이터 관리**: SQLite 기반 안정적인 사용자/경로 정보 저장
-
-#### 검증 완료 사항:
-- 실제 사용자가 카카오톡에서 경로 등록 성공
-- 모든 API 엔드포인트 정상 동작
-- 데이터베이스 스키마 안정성 확인
-- 보안 취약점 해결 및 성능 최적화
-
-#### 기술 스택:
-- **Backend**: Python 3.13 + FastAPI + SQLite
-- **Integration**: 카카오톡 Event API + 카카오 지도 API  
-- **Architecture**: Monolithic → Router-Service-Repository (예정)
-- **Deployment**: ngrok (개발) → 실제 서버 (운영 시)
+- 🔄 카카오톡 통합 테스트: 스킬 블록 설정 후 진행 예정
 
 ## Commit Message Convention
 Put #<issue-number> at the start of the commit message.
