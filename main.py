@@ -9,11 +9,8 @@ from typing import List, Optional
 import sqlite3
 import os
 import time
-import math
 from datetime import datetime
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 # 환경변수 로드
 load_dotenv()
@@ -24,9 +21,6 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# 스케줄러 초기화
-scheduler = AsyncIOScheduler()
-
 # 카카오 API 설정
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 BOT_ID = os.getenv("BOT_ID")
@@ -34,7 +28,7 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "users.db")
 
 # 데이터베이스 초기화
 def init_db():
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -60,26 +54,6 @@ def init_db():
         )
     ''')
     
-    # events 테이블 생성 (Phase 9: 집회 데이터 저장)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            location_name TEXT NOT NULL,
-            location_address TEXT,
-            latitude REAL NOT NULL,
-            longitude REAL NOT NULL,
-            start_date DATETIME NOT NULL,
-            end_date DATETIME,
-            category TEXT,
-            severity_level INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'active',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
     # 기존 테이블에 새 컬럼 추가 (마이그레이션)
     try:
         cursor.execute('ALTER TABLE users ADD COLUMN departure_name TEXT')
@@ -102,157 +76,14 @@ def init_db():
 # DB 의존성 주입 함수
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수"""
-    db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    db = sqlite3.connect(DATABASE_PATH)
     try:
         yield db
     finally:
         db.close()
 
-# --------------------------
-# Phase 9.4: 스케줄링 시스템
-# --------------------------
-
-async def scheduled_route_check():
-    """
-    매일 아침 7시 자동 실행되는 경로 기반 집회 확인 함수
-    모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
-    """
-    logger.info("=== 정기 집회 확인 시작 ===")
-    
-    try:
-        # 데이터베이스 연결
-        db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        
-        # auto_check_all_routes 로직 실행
-        cursor = db.cursor()
-        cursor.execute('''
-            SELECT bot_user_key FROM users 
-            WHERE active = 1 
-            AND departure_x IS NOT NULL 
-            AND departure_y IS NOT NULL
-            AND arrival_x IS NOT NULL 
-            AND arrival_y IS NOT NULL
-        ''')
-        
-        users = cursor.fetchall()
-        total_notifications = 0
-        
-        logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
-        
-        for user_row in users:
-            user_id = user_row[0]
-            
-            try:
-                # 각 사용자의 경로 확인 (자동 알림 포함)
-                result = await check_user_route_events(user_id, auto_notify=True, db=db)
-                
-                if result.events_found:
-                    total_notifications += 1
-                    logger.info(f"✅ {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
-                    
-            except Exception as e:
-                logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(e)}")
-        
-        db.close()
-        
-        logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
-        
-    except Exception as e:
-        logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
-
-@app.on_event("startup")
-async def startup_event():
-    """앱 시작시 스케줄러 시작"""
-    # DB 초기화
-    init_db()
-    
-    # 매일 오전 7시에 정기 집회 확인 스케줄 추가
-    scheduler.add_job(
-        scheduled_route_check,
-        CronTrigger(hour=7, minute=0),  # 매일 07:00
-        id="daily_route_check",
-        name="Daily Route Rally Check",
-        replace_existing=True
-    )
-    
-    # 스케줄러 시작
-    scheduler.start()
-    logger.info("🚀 스케줄러 시작: 매일 오전 7시 자동 집회 확인 설정됨")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """앱 종료시 스케줄러 종료"""
-    scheduler.shutdown()
-    logger.info("🛑 스케줄러 종료")
-
-# --------------------------
-# 거리 계산 함수 (Phase 9)
-# --------------------------
-def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """
-    Haversine 공식을 사용하여 두 지점 간의 거리를 계산 (단위: 미터)
-    
-    Args:
-        lat1, lon1: 첫 번째 지점의 위도, 경도
-        lat2, lon2: 두 번째 지점의 위도, 경도
-    
-    Returns:
-        float: 두 지점 간의 거리 (미터)
-    """
-    # 지구의 반지름 (미터)
-    R = 6371000
-    
-    # 위도와 경도를 라디안으로 변환
-    lat1_rad = math.radians(lat1)
-    lon1_rad = math.radians(lon1)
-    lat2_rad = math.radians(lat2)
-    lon2_rad = math.radians(lon2)
-    
-    # 위도와 경도의 차이
-    dlat = lat2_rad - lat1_rad
-    dlon = lon2_rad - lon1_rad
-    
-    # Haversine 공식
-    a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
-    c = 2 * math.asin(math.sqrt(a))
-    
-    # 거리 계산
-    distance = R * c
-    
-    return distance
-
-def is_point_near_route(start_lat: float, start_lon: float, end_lat: float, end_lon: float, 
-                       point_lat: float, point_lon: float, threshold_meters: float = 500) -> bool:
-    """
-    한 점이 두 지점을 잇는 직선 경로 근처에 있는지 확인
-    
-    Args:
-        start_lat, start_lon: 출발지 좌표
-        end_lat, end_lon: 도착지 좌표
-        point_lat, point_lon: 확인할 점의 좌표
-        threshold_meters: 임계거리 (미터, 기본값: 500m)
-    
-    Returns:
-        bool: 경로 근처에 있으면 True
-    """
-    # 출발지와 도착지에서 점까지의 거리 계산
-    dist_to_start = haversine_distance(start_lat, start_lon, point_lat, point_lon)
-    dist_to_end = haversine_distance(end_lat, end_lon, point_lat, point_lon)
-    
-    # 출발지와 도착지 사이의 거리
-    route_distance = haversine_distance(start_lat, start_lon, end_lat, end_lon)
-    
-    # 만약 점이 출발지나 도착지에서 임계거리 내에 있다면 True
-    if dist_to_start <= threshold_meters or dist_to_end <= threshold_meters:
-        return True
-    
-    # 삼각형 부등식을 이용한 간단한 경로 근처 판별
-    # 만약 (출발지->점->도착지)의 거리가 직선거리와 크게 차이나지 않으면 경로 근처
-    triangle_distance = dist_to_start + dist_to_end
-    deviation = triangle_distance - route_distance
-    
-    # 편차가 임계값보다 작으면 경로 근처로 판단
-    return deviation <= threshold_meters * 2
+# 앱 시작시 DB 초기화
+init_db()
 
 # --------------------------
 # 카카오 지도 API 함수
@@ -291,84 +122,6 @@ async def get_location_info(query: str):
         logger.error(f"카카오 지도 API 호출 중 오류: {str(e)}")
         return None
 
-async def get_route_coordinates(start_x: float, start_y: float, end_x: float, end_y: float):
-    """
-    카카오 Mobility API를 사용하여 실제 보행 경로 좌표를 가져옴
-    
-    Args:
-        start_x, start_y: 출발지 경도, 위도
-        end_x, end_y: 도착지 경도, 위도
-    
-    Returns:
-        List[Tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
-    """
-    url = f"https://apis-navi.kakaomobility.com/v1/directions"
-    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
-    params = {
-        "origin": f"{start_x},{start_y}",
-        "destination": f"{end_x},{end_y}",
-        "priority": "RECOMMEND"  # 추천 경로
-    }
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "routes" in data and len(data["routes"]) > 0:
-                    route = data["routes"][0]
-                    coordinates = []
-                    
-                    # 경로의 모든 섹션에서 좌표 추출
-                    for section in route["sections"]:
-                        for road in section["roads"]:
-                            vertexes = road["vertexes"]
-                            # vertexes는 [경도, 위도, 경도, 위도, ...] 형태
-                            for i in range(0, len(vertexes), 2):
-                                if i + 1 < len(vertexes):
-                                    lon = vertexes[i]      # 경도
-                                    lat = vertexes[i + 1]  # 위도
-                                    coordinates.append((lat, lon))
-                    
-                    logger.info(f"경로 좌표 {len(coordinates)}개 추출 완료")
-                    return coordinates
-                else:
-                    logger.warning("경로를 찾을 수 없습니다")
-                    return []
-            else:
-                logger.error(f"카카오 Mobility API 호출 실패: {response.status_code}, {response.text}")
-                return []
-                
-    except Exception as e:
-        logger.error(f"카카오 Mobility API 호출 중 오류: {str(e)}")
-        return []
-
-def is_event_near_route_accurate(route_coordinates: list, event_lat: float, event_lon: float, threshold_meters: float = 500) -> bool:
-    """
-    실제 경로 좌표를 사용하여 집회가 경로 근처에 있는지 정확히 확인
-    
-    Args:
-        route_coordinates: 경로상의 (위도, 경도) 좌표 리스트
-        event_lat, event_lon: 집회 위치
-        threshold_meters: 임계거리 (미터)
-    
-    Returns:
-        bool: 경로 근처에 있으면 True
-    """
-    if not route_coordinates:
-        return False
-    
-    # 경로상의 각 점에서 집회까지의 거리 확인
-    for lat, lon in route_coordinates:
-        distance = haversine_distance(lat, lon, event_lat, event_lon)
-        if distance <= threshold_meters:
-            logger.info(f"집회가 경로에서 {distance:.0f}m 거리에 감지됨")
-            return True
-    
-    return False
-
 # --------------------------
 # 경로 정보 저장 함수
 # --------------------------
@@ -382,7 +135,7 @@ async def save_route_to_db(user_id: str, departure: str, arrival: str):
         arr_info = await get_location_info(arrival) if arrival else None
         
         # 데이터베이스 업데이트
-        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         
         now = datetime.now()
@@ -468,41 +221,6 @@ class UserPreferences(BaseModel):
     categories: Optional[List[str]] = None
     preferences: Optional[dict] = None
 
-# Phase 9: 집회 관련 Pydantic 모델
-class EventCreate(BaseModel):
-    title: str = Field(..., description="집회 제목")
-    description: Optional[str] = Field(None, description="집회 설명")
-    location_name: str = Field(..., description="집회 장소명")
-    location_address: Optional[str] = Field(None, description="집회 주소")
-    latitude: float = Field(..., description="위도")
-    longitude: float = Field(..., description="경도")
-    start_date: datetime = Field(..., description="시작 일시")
-    end_date: Optional[datetime] = Field(None, description="종료 일시")
-    category: Optional[str] = Field(None, description="집회 카테고리")
-    severity_level: int = Field(1, description="심각도 (1: 낮음, 2: 보통, 3: 높음)")
-
-class EventResponse(BaseModel):
-    id: int
-    title: str
-    description: Optional[str]
-    location_name: str
-    location_address: Optional[str]
-    latitude: float
-    longitude: float
-    start_date: datetime
-    end_date: Optional[datetime]
-    category: Optional[str]
-    severity_level: int
-    status: str
-    created_at: datetime
-    updated_at: datetime
-
-class RouteEventCheck(BaseModel):
-    user_id: str
-    events_found: List[EventResponse]
-    route_info: dict
-    total_events: int
-
 @app.get("/")
 def read_root():
     """서버가 살아있는지 확인하는 기본 엔드포인트"""
@@ -510,7 +228,7 @@ def read_root():
 
 def save_or_update_user(bot_user_key: str, message: str = ""):
     """사용자 정보를 DB에 저장하거나 업데이트"""
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     now = datetime.now()
@@ -558,12 +276,7 @@ async def kakao_chat_callback(request: KakaoRequest):
             "outputs": [
                 {
                     "simpleText": {
-                        "text": (
-                            "안녕하세요! KT 종로구 집회 알림 서비스입니다.\n\n"
-                            "📢 서비스가 정상적으로 활성화되었습니다.\n"
-                            "🚗 출퇴근 경로를 등록하시면 경로상 집회 정보를 안내해드립니다.\n\n"
-                            "💡 [🚗 출퇴근 경로 등록하기] 버튼을 눌러 시작해보세요!"
-                        )
+                        "text": f"안녕하세요! 당신의 사용자 ID는 '{user_key}' 입니다. 알림 서비스에 등록되었습니다."
                     }
                 }
             ]
@@ -584,7 +297,7 @@ async def send_alarm(alarm_request: AlarmRequest):
             data=EventData(text=alarm_request.message)
         ),
         user=[EventUser(
-            type="botUserKey",  # open_id는 appUserId로 전송
+            type="appUserId",  # open_id는 appUserId로 전송
             id=alarm_request.user_id
         )],
         params={
@@ -709,7 +422,7 @@ async def send_alarm_to_all(message: str):
     """
     모든 등록된 사용자에게 알림을 전송하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     cursor.execute('SELECT bot_user_key FROM users WHERE active = 1')
@@ -733,7 +446,7 @@ async def send_alarm_to_all(message: str):
                 name="morning_demo_alarm",
                 data=EventData(text=message)
             ),
-            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
+            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "broadcast": "true",
                 "timestamp": str(int(time.time()))
@@ -791,7 +504,7 @@ async def update_user_preferences(user_id: str, preferences: UserPreferences):
     """
     사용자 설정 업데이트 (지역, 카테고리 등)
     """
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     # 기존 사용자 확인
@@ -822,7 +535,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
     """
     필터링된 사용자들에게 알림을 전송하는 엔드포인트
     """
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     # 쿼리 구성
@@ -870,7 +583,7 @@ async def send_filtered_alarm(alarm_request: FilteredAlarmRequest):
                 name="morning_demo_alarm",
                 data=EventData(text=alarm_request.message)
             ),
-            user=[EventUser(type="botUserKey", id=user_key) for user_key in batch],
+            user=[EventUser(type="appUserId", id=user_key) for user_key in batch],
             params={
                 "filtered": "true",
                 "location_filter": alarm_request.location_filter or "",
@@ -950,13 +663,13 @@ async def kakao_channel_webhook(request: Request):
     
     logger.info(f"웹훅 수신: event={event}, user_id={user_id}, id_type={id_type}")
     
-    # id_type 검증 - app_user_id와 open_id 지원
-    if id_type not in ["app_user_id", "open_id"]:
+    # id_type 검증 - 보안 강화
+    if id_type != "app_user_id":
         logger.warning(f"Unsupported id_type '{id_type}' received from webhook for user {user_id}")
         return {"status": "ignored", "reason": "unsupported id_type"}
     
     # DB에서 사용자 상태 업데이트
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
     if event == "added":
@@ -1003,10 +716,6 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
     else:  # 로컬 테스트용
         user_id = body.get('userId', 'test-user')
     
-    # botUserKey를 받은 경우 사용자 생성/업데이트
-    if 'userRequest' in body:
-        save_or_update_user(user_id, f"경로 등록: {body.get('action', {}).get('params', {}).get('departure', '')} → {body.get('action', {}).get('params', {}).get('arrival', '')}")
-    
     # 출발지와 도착지 정보 추출
     departure = body.get('action', {}).get('params', {}).get('departure', '')
     arrival = body.get('action', {}).get('params', {}).get('arrival', '')
@@ -1032,358 +741,4 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
                 }
             ]
         }
-    }
-
-# --------------------------
-# Phase 9: 집회 관리 API
-# --------------------------
-
-async def auto_notify_route_events(user_id: str, events_found: List[EventResponse]):
-    """
-    감지된 집회를 사용자에게 자동으로 알림 전송
-    
-    Args:
-        user_id: 사용자 ID  
-        events_found: 감지된 집회 목록
-    """
-    if not events_found:
-        return
-    
-    # 알림 메시지 구성
-    event_count = len(events_found)
-    
-    if event_count == 1:
-        event = events_found[0]
-        start_date = event.start_date.strftime('%m월 %d일 %H:%M')
-        
-        message_lines = [
-            f"🚨 설정하신 출퇴근 경로에 집회가 예정되어 있습니다!\n",
-            f"📍 {event.title}",
-            f"📅 {start_date}",
-            f"📍 위치: {event.location_name}\n",
-            "⚠️ 교통 지연이 예상되니 우회 경로를 고려해보세요!",
-            "🕐 평소보다 10-15분 일찍 출발하시길 권합니다."
-        ]
-    else:
-        message_lines = [
-            f"🚨 설정하신 출퇴근 경로에 {event_count}개의 집회가 예정되어 있습니다!\n"
-        ]
-        
-        for i, event in enumerate(events_found, 1):
-            start_date = event.start_date.strftime('%m월 %d일 %H:%M')
-            message_lines.append(f"{i}. {event.title} ({start_date})")
-        
-        message_lines.extend([
-            "\n⚠️ 교통 지연이 예상되니 우회 경로를 고려해보세요!",
-            "🕐 평소보다 15-20분 일찍 출발하시길 권합니다."
-        ])
-    
-    message = "\n".join(message_lines)
-    
-    # Event API 요청 데이터 구성
-    event_data = EventAPIRequest(
-        event=Event(
-            name="morning_demo_alarm",  # 기존 등록된 이벤트 사용
-            data=EventData(text=message)
-        ),
-        user=[EventUser(
-            type="botUserKey",
-            id=user_id
-        )],
-        params={
-            "location": "",
-            "timestamp": str(int(time.time()))
-        }
-    )
-    
-    # 카카오 Event API 호출
-    headers = {
-        "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    url = f"https://bot-api.kakao.com/v2/bots/{BOT_ID}/talk"
-    
-    try:
-        # 디버그: Event API 요청 데이터 로깅
-        logger.info(f"🔍 Event API 요청 - 사용자: {user_id}")
-        logger.info(f"🔍 이벤트명: {event_data.event.name}")  
-        logger.info(f"🔍 메시지 길이: {len(message)}자")
-        logger.info(f"🔍 메시지 미리보기: {message[:100]}...")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                url,
-                headers=headers,
-                json=event_data.model_dump()
-            )
-            
-            logger.info(f"🔍 Event API 응답: {response.status_code}")
-            if response.status_code == 200:
-                result = response.json()
-                task_id = result.get("taskId")
-                status = result.get("status")
-                
-                if status == "SUCCESS":
-                    logger.info(f"자동 집회 알림 요청 성공: {user_id}, {event_count}개 집회, taskId: {task_id}")
-                    # TODO: taskId로 실제 발송 결과 확인 로직 추가 필요
-                else:
-                    logger.warning(f"자동 집회 알림 요청 실패: {user_id}, status: {status}")
-                
-                return {
-                    "success": status == "SUCCESS",
-                    "task_id": task_id,
-                    "status": status,
-                    "event_count": event_count
-                }
-            else:
-                logger.error(f"자동 집회 알림 전송 실패: {response.status_code}, {response.text}")
-                return {"success": False, "error": response.text}
-                
-    except Exception as e:
-        logger.error(f"자동 집회 알림 전송 중 오류: {str(e)}")
-        return {"success": False, "error": str(e)}
-
-@app.post("/events", response_model=EventResponse)
-async def create_event(event: EventCreate, db: sqlite3.Connection = Depends(get_db)):
-    """새로운 집회 정보를 등록"""
-    cursor = db.cursor()
-    
-    cursor.execute('''
-        INSERT INTO events (title, description, location_name, location_address, 
-                          latitude, longitude, start_date, end_date, category, severity_level)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        event.title, event.description, event.location_name, event.location_address,
-        event.latitude, event.longitude, event.start_date, event.end_date,
-        event.category, event.severity_level
-    ))
-    
-    event_id = cursor.lastrowid
-    db.commit()
-    
-    # 생성된 집회 정보 반환
-    cursor.execute('SELECT * FROM events WHERE id = ?', (event_id,))
-    row = cursor.fetchone()
-    
-    return EventResponse(
-        id=row[0], title=row[1], description=row[2], location_name=row[3],
-        location_address=row[4], latitude=row[5], longitude=row[6],
-        start_date=datetime.fromisoformat(row[7]),
-        end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-        category=row[9], severity_level=row[10], status=row[11],
-        created_at=datetime.fromisoformat(row[12]),
-        updated_at=datetime.fromisoformat(row[13])
-    )
-
-@app.get("/events", response_model=List[EventResponse])
-async def get_events(
-    status: str = "active",
-    category: Optional[str] = None,
-    limit: int = 100,
-    db: sqlite3.Connection = Depends(get_db)
-):
-    """집회 목록 조회 (필터링 지원)"""
-    cursor = db.cursor()
-    
-    query = "SELECT * FROM events WHERE status = ?"
-    params = [status]
-    
-    if category:
-        query += " AND category = ?"
-        params.append(category)
-    
-    query += " ORDER BY start_date DESC LIMIT ?"
-    params.append(limit)
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    
-    events = []
-    for row in rows:
-        events.append(EventResponse(
-            id=row[0], title=row[1], description=row[2], location_name=row[3],
-            location_address=row[4], latitude=row[5], longitude=row[6],
-            start_date=datetime.fromisoformat(row[7]),
-            end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-            category=row[9], severity_level=row[10], status=row[11],
-            created_at=datetime.fromisoformat(row[12]),
-            updated_at=datetime.fromisoformat(row[13])
-        ))
-    
-    return events
-
-@app.get("/check-route-events/{user_id}", response_model=RouteEventCheck)
-async def check_user_route_events(
-    user_id: str, 
-    auto_notify: bool = False,  # 자동 알림 여부
-    db: sqlite3.Connection = Depends(get_db)
-):
-    """사용자의 경로상에 있는 집회들을 확인"""
-    cursor = db.cursor()
-    
-    # 사용자 경로 정보 조회
-    cursor.execute('''
-        SELECT departure_name, departure_address, departure_x, departure_y,
-               arrival_name, arrival_address, arrival_x, arrival_y
-        FROM users WHERE bot_user_key = ?
-    ''', (user_id,))
-    
-    user_row = cursor.fetchone()
-    if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
-        raise HTTPException(status_code=404, detail="사용자의 경로 정보를 찾을 수 없습니다.")
-    
-    dep_lon, dep_lat, arr_lon, arr_lat = user_row[2], user_row[3], user_row[6], user_row[7]
-    
-    # 활성 집회 목록 조회
-    cursor.execute('''
-        SELECT * FROM events 
-        WHERE status = 'active' AND start_date > datetime('now')
-        ORDER BY start_date
-    ''')
-    
-    events_rows = cursor.fetchall()
-    route_events = []
-    
-    # 카카오 Mobility API로 실제 경로 좌표 가져오기
-    route_coordinates = await get_route_coordinates(dep_lon, dep_lat, arr_lon, arr_lat)
-    
-    # 각 집회가 실제 경로 근처에 있는지 정확히 확인
-    for row in events_rows:
-        event_lat, event_lon = row[5], row[6]
-        
-        # 정확한 경로 기반 검사 (Mobility API 사용)
-        if route_coordinates and is_event_near_route_accurate(route_coordinates, event_lat, event_lon):
-            route_events.append(EventResponse(
-                id=row[0], title=row[1], description=row[2], location_name=row[3],
-                location_address=row[4], latitude=row[5], longitude=row[6],
-                start_date=datetime.fromisoformat(row[7]),
-                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                category=row[9], severity_level=row[10], status=row[11],
-                created_at=datetime.fromisoformat(row[12]),
-                updated_at=datetime.fromisoformat(row[13])
-            ))
-        # Mobility API 실패 시 기존 직선 방식으로 폴백
-        elif not route_coordinates and is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
-            logger.warning("Mobility API 실패로 직선 거리 방식 사용")
-            route_events.append(EventResponse(
-                id=row[0], title=row[1], description=row[2], location_name=row[3],
-                location_address=row[4], latitude=row[5], longitude=row[6],
-                start_date=datetime.fromisoformat(row[7]),
-                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                category=row[9], severity_level=row[10], status=row[11],
-                created_at=datetime.fromisoformat(row[12]),
-                updated_at=datetime.fromisoformat(row[13])
-            ))
-    
-    route_info = {
-        "departure": {"name": user_row[0], "address": user_row[1], "lat": dep_lat, "lon": dep_lon},
-        "arrival": {"name": user_row[4], "address": user_row[5], "lat": arr_lat, "lon": arr_lon}
-    }
-    
-    # 자동 알림 전송 (옵션)
-    if auto_notify and route_events:
-        await auto_notify_route_events(user_id, route_events)
-        logger.info(f"사용자 {user_id}에게 {len(route_events)}개 집회 자동 알림 전송")
-    
-    return RouteEventCheck(
-        user_id=user_id,
-        events_found=route_events,
-        route_info=route_info,
-        total_events=len(route_events)
-    )
-
-@app.post("/auto-check-all-routes")
-async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
-    """
-    모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
-    Phase 9.4: 자동화 시스템의 핵심 API
-    """
-    cursor = db.cursor()
-    
-    # 경로 정보가 등록된 모든 활성 사용자 조회
-    cursor.execute('''
-        SELECT bot_user_key FROM users 
-        WHERE active = 1 
-        AND departure_x IS NOT NULL 
-        AND departure_y IS NOT NULL
-        AND arrival_x IS NOT NULL 
-        AND arrival_y IS NOT NULL
-    ''')
-    
-    users = cursor.fetchall()
-    results = []
-    
-    logger.info(f"경로 기반 집회 확인 시작: {len(users)}명 사용자")
-    
-    for user_row in users:
-        user_id = user_row[0]
-        
-        try:
-            # 각 사용자의 경로 확인 (자동 알림 포함)
-            result = await check_user_route_events(user_id, auto_notify=True, db=db)
-            
-            results.append({
-                "user_id": user_id,
-                "events_found": len(result.events_found),
-                "auto_notified": len(result.events_found) > 0,
-                "status": "success"
-            })
-            
-            if result.events_found:
-                logger.info(f"사용자 {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
-                
-        except Exception as e:
-            logger.error(f"사용자 {user_id} 경로 확인 실패: {str(e)}")
-            results.append({
-                "user_id": user_id,
-                "events_found": 0,
-                "auto_notified": False,
-                "status": "failed",
-                "error": str(e)
-            })
-    
-    summary = {
-        "total_users": len(users),
-        "successful_checks": len([r for r in results if r["status"] == "success"]),
-        "users_with_events": len([r for r in results if r["events_found"] > 0]),
-        "total_notifications_sent": len([r for r in results if r["auto_notified"]]),
-        "results": results
-    }
-    
-    logger.info(f"경로 기반 집회 확인 완료: {summary['users_with_events']}명에게 알림 전송")
-    
-    return summary
-
-@app.post("/manual-schedule-test")
-async def manual_schedule_test():
-    """
-    스케줄링 함수를 수동으로 실행하여 테스트
-    매일 7시 자동 실행과 동일한 로직
-    """
-    logger.info("📋 수동 스케줄 테스트 시작")
-    await scheduled_route_check()
-    return {"message": "스케줄 테스트 완료", "status": "success"}
-
-@app.get("/scheduler-status")
-async def get_scheduler_status():
-    """
-    스케줄러 상태 및 다음 실행 시간 확인
-    """
-    if not scheduler.running:
-        return {"status": "stopped", "message": "스케줄러가 실행 중이지 않습니다"}
-    
-    jobs = []
-    for job in scheduler.get_jobs():
-        jobs.append({
-            "id": job.id,
-            "name": job.name,
-            "next_run_time": str(job.next_run_time) if job.next_run_time else None,
-            "trigger": str(job.trigger)
-        })
-    
-    return {
-        "status": "running",
-        "message": "스케줄러가 정상 동작 중입니다",
-        "jobs": jobs
     }
