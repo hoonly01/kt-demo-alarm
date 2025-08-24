@@ -91,7 +91,9 @@ def init_db():
         cursor.execute('ALTER TABLE users ADD COLUMN arrival_x REAL')
         cursor.execute('ALTER TABLE users ADD COLUMN arrival_y REAL')
         cursor.execute('ALTER TABLE users ADD COLUMN route_updated_at DATETIME')
-        logger.info("경로 정보 컬럼들이 성공적으로 추가되었습니다.")
+        cursor.execute('ALTER TABLE users ADD COLUMN marked_bus TEXT')
+        cursor.execute('ALTER TABLE users ADD COLUMN language TEXT')
+        logger.info("경로 정보 및 초기 설정 컬럼들이 성공적으로 추가되었습니다.")
     except sqlite3.OperationalError:
         # 컬럼이 이미 존재하는 경우
         logger.info("경로 정보 컬럼들이 이미 존재합니다.")
@@ -511,6 +513,13 @@ class RouteEventCheck(BaseModel):
     events_found: List[EventResponse]
     route_info: dict
     total_events: int
+
+class InitialSetupRequest(BaseModel):
+    userRequest: UserRequest
+    departure: Optional[str] = None
+    arrival: Optional[str] = None
+    marked_bus: Optional[str] = None
+    language: Optional[str] = None
 
 @app.get("/")
 def read_root():
@@ -2094,4 +2103,324 @@ async def crawl_and_sync_events_endpoint():
         return result
     finally:
         conn.close()
+
+@app.post("/upcoming-protests")
+async def get_upcoming_protests_skill(request: KakaoRequest):
+    """
+    카카오 스킬: 예정된 집회 정보를 조회하는 엔드포인트
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # 오늘 이후의 집회들 조회 (최대 5개)
+        cursor.execute('''
+            SELECT title, location_name, start_date, description
+            FROM events 
+            WHERE status = 'active' AND date(start_date) > date('now')
+            ORDER BY start_date ASC 
+            LIMIT 5
+        ''')
+        
+        events = cursor.fetchall()
+        conn.close()
+        
+        if not events:
+            response_text = "📅 현재 예정된 집회가 없습니다.\n\n안전한 하루 되세요! 😊"
+        else:
+            response_text = "📅 예정된 집회 정보\n\n"
+            for event in events:
+                title, location, start_date, description = event
+                # 날짜 파싱 및 포매팅
+                try:
+                    date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                    date_str = date_obj.strftime("%m월 %d일 %H:%M")
+                except:
+                    date_str = start_date[:16]  # 간단한 폴백
+                
+                response_text += f"🔹 {title}\n"
+                response_text += f"📍 {location}\n"
+                response_text += f"📅 {date_str}\n"
+                if description:
+                    # 설명에서 참가인원 정보만 추출
+                    if "참가인원:" in description:
+                        participant_info = description.split("참가인원:")[1].split("|")[0].strip()
+                        response_text += f"👥 {participant_info}\n"
+                response_text += "\n"
+            
+            response_text += "⚠️ 해당 지역을 지날 예정이시라면 교통 혼잡에 유의하세요!"
+        
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": response_text
+                        }
+                    }
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"예정 집회 정보 조회 중 오류: {e}")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": "죄송합니다. 집회 정보를 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                        }
+                    }
+                ]
+            }
+        }
+
+@app.post("/today-protests")
+async def get_today_protests_skill(request: KakaoRequest):
+    """
+    카카오 스킬: 오늘 진행되는 집회 정보를 조회하는 엔드포인트
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # 오늘 날짜의 집회들 조회
+        cursor.execute('''
+            SELECT title, location_name, start_date, description
+            FROM events 
+            WHERE status = 'active' AND date(start_date) = date('now')
+            ORDER BY start_date ASC
+        ''')
+        
+        events = cursor.fetchall()
+        conn.close()
+        
+        if not events:
+            response_text = "📅 오늘 진행되는 집회가 없습니다.\n\n평온한 하루 되세요! 😌"
+        else:
+            response_text = "📅 오늘의 집회 정보\n\n"
+            for event in events:
+                title, location, start_date, description = event
+                # 시간만 파싱
+                try:
+                    date_obj = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                    time_str = date_obj.strftime("%H:%M")
+                except:
+                    time_str = start_date[11:16]  # 간단한 폴백
+                
+                response_text += f"🔹 {title}\n"
+                response_text += f"📍 {location}\n"
+                response_text += f"🕐 {time_str}\n"
+                if description:
+                    # 설명에서 참가인원 정보만 추출
+                    if "참가인원:" in description:
+                        participant_info = description.split("참가인원:")[1].split("|")[0].strip()
+                        response_text += f"👥 {participant_info}\n"
+                response_text += "\n"
+            
+            response_text += "⚠️ 해당 지역은 교통 혼잡이 예상되니 우회 경로를 이용하세요!"
+        
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": response_text
+                        }
+                    }
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"오늘 집회 정보 조회 중 오류: {e}")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": "죄송합니다. 집회 정보를 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                        }
+                    }
+                ]
+            }
+        }
     
+
+
+# 서버 시작 시 실행
+@app.on_event("startup")
+async def startup_event():
+    """애플리케이션 시작 시 스케줄러 실행"""
+    scheduler.add_job(
+        scheduled_crawling_and_sync,
+        CronTrigger(hour=8, minute=30),
+        id="morning_crawling",
+        name="매일 08:30 집회 데이터 크롤링",
+        replace_existing=True
+    )
+    scheduler.add_job(
+        scheduled_route_check,
+        CronTrigger(hour=7, minute=0),  
+        id="morning_route_check",
+        name="매일 07:00 경로 기반 집회 감지",
+        replace_existing=True
+    )
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("스케줄러가 시작되었습니다: 08:30 크롤링, 07:00 경로체크")
+    else:
+        logger.info("스케줄러가 이미 실행 중입니다")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """애플리케이션 종료 시 스케줄러 정리"""
+    scheduler.shutdown()
+
+@app.post("/initial-setup")
+async def initial_setup_skill(request: InitialSetupRequest):
+    """
+    카카오 스킬: 사용자 초기 설정 (출발지, 도착지, 관심 버스, 언어)
+    """
+    try:
+        user_id = request.userRequest.user.id
+        logger.info(f"사용자 {user_id} 초기 설정 시작")
+        
+        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        cursor = conn.cursor()
+        
+        # 사용자 존재 확인 및 생성
+        cursor.execute('SELECT * FROM users WHERE bot_user_key = ?', (user_id,))
+        user = cursor.fetchone()
+        if not user:
+            cursor.execute('''
+                INSERT INTO users (bot_user_key, first_message_at, last_message_at, message_count, active)
+                VALUES (?, ?, ?, 1, 1)
+            ''', (user_id, datetime.now(), datetime.now()))
+        
+        # 설정할 항목들 추적
+        updated_items = []
+        
+        # 출발지 설정
+        if request.departure:
+            try:
+                location_info = await get_location_info(request.departure)
+                if location_info:
+                    cursor.execute('''
+                        UPDATE users SET 
+                        departure_name = ?, departure_address = ?, 
+                        departure_x = ?, departure_y = ?,
+                        route_updated_at = ?
+                        WHERE bot_user_key = ?
+                    ''', (
+                        location_info['place_name'], location_info['address_name'],
+                        float(location_info['x']), float(location_info['y']),
+                        datetime.now(), user_id
+                    ))
+                    updated_items.append(f"📍 출발지: {location_info['place_name']}")
+                    logger.info(f"출발지 설정 완료: {location_info['place_name']}")
+                else:
+                    updated_items.append(f"❌ 출발지 '{request.departure}' 검색 실패")
+            except Exception as e:
+                logger.error(f"출발지 설정 오류: {e}")
+                updated_items.append(f"❌ 출발지 설정 오류")
+        
+        # 도착지 설정
+        if request.arrival:
+            try:
+                location_info = await get_location_info(request.arrival)
+                if location_info:
+                    cursor.execute('''
+                        UPDATE users SET 
+                        arrival_name = ?, arrival_address = ?, 
+                        arrival_x = ?, arrival_y = ?,
+                        route_updated_at = ?
+                        WHERE bot_user_key = ?
+                    ''', (
+                        location_info['place_name'], location_info['address_name'],
+                        float(location_info['x']), float(location_info['y']),
+                        datetime.now(), user_id
+                    ))
+                    updated_items.append(f"🎯 도착지: {location_info['place_name']}")
+                    logger.info(f"도착지 설정 완료: {location_info['place_name']}")
+                else:
+                    updated_items.append(f"❌ 도착지 '{request.arrival}' 검색 실패")
+            except Exception as e:
+                logger.error(f"도착지 설정 오류: {e}")
+                updated_items.append(f"❌ 도착지 설정 오류")
+        
+        # 관심 버스 노선 설정
+        if request.marked_bus:
+            # 버스 노선 유효성 검증 (숫자 또는 숫자+문자 조합)
+            import re
+            if re.match(r'^\d+[가-힣]?$|^[가-힣]+\d+$|^\d+$', request.marked_bus.strip()):
+                cursor.execute('''
+                    UPDATE users SET marked_bus = ? WHERE bot_user_key = ?
+                ''', (request.marked_bus.strip(), user_id))
+                updated_items.append(f"🚌 관심 버스: {request.marked_bus}")
+                logger.info(f"관심 버스 설정 완료: {request.marked_bus}")
+            else:
+                updated_items.append(f"❌ 잘못된 버스 노선 번호: {request.marked_bus}")
+        
+        # 언어 설정
+        if request.language:
+            # 지원 언어 검증
+            supported_languages = {'ko': '한국어', 'en': '영어', 'ja': '일본어', 'zh': '중국어'}
+            lang_code = request.language.lower().strip()
+            
+            if lang_code in supported_languages:
+                cursor.execute('''
+                    UPDATE users SET language = ? WHERE bot_user_key = ?
+                ''', (lang_code, user_id))
+                updated_items.append(f"🌐 언어: {supported_languages[lang_code]}")
+                logger.info(f"언어 설정 완료: {lang_code}")
+            else:
+                updated_items.append(f"❌ 지원되지 않는 언어: {request.language}")
+        
+        conn.commit()
+        conn.close()
+        
+        # 응답 메시지 구성
+        if updated_items:
+            response_text = "✅ 초기 설정이 완료되었습니다!\n\n"
+            response_text += "📋 설정된 항목들:\n"
+            response_text += "\n".join(updated_items)
+            response_text += "\n\n🚀 이제 집회 알림 서비스를 이용하실 수 있습니다!"
+        else:
+            response_text = "⚠️ 설정할 항목이 없습니다.\n\n출발지, 도착지, 관심 버스 노선, 언어 중 하나 이상을 입력해주세요."
+        
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": response_text
+                        }
+                    }
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"초기 설정 중 오류: {e}")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": "죄송합니다. 초기 설정 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                        }
+                    }
+                ]
+            }
+        }
+
+# DB 초기화 실행
+init_db()
