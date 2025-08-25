@@ -1014,6 +1014,7 @@ async def save_user_info(request: Request, background_tasks: BackgroundTasks):
     카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
     """
     body = await request.json()
+    logger.info(f"🔍 save_user_info 요청 body: {body}")
     
     # 카카오톡에서 온 요청인지 확인
     if 'userRequest' in body:
@@ -2113,11 +2114,11 @@ async def get_upcoming_protests_skill(request: KakaoRequest):
         conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
         cursor = conn.cursor()
         
-        # 오늘 이후의 집회들 조회 (최대 5개)
+        # 오늘 포함 이후의 집회들 조회 (최대 5개)
         cursor.execute('''
             SELECT title, location_name, start_date, description
             FROM events 
-            WHERE status = 'active' AND date(start_date) > date('now')
+            WHERE status = 'active' AND date(start_date) >= date('now')
             ORDER BY start_date ASC 
             LIMIT 5
         ''')
@@ -2283,13 +2284,24 @@ async def shutdown_event():
     scheduler.shutdown()
 
 @app.post("/initial-setup")
-async def initial_setup_skill(request: InitialSetupRequest):
+async def initial_setup_skill(request: Request):
     """
     카카오 스킬: 사용자 초기 설정 (출발지, 도착지, 관심 버스, 언어)
     """
     try:
-        user_id = request.userRequest.user.id
+        body = await request.json()
+        logger.info(f"🔍 initial-setup 전체 요청 body: {body}")
+        
+        user_id = body['userRequest']['user']['id']
         logger.info(f"사용자 {user_id} 초기 설정 시작")
+        
+        # 파라미터 추출 (save_user_info와 동일한 방식)
+        departure = body.get('departure') or body.get('action', {}).get('params', {}).get('departure', '')
+        arrival = body.get('arrival') or body.get('action', {}).get('params', {}).get('arrival', '')
+        marked_bus = body.get('marked_bus') or body.get('action', {}).get('params', {}).get('marked_bus', '')
+        language = body.get('language') or body.get('action', {}).get('params', {}).get('language', '')
+        
+        logger.info(f"🔍 추출된 파라미터: departure={departure}, arrival={arrival}, marked_bus={marked_bus}, language={language}")
         
         conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
         cursor = conn.cursor()
@@ -2307,9 +2319,9 @@ async def initial_setup_skill(request: InitialSetupRequest):
         updated_items = []
         
         # 출발지 설정
-        if request.departure:
+        if departure:
             try:
-                location_info = await get_location_info(request.departure)
+                location_info = await get_location_info(departure)
                 if location_info:
                     cursor.execute('''
                         UPDATE users SET 
@@ -2318,22 +2330,22 @@ async def initial_setup_skill(request: InitialSetupRequest):
                         route_updated_at = ?
                         WHERE bot_user_key = ?
                     ''', (
-                        location_info['place_name'], location_info['address_name'],
+                        location_info['name'], location_info['address'],
                         float(location_info['x']), float(location_info['y']),
                         datetime.now(), user_id
                     ))
-                    updated_items.append(f"📍 출발지: {location_info['place_name']}")
-                    logger.info(f"출발지 설정 완료: {location_info['place_name']}")
+                    updated_items.append(f"📍 출발지: {location_info['name']}")
+                    logger.info(f"출발지 설정 완료: {location_info['name']}")
                 else:
-                    updated_items.append(f"❌ 출발지 '{request.departure}' 검색 실패")
+                    updated_items.append(f"❌ 출발지 '{departure}' 검색 실패")
             except Exception as e:
                 logger.error(f"출발지 설정 오류: {e}")
                 updated_items.append(f"❌ 출발지 설정 오류")
         
         # 도착지 설정
-        if request.arrival:
+        if arrival:
             try:
-                location_info = await get_location_info(request.arrival)
+                location_info = await get_location_info(arrival)
                 if location_info:
                     cursor.execute('''
                         UPDATE users SET 
@@ -2342,55 +2354,45 @@ async def initial_setup_skill(request: InitialSetupRequest):
                         route_updated_at = ?
                         WHERE bot_user_key = ?
                     ''', (
-                        location_info['place_name'], location_info['address_name'],
+                        location_info['name'], location_info['address'],
                         float(location_info['x']), float(location_info['y']),
                         datetime.now(), user_id
                     ))
-                    updated_items.append(f"🎯 도착지: {location_info['place_name']}")
-                    logger.info(f"도착지 설정 완료: {location_info['place_name']}")
+                    updated_items.append(f"🎯 도착지: {location_info['name']}")
+                    logger.info(f"도착지 설정 완료: {location_info['name']}")
                 else:
-                    updated_items.append(f"❌ 도착지 '{request.arrival}' 검색 실패")
+                    updated_items.append(f"❌ 도착지 '{arrival}' 검색 실패")
             except Exception as e:
                 logger.error(f"도착지 설정 오류: {e}")
                 updated_items.append(f"❌ 도착지 설정 오류")
         
         # 관심 버스 노선 설정
-        if request.marked_bus:
+        if marked_bus:
             # 버스 노선 유효성 검증 (숫자 또는 숫자+문자 조합)
             import re
-            if re.match(r'^\d+[가-힣]?$|^[가-힣]+\d+$|^\d+$', request.marked_bus.strip()):
+            if re.match(r'^\d+[가-힣]?$|^[가-힣]+\d+$|^\d+$', marked_bus.strip()):
                 cursor.execute('''
                     UPDATE users SET marked_bus = ? WHERE bot_user_key = ?
-                ''', (request.marked_bus.strip(), user_id))
-                updated_items.append(f"🚌 관심 버스: {request.marked_bus}")
-                logger.info(f"관심 버스 설정 완료: {request.marked_bus}")
+                ''', (marked_bus.strip(), user_id))
+                updated_items.append(f"🚌 관심 버스: {marked_bus}")
+                logger.info(f"관심 버스 설정 완료: {marked_bus}")
             else:
-                updated_items.append(f"❌ 잘못된 버스 노선 번호: {request.marked_bus}")
+                updated_items.append(f"❌ 잘못된 버스 노선 번호: {marked_bus}")
         
         # 언어 설정
-        if request.language:
-            # 지원 언어 검증
-            supported_languages = {'ko': '한국어', 'en': '영어', 'ja': '일본어', 'zh': '중국어'}
-            lang_code = request.language.lower().strip()
-            
-            if lang_code in supported_languages:
-                cursor.execute('''
-                    UPDATE users SET language = ? WHERE bot_user_key = ?
-                ''', (lang_code, user_id))
-                updated_items.append(f"🌐 언어: {supported_languages[lang_code]}")
-                logger.info(f"언어 설정 완료: {lang_code}")
-            else:
-                updated_items.append(f"❌ 지원되지 않는 언어: {request.language}")
+        if language:
+            cursor.execute('''
+                UPDATE users SET language = ? WHERE bot_user_key = ?
+            ''', (language, user_id))
+            updated_items.append(f"🌐 언어: {language}")
+            logger.info(f"언어 설정 완료: {language}")
         
         conn.commit()
         conn.close()
         
-        # 응답 메시지 구성
+        # 응답 메시지 구성 (텍스트 + 버튼)
         if updated_items:
-            response_text = "✅ 초기 설정이 완료되었습니다!\n\n"
-            response_text += "📋 설정된 항목들:\n"
-            response_text += "\n".join(updated_items)
-            response_text += "\n\n🚀 이제 집회 알림 서비스를 이용하실 수 있습니다!"
+            response_text = "🎉 설정이 완료되었습니다!\n\n이제부터 맞춤 알림 서비스를 이용하실 수 있어요 ✨\n\n저희 서비스를 이용해주셔서 감사합니다 🙌\n즐거운 하루 되세요! 🌿\n\n🔽 다른 기능을 보고 싶으시다면 아래 메뉴 버튼을 눌러주세요."
         else:
             response_text = "⚠️ 설정할 항목이 없습니다.\n\n출발지, 도착지, 관심 버스 노선, 언어 중 하나 이상을 입력해주세요."
         
@@ -2399,8 +2401,16 @@ async def initial_setup_skill(request: InitialSetupRequest):
             "template": {
                 "outputs": [
                     {
-                        "simpleText": {
-                            "text": response_text
+                        "textCard": {
+                            "title": "🎉 설정이 완료되었습니다!",
+                            "description": "이제부터 맞춤 알림 서비스를 이용하실 수 있어요 ✨\n\n저희 서비스를 이용해주셔서 감사합니다 🙌\n즐거운 하루 되세요! 🌿\n\n🔽 다른 기능을 보고 싶으시다면 아래 메뉴 버튼을 눌러주세요.",
+                            "buttons": [
+                                {
+                                    "action": "block",
+                                    "label": "📋 메인 메뉴",
+                                    "blockId": "689449da627dea71c7953060"
+                                }
+                            ]
                         }
                     }
                 ]
