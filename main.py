@@ -24,6 +24,9 @@ from app.utils.geo_utils import (
 from app.utils.scheduler_utils import (
     scheduler, setup_scheduler, start_scheduler, shutdown_scheduler, get_scheduler_status
 )
+from app.services.user_service import UserService
+from app.services.event_service import EventService
+from app.services.notification_service import NotificationService
 from apscheduler.triggers.cron import CronTrigger
 
 # 환경변수 로드
@@ -287,45 +290,26 @@ def is_event_near_route_accurate(route_coordinates: list, event_lat: float, even
 # --------------------------
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
     """
-    사용자 경로 정보를 데이터베이스에 저장
+    사용자 경로 정보를 데이터베이스에 저장 (서비스 레이어 사용)
     """
     try:
-        # 카카오 지도 API로 위치 정보 조회
-        dep_info = await get_location_info(departure) if departure else None
-        arr_info = await get_location_info(arrival) if arrival else None
-        
-        # 데이터베이스 업데이트
+        # 데이터베이스 연결
         conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        cursor = conn.cursor()
         
-        now = datetime.now()
+        # UserService를 통한 경로 정보 저장
+        user_setup = InitialSetupRequest(
+            bot_user_key=user_id,
+            departure=departure,
+            arrival=arrival
+        )
         
-        # 사용자 경로 정보 업데이트
-        cursor.execute('''
-            UPDATE users 
-            SET departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
-                arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
-                route_updated_at = ?
-            WHERE bot_user_key = ?
-        ''', (
-            dep_info["name"] if dep_info else departure,
-            dep_info["address"] if dep_info else None,
-            dep_info["x"] if dep_info else None,
-            dep_info["y"] if dep_info else None,
-            arr_info["name"] if arr_info else arrival,
-            arr_info["address"] if arr_info else None,
-            arr_info["x"] if arr_info else None,
-            arr_info["y"] if arr_info else None,
-            now,
-            user_id
-        ))
+        result = await UserService.save_user_route_info(user_setup, conn)
         
-        if cursor.rowcount > 0:
+        if result["success"]:
             logger.info(f"사용자 {user_id} 경로 정보 업데이트 완료: {departure} → {arrival}")
         else:
-            logger.warning(f"사용자 {user_id}를 찾을 수 없어 경로 정보 업데이트 실패")
+            logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
         
-        conn.commit()
         conn.close()
         
     except Exception as e:
@@ -1142,79 +1126,8 @@ async def check_user_route_events(
     auto_notify: bool = False,  # 자동 알림 여부
     db: sqlite3.Connection = Depends(get_db)
 ):
-    """사용자의 경로상에 있는 집회들을 확인"""
-    cursor = db.cursor()
-    
-    # 사용자 경로 정보 조회
-    cursor.execute('''
-        SELECT departure_name, departure_address, departure_x, departure_y,
-               arrival_name, arrival_address, arrival_x, arrival_y
-        FROM users WHERE bot_user_key = ?
-    ''', (user_id,))
-    
-    user_row = cursor.fetchone()
-    if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
-        raise HTTPException(status_code=404, detail="사용자의 경로 정보를 찾을 수 없습니다.")
-    
-    dep_lon, dep_lat, arr_lon, arr_lat = user_row[2], user_row[3], user_row[6], user_row[7]
-    
-    # 활성 집회 목록 조회
-    cursor.execute('''
-        SELECT * FROM events 
-        WHERE status = 'active' AND start_date > datetime('now')
-        ORDER BY start_date
-    ''')
-    
-    events_rows = cursor.fetchall()
-    route_events = []
-    
-    # 카카오 Mobility API로 실제 경로 좌표 가져오기
-    route_coordinates = await get_route_coordinates(dep_lon, dep_lat, arr_lon, arr_lat)
-    
-    # 각 집회가 실제 경로 근처에 있는지 정확히 확인
-    for row in events_rows:
-        event_lat, event_lon = row[5], row[6]
-        
-        # 정확한 경로 기반 검사 (Mobility API 사용)
-        if route_coordinates and is_event_near_route_accurate(route_coordinates, event_lat, event_lon):
-            route_events.append(EventResponse(
-                id=row[0], title=row[1], description=row[2], location_name=row[3],
-                location_address=row[4], latitude=row[5], longitude=row[6],
-                start_date=datetime.fromisoformat(row[7]),
-                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                category=row[9], severity_level=row[10], status=row[11],
-                created_at=datetime.fromisoformat(row[12]),
-                updated_at=datetime.fromisoformat(row[13])
-            ))
-        # Mobility API 실패 시 기존 직선 방식으로 폴백
-        elif not route_coordinates and is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
-            logger.warning("Mobility API 실패로 직선 거리 방식 사용")
-            route_events.append(EventResponse(
-                id=row[0], title=row[1], description=row[2], location_name=row[3],
-                location_address=row[4], latitude=row[5], longitude=row[6],
-                start_date=datetime.fromisoformat(row[7]),
-                end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                category=row[9], severity_level=row[10], status=row[11],
-                created_at=datetime.fromisoformat(row[12]),
-                updated_at=datetime.fromisoformat(row[13])
-            ))
-    
-    route_info = {
-        "departure": {"name": user_row[0], "address": user_row[1], "lat": dep_lat, "lon": dep_lon},
-        "arrival": {"name": user_row[4], "address": user_row[5], "lat": arr_lat, "lon": arr_lon}
-    }
-    
-    # 자동 알림 전송 (옵션)
-    if auto_notify and route_events:
-        await auto_notify_route_events(user_id, route_events)
-        logger.info(f"사용자 {user_id}에게 {len(route_events)}개 집회 자동 알림 전송")
-    
-    return RouteEventCheck(
-        user_id=user_id,
-        events_found=route_events,
-        route_info=route_info,
-        total_events=len(route_events)
-    )
+    """사용자의 경로상에 있는 집회들을 확인 (서비스 레이어 사용)"""
+    return await EventService.check_route_events(user_id, auto_notify, db)
 
 @app.post("/auto-check-all-routes")
 async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
