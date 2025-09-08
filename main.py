@@ -162,39 +162,7 @@ async def scheduled_route_check():
     except Exception as e:
         logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
 
-@app.on_event("startup")
-async def startup_event():
-    """앱 시작시 스케줄러 시작"""
-    # DB 초기화
-    init_db()
-    
-    # 매일 오전 8시 30분에 SMPA 집회 데이터 크롤링 및 동기화
-    scheduler.add_job(
-        scheduled_crawling_and_sync,
-        CronTrigger(hour=8, minute=30),  # 매일 08:30
-        id="daily_crawling_sync",
-        name="Daily SMPA Crawling & Sync",
-        replace_existing=True
-    )
-    
-    # 매일 오전 7시에 정기 집회 확인 스케줄 추가
-    scheduler.add_job(
-        scheduled_route_check,
-        CronTrigger(hour=7, minute=0),  # 매일 07:00
-        id="daily_route_check",
-        name="Daily Route Rally Check",
-        replace_existing=True
-    )
-    
-    # 스케줄러 시작
-    scheduler.start()
-    logger.info("🚀 스케줄러 시작: 매일 오전 7시 자동 집회 확인 설정됨")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """앱 종료시 스케줄러 종료"""
-    scheduler.shutdown()
-    logger.info("🛑 스케줄러 종료")
+# 중복된 이벤트 핸들러 제거됨 - 파일 하단의 이벤트 핸들러 사용
 
 # --------------------------
 # 거리 계산 함수 (Phase 9)
@@ -2258,6 +2226,9 @@ async def get_today_protests_skill(request: KakaoRequest):
 @app.on_event("startup")
 async def startup_event():
     """애플리케이션 시작 시 스케줄러 실행"""
+    # DB 초기화
+    init_db()
+    
     scheduler.add_job(
         scheduled_crawling_and_sync,
         CronTrigger(hour=8, minute=30),
