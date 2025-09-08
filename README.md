@@ -173,7 +173,6 @@ CREATE TABLE events (
 ### 집회 데이터 크롤링
 - **시간**: 매일 오전 8시 30분
 - **작업**: SMPA PDF 다운로드 → 파싱 → DB 동기화
-- **알고리즘**: MinhaKim02 크롤링 시스템 기반
 
 ### 경로 기반 집회 감지
 - **시간**: 매일 오전 7시
@@ -252,13 +251,6 @@ kt-demo-alarm/
 └── README.md                # 이 파일
 ```
 
-## 🤝 기여 및 협업
-
-### 코드 크레딧
-- **메인 시스템**: hoonly01 (FastAPI, 카카오톡 통합, 경로 감지)
-- **크롤링 알고리즘**: MinhaKim02 (SMPA PDF 크롤링 시스템)
-- **개발 협력**: Claude AI (코드 리뷰 및 최적화)
-
 ### 커밋 컨벤션
 ```
 feat: 새로운 기능 추가
@@ -269,10 +261,6 @@ style: 코드 스타일 변경 (포매팅, 세미콜론 등)
 refactor: 코드 리팩토링
 test: 테스트 추가 또는 업데이트
 ```
-
-## 📝 라이선스
-
-이 프로젝트는 MIT 라이선스하에 배포됩니다.
 
 ## 🔧 문제 해결
 
@@ -291,13 +279,6 @@ pip install -r requirements.txt
 ```bash
 # ngrok 토큰 설정
 ngrok config add-authtoken YOUR_AUTHTOKEN
-```
-
-**3. 데이터베이스 오류**
-```bash
-# 데이터베이스 재초기화 (주의: 데이터 삭제됨)
-rm users.db
-# 서버 재시작하면 자동으로 테이블 생성됨
 ```
 
 ## 📞 지원
