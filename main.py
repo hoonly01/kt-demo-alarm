@@ -27,6 +27,8 @@ from app.utils.scheduler_utils import (
 from app.services.user_service import UserService
 from app.services.event_service import EventService
 from app.services.notification_service import NotificationService
+from app.routers import users, events, alarms, kakao
+from app.routers import scheduler as scheduler_router
 from apscheduler.triggers.cron import CronTrigger
 
 # 환경변수 로드
@@ -37,6 +39,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# 라우터 등록
+app.include_router(users.router)
+app.include_router(events.router)
+app.include_router(alarms.router)
+app.include_router(kakao.router)
+app.include_router(scheduler_router.router)
 
 # 카카오 API 설정
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
