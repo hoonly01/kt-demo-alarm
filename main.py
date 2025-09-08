@@ -1,7 +1,6 @@
 # main.py
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Depends
-from pydantic import BaseModel, Field
 import logging
 import httpx
 import json
@@ -9,10 +8,22 @@ from typing import List, Optional
 import sqlite3
 import os
 import time
-import math
 from datetime import datetime
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+# 분리된 모듈들 import
+from app.models.user import User, UserRequest, UserPreferences, InitialSetupRequest
+from app.models.kakao import KakaoRequest, EventAPIRequest, Event, EventData, EventUser
+from app.models.event import EventCreate, EventResponse, RouteEventCheck
+from app.models.alarm import AlarmRequest, FilteredAlarmRequest
+from app.database.connection import init_db, get_db, DATABASE_PATH
+from app.utils.geo_utils import (
+    haversine_distance, is_point_near_route, is_event_near_route_accurate,
+    get_location_info, get_route_coordinates
+)
+from app.utils.scheduler_utils import (
+    scheduler, setup_scheduler, start_scheduler, shutdown_scheduler, get_scheduler_status
+)
 from apscheduler.triggers.cron import CronTrigger
 
 # 환경변수 로드
@@ -24,91 +35,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# 스케줄러 초기화
-scheduler = AsyncIOScheduler()
-
 # 카카오 API 설정
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 BOT_ID = os.getenv("BOT_ID")
-DATABASE_PATH = os.getenv("DATABASE_PATH", "users.db")
+# DATABASE_PATH는 app.database.connection에서 import됨
 
-# 데이터베이스 초기화
-def init_db():
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bot_user_key TEXT UNIQUE NOT NULL,
-            first_message_at DATETIME,
-            last_message_at DATETIME,
-            message_count INTEGER DEFAULT 1,
-            location TEXT,
-            categories TEXT,  -- JSON 형태로 관심 카테고리 저장
-            preferences TEXT, -- JSON 형태로 기타 설정 저장
-            active BOOLEAN DEFAULT TRUE,
-            departure_name TEXT,
-            departure_address TEXT,
-            departure_x REAL,
-            departure_y REAL,
-            arrival_name TEXT,
-            arrival_address TEXT,
-            arrival_x REAL,
-            arrival_y REAL,
-            route_updated_at DATETIME
-        )
-    ''')
-    
-    # events 테이블 생성 (Phase 9: 집회 데이터 저장)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            description TEXT,
-            location_name TEXT NOT NULL,
-            location_address TEXT,
-            latitude REAL NOT NULL,
-            longitude REAL NOT NULL,
-            start_date DATETIME NOT NULL,
-            end_date DATETIME,
-            category TEXT,
-            severity_level INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'active',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 기존 테이블에 새 컬럼 추가 (마이그레이션)
-    try:
-        cursor.execute('ALTER TABLE users ADD COLUMN departure_name TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN departure_address TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN departure_x REAL')
-        cursor.execute('ALTER TABLE users ADD COLUMN departure_y REAL')
-        cursor.execute('ALTER TABLE users ADD COLUMN arrival_name TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN arrival_address TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN arrival_x REAL')
-        cursor.execute('ALTER TABLE users ADD COLUMN arrival_y REAL')
-        cursor.execute('ALTER TABLE users ADD COLUMN route_updated_at DATETIME')
-        cursor.execute('ALTER TABLE users ADD COLUMN marked_bus TEXT')
-        cursor.execute('ALTER TABLE users ADD COLUMN language TEXT')
-        logger.info("경로 정보 및 초기 설정 컬럼들이 성공적으로 추가되었습니다.")
-    except sqlite3.OperationalError:
-        # 컬럼이 이미 존재하는 경우
-        logger.info("경로 정보 컬럼들이 이미 존재합니다.")
-    
-    conn.commit()
-    conn.close()
-
-# DB 의존성 주입 함수
-def get_db():
-    """데이터베이스 연결을 위한 의존성 주입 함수"""
-    db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-    try:
-        yield db
-    finally:
-        db.close()
+# 데이터베이스 초기화와 의존성 주입 함수는 app.database.connection에서 import됨
+# def init_db(): ...
+# def get_db(): ...
 
 # --------------------------
 # Phase 9.4: 스케줄링 시스템
@@ -165,7 +99,7 @@ async def scheduled_route_check():
 # 중복된 이벤트 핸들러 제거됨 - 파일 하단의 이벤트 핸들러 사용
 
 # --------------------------
-# 거리 계산 함수 (Phase 9)
+# 거리 계산 함수들은 app.utils.geo_utils에서 import됨
 # --------------------------
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -399,21 +333,23 @@ async def save_route_to_db(user_id: str, departure: str, arrival: str):
 
 # --- Pydantic 모델 정의 ---
 # 카카오톡 챗봇이 보내주는 데이터 구조를 클래스로 정의합니다.
+# Pydantic 모델들은 app.models 패키지에서 import됨
 # 이렇게 하면 타입 힌팅, 유효성 검사, 자동 완성이 가능해져 매우 편리합니다.
 
+# 모든 Pydantic 모델들은 app.models 패키지에서 import됨
+"""
 class User(BaseModel):
-    id: str  # botUserKey. 카카오 문서에서는 plusfriendUserKey 또는 botUserKey 라고 함
-    type: str
+    id: str
+    type: str 
     properties: dict = {}
 
 class UserRequest(BaseModel):
     user: User
-    utterance: str # 사용자가 입력한 실제 메시지
+    utterance: str
 
 class KakaoRequest(BaseModel):
     userRequest: UserRequest
 
-# Event API 모델 정의
 class EventData(BaseModel):
     text: Optional[str] = None
 
@@ -422,7 +358,7 @@ class Event(BaseModel):
     data: Optional[EventData] = None
 
 class EventUser(BaseModel):
-    type: str  # "botUserKey", "plusfriendUserKey", "appUserId"
+    type: str
     id: str
     properties: Optional[dict] = None
 
@@ -440,14 +376,13 @@ class FilteredAlarmRequest(BaseModel):
     message: str
     location_filter: Optional[str] = None
     category_filter: Optional[List[str]] = None
-    user_filter: Optional[List[str]] = None  # 특정 사용자들만
+    user_filter: Optional[List[str]] = None
 
 class UserPreferences(BaseModel):
     location: Optional[str] = None
     categories: Optional[List[str]] = None
     preferences: Optional[dict] = None
 
-# Phase 9: 집회 관련 Pydantic 모델
 class EventCreate(BaseModel):
     title: str = Field(..., description="집회 제목")
     description: Optional[str] = Field(None, description="집회 설명")
@@ -488,6 +423,7 @@ class InitialSetupRequest(BaseModel):
     arrival: Optional[str] = None
     marked_bus: Optional[str] = None
     language: Optional[str] = None
+"""
 
 @app.get("/")
 def read_root():
