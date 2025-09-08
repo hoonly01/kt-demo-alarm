@@ -208,8 +208,12 @@ curl -X POST http://127.0.0.1:8000/save_user_info \
       "user": {"id": "test_user_123", "type": "botUserKey"},
       "utterance": "경로등록"
     },
-    "departure": "강남역",
-    "arrival": "광화문역"
+    "action": {
+      "params": {
+        "departure": "강남역",
+        "arrival": "광화문역"
+      }
+    }
   }'
 ```
 
