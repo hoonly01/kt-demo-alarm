@@ -1,10 +1,10 @@
 """데이터베이스 연결 관리"""
 import sqlite3
-import os
 from contextlib import contextmanager
+from app.config.settings import settings
 
 
-DATABASE_PATH = os.getenv("DATABASE_PATH", "users.db")
+DATABASE_PATH = settings.DATABASE_PATH
 
 
 def get_db():
