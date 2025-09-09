@@ -603,15 +603,20 @@ class CrawlingService:
                         # 단일 문자열인 경우
                         location_name = location_raw
                 
-                # 좌표 파싱 개선 (기본값으로 광화문 사용)
-                latitude = 37.5709  # 광화문 기본 좌표
+                # 좌표 획득 - 카카오 지도 API 사용하여 장소명을 좌표로 변환
+                latitude = 37.5709  # 광화문 기본 좌표 (fallback)
                 longitude = 126.9769
                 
+                # 먼저 PDF의 좌표 데이터 파싱 시도
+                coordinates_found = False
                 try:
-                    lat_raw = str(row.get('위도', '[37.5709]')).strip()
-                    lon_raw = str(row.get('경도', '[126.9769]')).strip()
+                    lat_raw = str(row.get('위도', '')).strip()
+                    lon_raw = str(row.get('경도', '')).strip()
                     
                     def parse_coordinate(coord_str, default_val):
+                        if not coord_str or coord_str in ['', 'nan', 'None']:
+                            return None
+                        
                         if coord_str.startswith('[') and coord_str.endswith(']'):
                             # JSON 배열
                             try:
@@ -633,13 +638,33 @@ class CrawlingService:
                                     return val
                             except (ValueError, TypeError):
                                 pass
-                        return default_val
+                        return None
                     
-                    latitude = parse_coordinate(lat_raw, 37.5709)
-                    longitude = parse_coordinate(lon_raw, 126.9769)
+                    parsed_lat = parse_coordinate(lat_raw, None)
+                    parsed_lon = parse_coordinate(lon_raw, None)
+                    
+                    if parsed_lat and parsed_lon:
+                        latitude = parsed_lat
+                        longitude = parsed_lon
+                        coordinates_found = True
+                        logger.debug(f"PDF에서 좌표 파싱 성공: {location_name} -> ({latitude}, {longitude})")
                     
                 except Exception as coord_e:
-                    logger.warning(f"행 {i+1}: 좌표 파싱 오류, 기본값 사용: {coord_e}")
+                    logger.debug(f"행 {i+1}: PDF 좌표 파싱 실패: {coord_e}")
+                
+                # PDF에서 좌표를 찾지 못한 경우 카카오 지도 API 사용
+                if not coordinates_found and location_name != "알 수 없는 장소":
+                    try:
+                        from app.utils.geo_utils import get_location_info
+                        location_info = await get_location_info(location_name)
+                        if location_info:
+                            latitude = location_info["y"]  # 위도
+                            longitude = location_info["x"]  # 경도
+                            logger.info(f"카카오 지도 API로 좌표 획득: {location_name} -> ({latitude}, {longitude})")
+                        else:
+                            logger.warning(f"카카오 지도 API에서 장소를 찾을 수 없음: {location_name}")
+                    except Exception as api_e:
+                        logger.warning(f"카카오 지도 API 호출 실패: {api_e}")
                 
                 # 설명 구성 개선
                 description_parts = []
