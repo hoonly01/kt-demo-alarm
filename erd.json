@@ -1,0 +1,102 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dineug/erd-editor/main/json-schema/schema.json",
+  "version": "3.0.0",
+  "settings": {
+    "width": 3000,
+    "height": 2000,
+    "scrollTop": 0,
+    "scrollLeft": 0,
+    "zoomLevel": 0.8,
+    "show": 511,
+    "database": 4,
+    "databaseName": "KTDemoAlarmSystem",
+    "canvasType": "ERD",
+    "language": 1,
+    "tableNameCase": 2,
+    "columnNameCase": 2,
+    "bracketType": 1,
+    "relationshipDataTypeSync": true,
+    "relationshipOptimization": false,
+    "columnOrder": [1, 2, 4, 8, 16, 32, 64],
+    "maxWidthComment": 200,
+    "ignoreSaveSettings": 0
+  },
+  "doc": {
+    "tableIds": ["t_users", "t_events"],
+    "relationshipIds": [],
+    "indexIds": [],
+    "memoIds": ["memo_business_logic"]
+  },
+  "collections": {
+    "tableEntities": {
+      "t_users": {
+        "id": "t_users",
+        "name": "users",
+        "comment": "카카오톡 사용자 정보 및 경로 데이터",
+        "columnIds": ["c_user_id", "c_bot_user_key", "c_first_message_at", "c_last_message_at", "c_message_count", "c_location", "c_active", "c_categories", "c_preferences", "c_departure_name", "c_departure_address", "c_departure_x", "c_departure_y", "c_arrival_name", "c_arrival_address", "c_arrival_x", "c_arrival_y", "c_route_updated_at", "c_marked_bus", "c_language"],
+        "seqColumnIds": ["c_user_id", "c_bot_user_key", "c_first_message_at", "c_last_message_at", "c_message_count", "c_location", "c_active", "c_categories", "c_preferences", "c_departure_name", "c_departure_address", "c_departure_x", "c_departure_y", "c_arrival_name", "c_arrival_address", "c_arrival_x", "c_arrival_y", "c_route_updated_at", "c_marked_bus", "c_language"],
+        "ui": { "x": 100, "y": 100, "zIndex": 1, "color": "#FFDDC1" }
+      },
+      "t_events": {
+        "id": "t_events",
+        "name": "events",
+        "comment": "집회/시위 이벤트 정보",
+        "columnIds": ["c_event_id", "c_title", "c_description", "c_location_name", "c_location_address", "c_latitude", "c_longitude", "c_start_date", "c_end_date", "c_category", "c_severity_level", "c_status", "c_event_created_at", "c_event_updated_at"],
+        "seqColumnIds": ["c_event_id", "c_title", "c_description", "c_location_name", "c_location_address", "c_latitude", "c_longitude", "c_start_date", "c_end_date", "c_category", "c_severity_level", "c_status", "c_event_created_at", "c_event_updated_at"],
+        "ui": { "x": 800, "y": 100, "zIndex": 2, "color": "#C1FFD7" }
+      }
+    },
+    "tableColumnEntities": {
+      "c_user_id": { "id": "c_user_id", "tableId": "t_users", "name": "id", "comment": "사용자 고유 ID", "dataType": "INTEGER", "options": 9, "ui": { "keys": 1 } },
+      "c_bot_user_key": { "id": "c_bot_user_key", "tableId": "t_users", "name": "bot_user_key", "comment": "카카오톡 봇 사용자 키 (유니크)", "dataType": "TEXT", "options": 12, "ui": { "keys": 6 } },
+      "c_first_message_at": { "id": "c_first_message_at", "tableId": "t_users", "name": "first_message_at", "comment": "첫 메시지 시간", "dataType": "DATETIME", "options": 4 },
+      "c_last_message_at": { "id": "c_last_message_at", "tableId": "t_users", "name": "last_message_at", "comment": "마지막 메시지 시간", "dataType": "DATETIME", "options": 4 },
+      "c_message_count": { "id": "c_message_count", "tableId": "t_users", "name": "message_count", "comment": "메시지 개수", "dataType": "INTEGER", "default": "1", "options": 0 },
+      "c_location": { "id": "c_location", "tableId": "t_users", "name": "location", "comment": "사용자 위치", "dataType": "TEXT", "options": 4 },
+      "c_active": { "id": "c_active", "tableId": "t_users", "name": "active", "comment": "활성 상태", "dataType": "BOOLEAN", "default": "TRUE", "options": 0 },
+      "c_categories": { "id": "c_categories", "tableId": "t_users", "name": "categories", "comment": "관심 카테고리", "dataType": "TEXT", "options": 4 },
+      "c_preferences": { "id": "c_preferences", "tableId": "t_users", "name": "preferences", "comment": "사용자 설정", "dataType": "TEXT", "options": 4 },
+      "c_departure_name": { "id": "c_departure_name", "tableId": "t_users", "name": "departure_name", "comment": "출발지 이름", "dataType": "TEXT", "options": 4 },
+      "c_departure_address": { "id": "c_departure_address", "tableId": "t_users", "name": "departure_address", "comment": "출발지 주소", "dataType": "TEXT", "options": 4 },
+      "c_departure_x": { "id": "c_departure_x", "tableId": "t_users", "name": "departure_x", "comment": "출발지 경도", "dataType": "REAL", "options": 4 },
+      "c_departure_y": { "id": "c_departure_y", "tableId": "t_users", "name": "departure_y", "comment": "출발지 위도", "dataType": "REAL", "options": 4 },
+      "c_arrival_name": { "id": "c_arrival_name", "tableId": "t_users", "name": "arrival_name", "comment": "도착지 이름", "dataType": "TEXT", "options": 4 },
+      "c_arrival_address": { "id": "c_arrival_address", "tableId": "t_users", "name": "arrival_address", "comment": "도착지 주소", "dataType": "TEXT", "options": 4 },
+      "c_arrival_x": { "id": "c_arrival_x", "tableId": "t_users", "name": "arrival_x", "comment": "도착지 경도", "dataType": "REAL", "options": 4 },
+      "c_arrival_y": { "id": "c_arrival_y", "tableId": "t_users", "name": "arrival_y", "comment": "도착지 위도", "dataType": "REAL", "options": 4 },
+      "c_route_updated_at": { "id": "c_route_updated_at", "tableId": "t_users", "name": "route_updated_at", "comment": "경로 업데이트 시간", "dataType": "DATETIME", "options": 4 },
+      "c_marked_bus": { "id": "c_marked_bus", "tableId": "t_users", "name": "marked_bus", "comment": "표시된 버스", "dataType": "TEXT", "options": 4 },
+      "c_language": { "id": "c_language", "tableId": "t_users", "name": "language", "comment": "언어 설정", "dataType": "TEXT", "options": 4 },
+      "c_event_id": { "id": "c_event_id", "tableId": "t_events", "name": "id", "comment": "이벤트 고유 ID", "dataType": "INTEGER", "options": 9, "ui": { "keys": 1 } },
+      "c_title": { "id": "c_title", "tableId": "t_events", "name": "title", "comment": "집회 제목", "dataType": "TEXT", "options": 8 },
+      "c_description": { "id": "c_description", "tableId": "t_events", "name": "description", "comment": "집회 설명", "dataType": "TEXT", "options": 4 },
+      "c_location_name": { "id": "c_location_name", "tableId": "t_events", "name": "location_name", "comment": "장소명", "dataType": "TEXT", "options": 8 },
+      "c_location_address": { "id": "c_location_address", "tableId": "t_events", "name": "location_address", "comment": "장소 주소", "dataType": "TEXT", "options": 4 },
+      "c_latitude": { "id": "c_latitude", "tableId": "t_events", "name": "latitude", "comment": "위도", "dataType": "REAL", "options": 8 },
+      "c_longitude": { "id": "c_longitude", "tableId": "t_events", "name": "longitude", "comment": "경도", "dataType": "REAL", "options": 8 },
+      "c_start_date": { "id": "c_start_date", "tableId": "t_events", "name": "start_date", "comment": "시작 일시", "dataType": "DATETIME", "options": 8 },
+      "c_end_date": { "id": "c_end_date", "tableId": "t_events", "name": "end_date", "comment": "종료 일시", "dataType": "DATETIME", "options": 4 },
+      "c_category": { "id": "c_category", "tableId": "t_events", "name": "category", "comment": "집회 카테고리", "dataType": "TEXT", "options": 4 },
+      "c_severity_level": { "id": "c_severity_level", "tableId": "t_events", "name": "severity_level", "comment": "심각도 (1-5)", "dataType": "INTEGER", "default": "1", "options": 0 },
+      "c_status": { "id": "c_status", "tableId": "t_events", "name": "status", "comment": "상태 (active/inactive)", "dataType": "TEXT", "default": "'active'", "options": 0 },
+      "c_event_created_at": { "id": "c_event_created_at", "tableId": "t_events", "name": "created_at", "comment": "생성일", "dataType": "DATETIME", "default": "CURRENT_TIMESTAMP", "options": 0 },
+      "c_event_updated_at": { "id": "c_event_updated_at", "tableId": "t_events", "name": "updated_at", "comment": "수정일", "dataType": "DATETIME", "default": "CURRENT_TIMESTAMP", "options": 0 }
+    },
+    "relationshipEntities": {},
+    "indexEntities": {},
+    "memoEntities": {
+      "memo_business_logic": {
+        "id": "memo_business_logic",
+        "value": "⚠️ 테이블 간 FK 관계 없음\n\n비즈니스 로직 연결:\n• users.departure_x/y, arrival_x/y ↔ events.latitude/longitude\n• Haversine 거리 계산 (500m 이내)\n• check_user_route_events() 함수에서 런타임 매칭\n• 물리적 참조 무결성 없음, 애플리케이션 레벨에서만 연결",
+        "ui": {
+          "x": 400,
+          "y": 400,
+          "zIndex": 3,
+          "width": 350,
+          "height": 180,
+          "color": "#FFCCCC"
+        }
+      }
+    }
+  }
+}
