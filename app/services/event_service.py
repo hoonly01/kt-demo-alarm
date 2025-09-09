@@ -1,4 +1,5 @@
 """이벤트/집회 관리 서비스"""
+import asyncio
 import logging
 import sqlite3
 from datetime import datetime
@@ -278,19 +279,24 @@ class EventService:
             
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
             
+            # 모든 사용자에 대한 작업을 병렬로 실행 (성능 개선)
+            tasks = []
             for user_row in users:
                 user_id = user_row[0]
-                
-                try:
-                    # EventService를 통한 경로 확인 (자동 알림 포함)
-                    result = await EventService.check_route_events(user_id, auto_notify=True, db=db)
-                    
+                tasks.append(EventService.check_route_events(user_id, auto_notify=True, db=db))
+            
+            # 모든 작업을 병렬로 실행
+            results_from_gather = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 결과 처리
+            for i, result in enumerate(results_from_gather):
+                user_id = users[i][0]
+                if isinstance(result, Exception):
+                    logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(result)}")
+                else:
                     if result.events_found:
                         total_notifications += 1
                         logger.info(f"✅ {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
-                        
-                except Exception as e:
-                    logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(e)}")
             
             db.close()
             

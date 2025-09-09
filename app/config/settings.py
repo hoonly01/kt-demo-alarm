@@ -42,7 +42,7 @@ class Settings:
 def setup_logging():
     """로깅 설정"""
     logging.basicConfig(
-        level=getattr(logging, Settings.LOG_LEVEL.upper()),
+        level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
