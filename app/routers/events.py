@@ -145,15 +145,16 @@ async def crawl_and_sync_events(db: sqlite3.Connection = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"크롤링 실패: {str(e)}")
 
 
-@router.post("/upcoming-protests")
-async def get_upcoming_protests():
+@router.get("/upcoming-protests", response_model=List[EventResponse])
+async def get_upcoming_protests(
+    limit: int = Query(5, description="조회 제한", ge=1, le=50),
+    db: sqlite3.Connection = Depends(get_db)
+):
     """다가오는 집회 정보 조회"""
-    # 기존 로직을 서비스로 이관 필요
-    return {"message": "다가오는 집회 조회 기능 구현 예정"}
+    return EventService.get_upcoming_events(limit, db)
 
 
-@router.post("/today-protests") 
-async def get_today_protests():
+@router.get("/today-protests", response_model=List[EventResponse])
+async def get_today_protests(db: sqlite3.Connection = Depends(get_db)):
     """오늘 집회 정보 조회"""
-    # 기존 로직을 서비스로 이관 필요
-    return {"message": "오늘 집회 조회 기능 구현 예정"}
+    return EventService.get_today_events(db)
