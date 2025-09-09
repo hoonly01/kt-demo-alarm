@@ -12,13 +12,14 @@ class KakaoRequest(BaseModel):
 # Event API 모델 정의
 class EventData(BaseModel):
     """Event API 데이터 모델"""
-    text: Optional[str] = None
+    name: str  # 이벤트 이름
+    data: dict  # 이벤트 데이터
 
 
 class Event(BaseModel):
     """Event API 이벤트 모델"""
     name: str
-    data: Optional[EventData] = None
+    data: Optional[dict] = None
 
 
 class EventUser(BaseModel):
@@ -31,6 +32,6 @@ class EventUser(BaseModel):
 class EventAPIRequest(BaseModel):
     """Event API 요청 모델"""
     botId: str  # 봇 ID (필수)
-    event: EventData  # 이벤트 데이터 (EventData로 수정)
+    event: EventData  # 이벤트 데이터
     user: EventUser  # 단일 사용자 (List가 아닌 단일 객체)
     params: Optional[dict] = None

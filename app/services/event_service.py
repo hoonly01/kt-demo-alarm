@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.utils.geo_utils import haversine_distance, get_route_coordinates, is_event_near_route_accurate, is_point_near_route
+from app.database.connection import DATABASE_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -246,3 +247,64 @@ class EventService:
                 route_info={},
                 total_events=0
             )
+
+    @staticmethod
+    async def scheduled_route_check() -> Dict[str, Any]:
+        """
+        매일 아침 자동 실행되는 경로 기반 집회 확인 함수
+        
+        Returns:
+            Dict: 처리 결과
+        """
+        logger.info("=== 정기 집회 확인 시작 ===")
+        
+        try:
+            # 데이터베이스 연결
+            db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+            
+            # 활성 사용자 조회
+            cursor = db.cursor()
+            cursor.execute('''
+                SELECT bot_user_key FROM users 
+                WHERE active = 1 
+                AND departure_x IS NOT NULL 
+                AND departure_y IS NOT NULL
+                AND arrival_x IS NOT NULL 
+                AND arrival_y IS NOT NULL
+            ''')
+            
+            users = cursor.fetchall()
+            total_notifications = 0
+            
+            logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
+            
+            for user_row in users:
+                user_id = user_row[0]
+                
+                try:
+                    # EventService를 통한 경로 확인 (자동 알림 포함)
+                    result = await EventService.check_route_events(user_id, auto_notify=True, db=db)
+                    
+                    if result.events_found:
+                        total_notifications += 1
+                        logger.info(f"✅ {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(e)}")
+            
+            db.close()
+            
+            logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
+            
+            return {
+                "success": True,
+                "total_users": len(users),
+                "notifications_sent": total_notifications
+            }
+            
+        except Exception as e:
+            logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
