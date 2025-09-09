@@ -654,8 +654,7 @@ class CrawlingService:
                 if remarks:
                     description_parts.append(f"추가정보: {remarks}")
                 
-                description_parts.append("데이터 출처: SMPA(서울경찰청) PDF 크롤링")
-                description_parts.append("크롤링 시스템: MinhaKim02 알고리즘 기반")
+                description_parts.append("데이터 출처: SMPA(서울경찰청)")
                 description = " | ".join(description_parts)
                 
                 # 제목 생성 개선
