@@ -25,8 +25,9 @@ class UserPreferences(BaseModel):
 
 class InitialSetupRequest(BaseModel):
     """초기 설정 요청 모델"""
-    userRequest: UserRequest
+    bot_user_key: str  # 사용자 식별 키 (필수)
     departure: Optional[str] = None
     arrival: Optional[str] = None
     marked_bus: Optional[str] = None
     language: Optional[str] = None
+    userRequest: Optional[UserRequest] = None  # 카카오톡 요청 시에만 사용
