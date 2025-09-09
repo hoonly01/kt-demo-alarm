@@ -51,6 +51,9 @@ GIT_HISTORY_RECORD.md
 PHASE*_MEMO.md
 *_MEMO.md
 
+# Backup and legacy files
+backup_oldfiles/
+
 # Design files
 *.vuerd.json
 erd.json
