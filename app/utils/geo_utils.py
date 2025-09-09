@@ -189,10 +189,12 @@ async def get_route_coordinates(start_x: float, start_y: float,
                     
                     for section in route.get("sections", []):
                         for road in section.get("roads", []):
-                            for vertex in road.get("vertexes", []):
-                                # vertex는 [경도, 위도] 순서로 되어 있음
-                                if len(vertex) >= 2:
-                                    lon, lat = vertex[0], vertex[1]
+                            vertexes = road.get("vertexes", [])
+                            # vertexes는 [경도, 위도, 경도, 위도, ...] 형태의 평면 배열
+                            for i in range(0, len(vertexes), 2):
+                                if i + 1 < len(vertexes):
+                                    lon = vertexes[i]      # 경도
+                                    lat = vertexes[i + 1]  # 위도
                                     coordinates.append((lat, lon))  # (위도, 경도) 순서로 반환
                     
                     logger.info(f"경로 좌표 {len(coordinates)}개 추출됨")
