@@ -6,7 +6,7 @@ import json
 import os
 from typing import List, Dict, Any, Optional
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
-from app.models.kakao import EventAPIRequest, EventData, EventUser
+from app.models.kakao import EventAPIRequest, Event, EventUser
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class NotificationService:
         try:
             event_api_request = EventAPIRequest(
                 botId=BOT_ID,
-                event=EventData(
+                event=Event(
                     name=alarm_request.event_name,
                     data=alarm_request.data
                 ),
