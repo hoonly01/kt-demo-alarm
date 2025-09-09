@@ -1,4 +1,5 @@
 """알림 전송 서비스"""
+import asyncio
 import logging
 import httpx
 import json
@@ -88,28 +89,42 @@ class NotificationService:
             success_count = 0
             fail_count = 0
             
-            # 배치 단위로 처리
+            # 배치 단위로 병렬 처리 (성능 최적화)
             for i in range(0, len(user_ids), batch_size):
                 batch_users = user_ids[i:i + batch_size]
                 
-                for user_id in batch_users:
+                # 배치 내 모든 사용자에게 병렬로 알림 전송
+                async def send_to_user(user_id: str) -> Dict[str, Any]:
                     try:
                         alarm_request = AlarmRequest(
                             user_id=user_id,
                             event_name=event_name,
                             data=data
                         )
-                        
-                        result = await NotificationService.send_individual_alarm(alarm_request)
-                        
-                        if result.get("success"):
-                            success_count += 1
-                        else:
-                            fail_count += 1
-                            
+                        return await NotificationService.send_individual_alarm(alarm_request)
                     except Exception as e:
                         logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
+                        return {"success": False, "error": str(e)}
+                
+                # 배치 내 모든 작업을 동시에 실행
+                batch_tasks = [send_to_user(user_id) for user_id in batch_users]
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                
+                # 결과 집계
+                batch_success = 0
+                batch_fail = 0
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        batch_fail += 1
+                        logger.error(f"배치 알림 전송 중 예외: {str(result)}")
+                    elif result.get("success"):
+                        batch_success += 1
+                        success_count += 1
+                    else:
+                        batch_fail += 1
                         fail_count += 1
+                
+                logger.info(f"배치 {i//batch_size + 1} 완료: 성공 {batch_success}/{len(batch_users)}")
             
             logger.info(f"대량 알림 전송 완료: 성공 {success_count}건, 실패 {fail_count}건")
             
