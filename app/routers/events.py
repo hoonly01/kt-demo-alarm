@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import sqlite3
 from typing import List, Optional
 import logging
+import asyncio
 
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.database.connection import get_db
@@ -71,25 +72,44 @@ async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
     ''')
     
     users = cursor.fetchall()
-    results = []
     
-    for user_row in users:
-        user_id = user_row[0]
+    # 병렬 처리를 위한 태스크 생성
+    async def process_user(user_id: str):
         try:
             # 각 사용자의 경로 확인 (자동 알림 포함)
             result = await EventService.check_route_events(user_id, auto_notify=True, db=db)
-            results.append({
+            return {
                 "user_id": user_id,
                 "events_found": len(result.events_found),
                 "success": True
-            })
+            }
         except Exception as e:
             logger.error(f"사용자 {user_id} 처리 실패: {str(e)}")
-            results.append({
+            return {
                 "user_id": user_id,
                 "success": False,
                 "error": str(e)
+            }
+    
+    # 모든 사용자에 대한 작업을 병렬로 실행
+    tasks = [process_user(user_row[0]) for user_row in users]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 예외 처리 결과 변환
+    processed_results = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            user_id = users[i][0]
+            logger.error(f"사용자 {user_id} 처리 중 예외: {str(result)}")
+            processed_results.append({
+                "user_id": user_id,
+                "success": False,
+                "error": str(result)
             })
+        else:
+            processed_results.append(result)
+    
+    results = processed_results
     
     success_count = sum(1 for r in results if r["success"])
     total_events = sum(r.get("events_found", 0) for r in results if r["success"])
