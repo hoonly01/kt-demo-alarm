@@ -354,11 +354,6 @@ kt-demo-alarm/
 │       ├── __init__.py
 │       ├── geo_utils.py         # 지리 계산 유틸리티
 │       └── scheduler_utils.py   # 스케줄러 유틸리티
-└── backup_oldfiles/             # 백업 및 레거시 파일들 (git ignored)
-    └── archive/                 # 개발 단계별 아카이브
-        ├── main_stage1.py
-        ├── main_stage2.py
-        └── main_stage3.py
 ```
 
 ### 커밋 컨벤션
