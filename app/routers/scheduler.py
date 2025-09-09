@@ -36,8 +36,8 @@ async def manual_schedule_test():
         logger.info("🧪 수동 스케줄 테스트 시작")
         
         # scheduled_route_check 함수 실행
-        from main import scheduled_route_check
-        await scheduled_route_check()
+        from app.services.event_service import EventService
+        await EventService.scheduled_route_check()
         
         return {
             "message": "수동 스케줄 테스트가 성공적으로 실행되었습니다",
