@@ -101,8 +101,10 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
     
     # botUserKey를 받은 경우 사용자 생성/업데이트
     if 'userRequest' in request:
-        from app.database.connection import save_or_update_user
-        save_or_update_user(user_id, f"경로 등록: {request.get('action', {}).get('params', {}).get('departure', '')} → {request.get('action', {}).get('params', {}).get('arrival', '')}")
+        from app.services.user_service import UserService
+        from app.database.connection import get_db_connection
+        with get_db_connection() as db:
+            UserService.save_or_update_user(user_id, db, f"경로 등록: {request.get('action', {}).get('params', {}).get('departure', '')} → {request.get('action', {}).get('params', {}).get('arrival', '')}")
     
     # 출발지와 도착지 정보 추출
     departure = request.get('action', {}).get('params', {}).get('departure', '')

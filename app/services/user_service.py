@@ -13,6 +13,69 @@ class UserService:
     """사용자 관리 비즈니스 로직"""
 
     @staticmethod
+    def save_or_update_user(bot_user_key: str, db: sqlite3.Connection, message: str = "") -> None:
+        """
+        사용자 정보를 DB에 저장하거나 업데이트
+        
+        Args:
+            bot_user_key: 사용자 식별 키
+            db: 데이터베이스 연결
+            message: 메시지 (로깅용)
+        """
+        try:
+            cursor = db.cursor()
+            now = datetime.now()
+            
+            # 기존 사용자 확인
+            cursor.execute('SELECT * FROM users WHERE bot_user_key = ?', (bot_user_key,))
+            user = cursor.fetchone()
+            
+            if user:
+                # 기존 사용자 업데이트
+                cursor.execute('''
+                    UPDATE users 
+                    SET last_message_at = ?, message_count = message_count + 1 
+                    WHERE bot_user_key = ?
+                ''', (now, bot_user_key))
+                logger.info(f"사용자 업데이트: {bot_user_key}")
+            else:
+                # 새 사용자 생성
+                cursor.execute('''
+                    INSERT INTO users (bot_user_key, first_message_at, last_message_at, message_count)
+                    VALUES (?, ?, ?, 1)
+                ''', (bot_user_key, now, now))
+                logger.info(f"새 사용자 등록: {bot_user_key}")
+            
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"사용자 저장/업데이트 실패: {str(e)}")
+            raise
+
+    @staticmethod
+    def update_user_status(bot_user_key: str, db: sqlite3.Connection, active: bool) -> None:
+        """
+        사용자 활성 상태 업데이트
+        
+        Args:
+            bot_user_key: 사용자 식별 키
+            db: 데이터베이스 연결
+            active: 활성 상태
+        """
+        try:
+            cursor = db.cursor()
+            cursor.execute(
+                'UPDATE users SET active = ? WHERE bot_user_key = ?',
+                (active, bot_user_key)
+            )
+            db.commit()
+            logger.info(f"사용자 상태 업데이트: {bot_user_key} -> {'활성' if active else '비활성'}")
+            
+        except Exception as e:
+            logger.error(f"사용자 상태 업데이트 실패: {str(e)}")
+            raise
+
+    @staticmethod
     async def save_user_route_info(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자의 출발지/도착지 정보를 저장
