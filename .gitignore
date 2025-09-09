@@ -32,6 +32,29 @@ replay_pid*
 # Claude Code personal development notes
 CLAUDE.md
 
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary development files
+*_old.py
+*_backup.py
+fix_*.py
+GIT_HISTORY_RECORD.md
+PHASE*_MEMO.md
+*_MEMO.md
+
+# Design files
+*.vuerd.json
+erd.json
+
 ### Git ###
 # Created by git for backups. To disable backups in Git:
 # $ git config --global mergetool.keepBackup false
