@@ -21,8 +21,10 @@ async def kakao_chat_fallback(request: KakaoRequest):
     logger.info(f"📨 사용자 메시지: {user_message} (ID: {user_id})")
     
     # 사용자 정보 저장/업데이트
-    from app.database.connection import save_or_update_user
-    save_or_update_user(user_id, user_message)
+    from app.services.user_service import UserService
+    from app.database.connection import get_db_connection
+    with get_db_connection() as db:
+        UserService.save_or_update_user(user_id, db, user_message)
     
     return {
         "version": "2.0",
@@ -68,22 +70,24 @@ async def kakao_channel_webhook(request: Request):
         return {"status": "error", "message": "사용자 ID 필요"}
     
     # 사용자 상태 업데이트
-    from app.database.connection import save_or_update_user, update_user_status
+    from app.services.user_service import UserService
+    from app.database.connection import get_db_connection
     
     try:
-        if event == 'chat_room':
-            # 채팅방 입장 (채널 추가)
-            logger.info(f"✅ 채널 추가: {user_id}")
-            save_or_update_user(user_id, "채널 추가")
-            update_user_status(user_id, active=True)
-            
-        elif event == 'leave':
-            # 채팅방 나가기 (채널 차단)
-            logger.info(f"❌ 채널 차단: {user_id}")
-            update_user_status(user_id, active=False)
-            
-        else:
-            logger.warning(f"알 수 없는 이벤트: {event}")
+        with get_db_connection() as db:
+            if event == 'chat_room':
+                # 채팅방 입장 (채널 추가)
+                logger.info(f"✅ 채널 추가: {user_id}")
+                UserService.save_or_update_user(user_id, db, "채널 추가")
+                UserService.update_user_status(user_id, db, active=True)
+                
+            elif event == 'leave':
+                # 채팅방 나가기 (채널 차단)
+                logger.info(f"❌ 채널 차단: {user_id}")
+                UserService.update_user_status(user_id, db, active=False)
+                
+            else:
+                logger.warning(f"알 수 없는 이벤트: {event}")
     
     except Exception as e:
         logger.error(f"웹훅 처리 중 오류: {str(e)}")
