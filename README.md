@@ -36,7 +36,7 @@ app/
 - **병렬 처리**: `asyncio.gather()`로 성능 최적화
 
 ### 📊 집회 데이터 관리
-- **자동 크롤링**: SMPA(서울경찰청) PDF 데이터 수집 (MinhaKim02 알고리즘)
+- **자동 크롤링**: SMPA(서울경찰청) PDF 데이터 수집
 - **실시간 동기화**: 매일 오전 8시 30분 자동 업데이트
 - **중복 제거**: 스마트 데이터 중복 방지
 - **완전한 CRUD**: 집회 정보 생성/조회/수정/삭제
@@ -91,8 +91,13 @@ pip install -r requirements.txt
 ```
 
 ### 2. 환경변수 설정
-`.env` 파일 생성:
-```env
+`.env` 파일 생성 (git ignored):
+```bash
+# .env.example 파일을 복사하여 시작
+cp .env.example .env
+
+# 또는 직접 생성
+cat > .env << EOF
 # 카카오 API 설정
 KAKAO_REST_API_KEY=your_kakao_rest_api_key
 BOT_ID=your_bot_id
@@ -101,8 +106,9 @@ BOT_ID=your_bot_id
 PORT=8000
 DEBUG=true
 
-# 데이터베이스 설정
+# 데이터베이스 설정 (SQLite 파일은 자동 생성됨)
 DATABASE_PATH=users.db
+EOF
 ```
 
 ### 3. 서버 실행
@@ -313,45 +319,46 @@ curl http://127.0.0.1:8000/events/test_user_123/check-route
 
 ```
 kt-demo-alarm/
-├── main.py                    # FastAPI 메인 진입점
-├── main_old.py               # 이전 버전 (참고용)
-├── requirements.txt          # Python 의존성
-├── .env                      # 환경변수 (git ignored)
-├── users.db                  # SQLite 데이터베이스
-├── app/                      # 모듈화된 애플리케이션
-│   ├── routers/             # API 라우터들
+├── main.py                      # FastAPI 메인 진입점
+├── requirements.txt             # Python 의존성
+├── .gitignore                   # Git 무시 파일 설정
+├── README.md                    # 프로젝트 문서
+├── app/                         # 모듈화된 애플리케이션
+│   ├── config/                  # 애플리케이션 설정
 │   │   ├── __init__.py
-│   │   ├── users.py         # 사용자 관리 라우터
-│   │   ├── events.py        # 집회 관리 라우터
-│   │   ├── alarms.py        # 알림 전송 라우터
-│   │   ├── kakao.py         # 카카오톡 라우터
-│   │   └── scheduler.py     # 스케줄러 라우터
-│   ├── services/            # 비즈니스 로직
+│   │   └── settings.py          # 환경변수 및 설정 관리
+│   ├── database/                # 데이터베이스 관련
 │   │   ├── __init__.py
-│   │   ├── user_service.py       # 사용자 관리 서비스
-│   │   ├── event_service.py      # 집회 관리 서비스
+│   │   ├── connection.py        # DB 연결 및 초기화
+│   │   └── models.py            # SQLAlchemy 모델 정의
+│   ├── models/                  # Pydantic 모델들
+│   │   ├── __init__.py
+│   │   ├── alarm.py             # 알림 모델
+│   │   ├── event.py             # 집회 모델
+│   │   ├── kakao.py             # 카카오 API 모델
+│   │   └── user.py              # 사용자 모델
+│   ├── routers/                 # API 라우터들
+│   │   ├── __init__.py
+│   │   ├── alarms.py            # 알림 전송 라우터
+│   │   ├── events.py            # 집회 관리 라우터
+│   │   ├── kakao.py             # 카카오톡 라우터
+│   │   ├── scheduler.py         # 스케줄러 라우터
+│   │   └── users.py             # 사용자 관리 라우터
+│   ├── services/                # 비즈니스 로직
+│   │   ├── __init__.py
+│   │   ├── crawling_service.py  # 집회 데이터 크롤링 서비스
+│   │   ├── event_service.py     # 집회 관리 서비스
 │   │   ├── notification_service.py  # 알림 전송 서비스
-│   │   └── crawling_service.py   # 크롤링 서비스
-│   ├── models/              # Pydantic 모델들
-│   │   ├── __init__.py
-│   │   ├── user.py          # 사용자 모델
-│   │   ├── event.py         # 집회 모델
-│   │   ├── alarm.py         # 알림 모델
-│   │   └── kakao.py         # 카카오 API 모델
-│   ├── utils/               # 유틸리티 함수들
-│   │   ├── __init__.py
-│   │   ├── geo_utils.py     # 지리 계산 유틸리티
-│   │   └── scheduler_utils.py  # 스케줄러 유틸리티
-│   ├── database/            # 데이터베이스 관련
-│   │   ├── __init__.py
-│   │   └── connection.py    # DB 연결 및 초기화
-│   └── config/              # 설정 파일들
+│   │   └── user_service.py      # 사용자 관리 서비스
+│   └── utils/                   # 유틸리티 함수들
 │       ├── __init__.py
-│       └── settings.py      # 애플리케이션 설정
-├── venv/                    # Python 가상환경
-├── temp_pdfs/              # 크롤링된 PDF 임시 저장소
-├── CLAUDE.md               # AI 개발 가이드라인
-└── README.md               # 이 파일
+│       ├── geo_utils.py         # 지리 계산 유틸리티
+│       └── scheduler_utils.py   # 스케줄러 유틸리티
+└── backup_oldfiles/             # 백업 및 레거시 파일들 (git ignored)
+    └── archive/                 # 개발 단계별 아카이브
+        ├── main_stage1.py
+        ├── main_stage2.py
+        └── main_stage3.py
 ```
 
 ### 커밋 컨벤션
@@ -412,15 +419,26 @@ source venv/bin/activate
 
 # 의존성 재설치
 pip install -r requirements.txt
+
+# .env 파일 확인 (git ignored이므로 직접 생성 필요)
+cp .env.example .env  # 또는 수동으로 .env 파일 생성
 ```
 
-**2. ngrok 인증 오류**
+**2. 환경변수 설정 오류**
+```bash
+# .env 파일이 없는 경우 (git ignored 파일)
+# README의 환경변수 설정 섹션을 참고하여 .env 파일을 직접 생성
+echo "KAKAO_REST_API_KEY=your_key_here" > .env
+echo "BOT_ID=your_bot_id_here" >> .env
+```
+
+**3. ngrok 인증 오류**
 ```bash
 # ngrok 토큰 설정
 ngrok config add-authtoken YOUR_AUTHTOKEN
 ```
 
-**3. 모듈 import 오류**
+**4. 모듈 import 오류**
 ```bash
 # Python 경로 확인
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
