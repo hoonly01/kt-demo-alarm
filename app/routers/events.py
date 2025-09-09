@@ -124,21 +124,23 @@ async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
 
 
 @router.post("/crawl-and-sync")
-async def crawl_and_sync_events(db: sqlite3.Connection = Depends(get_db)):
+async def crawl_and_sync_events():
     """SMPA 집회 데이터 크롤링 및 동기화"""
     try:
-        # 크롤링 로직은 기존 main.py에서 가져와야 함
-        # 여기서는 placeholder로 처리
-        logger.info("집회 데이터 크롤링 시작")
+        from app.services.crawling_service import CrawlingService
+        result = await CrawlingService.crawl_and_sync_events()
         
-        # TODO: 실제 크롤링 로직 구현
-        # from app.services.crawling_service import CrawlingService
-        # result = await CrawlingService.crawl_smpa_events()
-        
-        return {
-            "message": "집회 데이터 크롤링이 시작되었습니다",
-            "status": "processing"
-        }
+        if result["success"]:
+            return {
+                "message": result["message"],
+                "total_crawled": result["total_crawled"],
+                "status": "completed"
+            }
+        else:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"크롤링 실패: {result['error']}"
+            )
         
     except Exception as e:
         logger.error(f"크롤링 중 오류: {str(e)}")
