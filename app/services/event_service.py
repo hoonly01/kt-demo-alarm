@@ -42,7 +42,7 @@ class EventService:
                 event_data.end_date,
                 event_data.category,
                 event_data.severity_level,
-                event_data.status
+                'active'  # 기본값으로 'active' 설정
             ))
             
             event_id = cursor.lastrowid
