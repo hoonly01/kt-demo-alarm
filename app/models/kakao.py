@@ -30,6 +30,7 @@ class EventUser(BaseModel):
 
 class EventAPIRequest(BaseModel):
     """Event API 요청 모델"""
-    event: Event
-    user: List[EventUser]
+    botId: str  # 봇 ID (필수)
+    event: EventData  # 이벤트 데이터 (EventData로 수정)
+    user: EventUser  # 단일 사용자 (List가 아닌 단일 객체)
     params: Optional[dict] = None
