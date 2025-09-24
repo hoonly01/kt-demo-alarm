@@ -5,6 +5,10 @@ from typing import Dict, Any, List
 import logging
 
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
+from app.models.responses import (
+    AlarmStatusResponse, AlarmTaskListResponse, AlarmSendResponse,
+    BulkAlarmSendResponse, FilteredAlarmSendResponse, CleanupResponse, ErrorResponse
+)
 from app.database.connection import get_db
 from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
@@ -13,9 +17,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/alarms", tags=["alarms"])
 
 
-@router.post("/send")
+@router.post("/send", response_model=AlarmSendResponse, 
+          responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
 async def send_individual_alarm(alarm_request: AlarmRequest):
-    """개별 사용자에게 알림 전송"""
+    """개별 사용자에게 알림 전송
+    
+    지정된 사용자에게 개별 알림을 전송합니다.
+    전송 상태는 task_id를 통해 추적할 수 있습니다.
+    
+    Args:
+        alarm_request: 알림 요청 데이터
+        
+    Returns:
+        AlarmSendResponse: 전송 결과 및 작업 ID
+        
+    Raises:
+        HTTPException: 400 - 잘못된 요청 데이터
+        HTTPException: 500 - 전송 실패
+    """
     # 1. 이벤트 데이터 검증
     validation = NotificationService.validate_event_data(
         alarm_request.event_name, 
@@ -44,12 +63,12 @@ async def send_individual_alarm(alarm_request: AlarmRequest):
             AlarmStatusService.update_alarm_task_status(
                 task_id, "completed", successful_sends=1
             )
-            return {
-                "message": "알림이 성공적으로 전송되었습니다",
-                "task_id": task_id,
-                "user_id": alarm_request.user_id,
-                "event_name": alarm_request.event_name
-            }
+            return AlarmSendResponse(
+                message="알림이 성공적으로 전송되었습니다",
+                task_id=task_id,
+                user_id=alarm_request.user_id,
+                event_name=alarm_request.event_name
+            )
         else:
             # 6. 실패 시 상태 업데이트
             AlarmStatusService.update_alarm_task_status(
@@ -158,9 +177,22 @@ async def send_filtered_alarm(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/status/{task_id}")
+@router.get("/status/{task_id}", response_model=AlarmStatusResponse,
+           responses={404: {"model": ErrorResponse}})
 async def get_alarm_status(task_id: str):
-    """알림 전송 상태 확인"""
+    """알림 전송 상태 상세 조회
+    
+    특정 알림 작업의 상세 상태를 조회합니다.
+    
+    Args:
+        task_id: 조회할 작업 ID
+        
+    Returns:
+        AlarmStatusResponse: 알림 상태 상세 정보
+        
+    Raises:
+        HTTPException: 404 - 작업 ID를 찾을 수 없음
+    """
     status_info = AlarmStatusService.get_alarm_task_status(task_id)
     
     if not status_info:
@@ -169,45 +201,63 @@ async def get_alarm_status(task_id: str):
             detail=f"알림 작업 ID {task_id}를 찾을 수 없습니다"
         )
     
-    return {
-        "task_id": status_info["task_id"],
-        "status": status_info["status"],
-        "alarm_type": status_info["alarm_type"],
-        "progress": {
+    return AlarmStatusResponse(
+        task_id=status_info["task_id"],
+        status=status_info["status"],
+        alarm_type=status_info["alarm_type"],
+        progress={
             "total_recipients": status_info["total_recipients"],
             "successful_sends": status_info["successful_sends"] or 0,
             "failed_sends": status_info["failed_sends"] or 0,
             "success_rate": status_info["success_rate"]
         },
-        "timestamps": {
+        timestamps={
             "created_at": status_info["created_at"],
             "updated_at": status_info["updated_at"],
             "completed_at": status_info["completed_at"]
         },
-        "error_messages": status_info["error_messages"],
-        "event_id": status_info["event_id"]
-    }
+        error_messages=status_info["error_messages"],
+        event_id=status_info["event_id"]
+    )
 
 
-@router.get("/status")
-async def get_recent_alarm_tasks(limit: int = Query(50, ge=1, le=100)):
-    """최근 알림 작업 목록 조회"""
+@router.get("/status", response_model=AlarmTaskListResponse)
+async def get_recent_alarm_tasks(limit: int = Query(50, ge=1, le=100, description="조회할 작업 수")):
+    """최근 알림 작업 목록 조회
+    
+    최근 생성된 알림 작업들의 목록을 조회합니다.
+    
+    Args:
+        limit: 조회할 작업 수 (1-100)
+        
+    Returns:
+        AlarmTaskListResponse: 알림 작업 목록
+    """
     tasks = AlarmStatusService.get_recent_alarm_tasks(limit)
     
-    return {
-        "tasks": tasks,
-        "total": len(tasks),
-        "limit": limit
-    }
+    return AlarmTaskListResponse(
+        tasks=tasks,
+        total=len(tasks),
+        limit=limit
+    )
 
 
-@router.post("/cleanup-old-tasks")
-async def cleanup_old_alarm_tasks(days: int = Query(30, ge=1, le=365)):
-    """오래된 알림 작업 정리"""
+@router.post("/cleanup-old-tasks", response_model=CleanupResponse)
+async def cleanup_old_alarm_tasks(days: int = Query(30, ge=1, le=365, description="보관 기간 (일)")):
+    """오래된 알림 작업 정리
+    
+    지정된 기간보다 오래된 알림 작업들을 삭제합니다.
+    
+    Args:
+        days: 보관할 기간 (일 단위, 1-365)
+        
+    Returns:
+        CleanupResponse: 정리 결과
+    """
     deleted_count = AlarmStatusService.cleanup_old_tasks(days)
     
-    return {
-        "message": f"{deleted_count}개의 오래된 알림 작업이 정리되었습니다",
-        "deleted_count": deleted_count,
-        "retention_days": days
-    }
+    return CleanupResponse(
+        message=f"{deleted_count}개의 오래된 알림 작업이 정리되었습니다",
+        deleted_count=deleted_count,
+        retention_days=days
+    )

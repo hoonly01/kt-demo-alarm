@@ -19,6 +19,8 @@ from app.routers import scheduler as scheduler_router
 from app.config.settings import settings, setup_logging
 from app.services.crawling_service import CrawlingService
 
+from app.models.responses import HealthCheckResponse
+
 # 로깅 설정
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -54,8 +56,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="KT 종로구 집회 알림 시스템 API - Router-Service-Repository 패턴 적용",
-    lifespan=lifespan
+    description="""
+    KT 종로구 집회 알림 시스템 API
+    
+    ## 기능
+    * **집회 데이터 크롤링**: SMPA 사이트에서 자동 크롤링
+    * **사용자 경로 관리**: 출발지-도착지 경로 등록 및 관리
+    * **실시간 알림**: 경로 상 집회 발견 시 자동 알림 전송
+    * **알림 상태 추적**: 알림 전송 상태 실시간 모니터링
+    * **스케줄러**: 자동 크롤링 및 경로 확인 스케줄링
+    
+    ## 아키텍처
+    Router-Service-Repository 패턴을 적용한 깔끔한 구조
+    """,
+    lifespan=lifespan,
+    responses={
+        400: {"description": "Bad Request", "model": None},
+        404: {"description": "Not Found", "model": None}, 
+        500: {"description": "Internal Server Error", "model": None}
+    }
 )
 
 # 라우터 등록
@@ -66,14 +85,17 @@ app.include_router(kakao.router)
 app.include_router(scheduler_router.router)
 
 
-@app.get("/")
+@app.get("/", response_model=HealthCheckResponse, tags=["Health"])
 def read_root():
-    """서버가 살아있는지 확인하는 기본 엔드포인트"""
-    return {
-        "message": "KT Demo Alarm API is running!",
-        "version": settings.APP_VERSION,
-        "status": "healthy"
-    }
+    """서버 헬스체크 엔드포인트
+    
+    애플리케이션이 정상적으로 실행 중인지 확인합니다.
+    """
+    return HealthCheckResponse(
+        message="KT Demo Alarm API is running!",
+        version=settings.APP_VERSION,
+        status="healthy"
+    )
 
 
 
