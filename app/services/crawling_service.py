@@ -110,7 +110,7 @@ class CrawlingService:
             
             # 4. DB 형식으로 변환  
             logger.info("DB 형식으로 데이터 변환 시작")
-            db_events = CrawlingService._convert_raw_events_to_db_format(raw_events)
+            db_events = await CrawlingService._convert_raw_events_to_db_format(raw_events)
             logger.info(f"DB 형식 변환 완료: {len(db_events)}개 이벤트")
             
             # 5. 임시 파일 정리
@@ -511,7 +511,7 @@ class CrawlingService:
         return rows
 
     @staticmethod
-    def _convert_raw_events_to_db_format(raw_events: List[Dict]) -> List[Dict]:
+    async def _convert_raw_events_to_db_format(raw_events: List[Dict]) -> List[Dict]:
         """
         파싱된 PDF 데이터를 우리 events 테이블 형식으로 변환
         Integration: MinhaKim02의 파싱 결과를 우리 DB 스키마로 변환
