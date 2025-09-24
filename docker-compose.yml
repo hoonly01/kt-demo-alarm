@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  kt-demo-alarm:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+      - DATABASE_PATH=/app/data/kt_demo_alarm.db
+      - CRAWLING_HOUR=9
+      - CRAWLING_MINUTE=0
+      - ROUTE_CHECK_HOUR=18
+      - ROUTE_CHECK_MINUTE=30
+      # Kakao API credentials (set these in .env file or environment)
+      - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
+      - BOT_ID=${BOT_ID:-}
+    volumes:
+      - ./data:/app/data  # Persist database
+      - ./logs:/app/logs  # Persist logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a database service if switching from SQLite
+  # postgres:
+  #   image: postgres:15
+  #   environment:
+  #     POSTGRES_DB: kt_demo_alarm
+  #     POSTGRES_USER: ${POSTGRES_USER:-kt_user}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   restart: unless-stopped
+
+volumes:
+  # postgres_data:  # Uncomment if using PostgreSQL
+  data_volume:
+  logs_volume:
