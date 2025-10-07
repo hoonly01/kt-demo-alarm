@@ -2,6 +2,7 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,25 +18,25 @@ def setup_scheduler(crawling_func, route_check_func):
         crawling_func: 크롤링 함수
         route_check_func: 경로 확인 함수
     """
-    # 매일 오전 8시 30분에 SMPA 집회 데이터 크롤링 및 동기화
+    # 설정된 시간에 SMPA 집회 데이터 크롤링 및 동기화
     scheduler.add_job(
         crawling_func,
-        CronTrigger(hour=8, minute=30),  # 매일 08:30
+        CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE),
         id="daily_crawling_sync",
         name="Daily SMPA Crawling & Sync",
         replace_existing=True
     )
     
-    # 매일 오전 7시에 정기 집회 확인 스케줄 추가
+    # 설정된 시간에 정기 집회 확인 스케줄 추가
     scheduler.add_job(
         route_check_func,
-        CronTrigger(hour=7, minute=0),  # 매일 07:00
+        CronTrigger(hour=settings.ROUTE_CHECK_HOUR, minute=settings.ROUTE_CHECK_MINUTE),
         id="daily_route_check",
         name="Daily Route Rally Check",
         replace_existing=True
     )
     
-    logger.info("🚀 스케줄러 작업 등록 완료: 매일 08:30 크롤링, 07:00 경로 확인")
+    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인")
 
 
 def start_scheduler():

@@ -9,7 +9,7 @@ import shutil
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
-import requests
+import httpx
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
 from zoneinfo import ZoneInfo
@@ -110,7 +110,7 @@ class CrawlingService:
             
             # 4. DB 형식으로 변환  
             logger.info("DB 형식으로 데이터 변환 시작")
-            db_events = CrawlingService._convert_raw_events_to_db_format(raw_events)
+            db_events = await CrawlingService._convert_raw_events_to_db_format(raw_events)
             logger.info(f"DB 형식 변환 완료: {len(db_events)}개 이벤트")
             
             # 5. 임시 파일 정리
@@ -248,12 +248,12 @@ class CrawlingService:
         return current_date, f"오늘의 집회 {current_date} {current_day}"
 
     @staticmethod
-    async def _get_today_post_info(session: requests.Session, list_url: str = LIST_URL) -> Tuple[str, str]:
+    async def _get_today_post_info(client: httpx.AsyncClient, list_url: str = LIST_URL) -> Tuple[str, str]:
         """
         목록 페이지에서 오늘자 게시글의 뷰 URL과 제목을 반환 (원본 by MinhaKim02)
         """
         current_date, expected_full = CrawlingService._current_title_pattern()
-        r = session.get(list_url, timeout=20)
+        r = await client.get(list_url, timeout=20)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -295,7 +295,7 @@ class CrawlingService:
         return m.group(1), m.group(2)
 
     @staticmethod
-    def _is_pdf(resp: requests.Response, first: bytes) -> bool:
+    def _is_pdf(resp: httpx.Response, first: bytes) -> bool:
         """PDF 파일 여부 확인 (원본 by MinhaKim02)"""
         ct = (resp.headers.get("Content-Type") or "").lower()
         return first.startswith(b"%PDF-") or "pdf" in ct
@@ -322,13 +322,13 @@ class CrawlingService:
         return None
 
     @staticmethod
-    async def _download_from_view(session: requests.Session, view_url: str, out_dir: str = "temp") -> str:
+    async def _download_from_view(client: httpx.AsyncClient, view_url: str, out_dir: str = "temp") -> str:
         """
         게시글 뷰 페이지에서 PDF 첨부파일 다운로드 (원본 by MinhaKim02)
         """
         os.makedirs(out_dir, exist_ok=True)
         
-        r = session.get(view_url, timeout=20)
+        r = await client.get(view_url, timeout=20)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -350,26 +350,29 @@ class CrawlingService:
             path, attach_no = parsed
             download_url = urllib.parse.urljoin(BASE_URL, path)
             try:
-                with session.get(download_url, params={"attachNo": attach_no}, stream=True, timeout=30) as resp:
+                async with client.stream("GET", download_url, params={"attachNo": attach_no}, timeout=30) as resp:
                     resp.raise_for_status()
-                    it = resp.iter_content(chunk_size=8192)
-                    first_chunk = next(it, b"")
-                    if not CrawlingService._is_pdf(resp, first_chunk):
-                        continue
-                    cd = resp.headers.get("Content-Disposition", "")
-                    filename = CrawlingService._filename_from_cd(cd) or (a_tag.get_text(strip=True) or f"{attach_no}.pdf")
-                    root, ext = os.path.splitext(filename)
-                    if ext.lower() != ".pdf":
-                        filename = root + ".pdf"
-                    filename = CrawlingService._sanitize_filename(filename)
-                    save_path = os.path.join(out_dir, filename)
-                    with open(save_path, "wb") as f:
-                        if first_chunk:
-                            f.write(first_chunk)
-                        for chunk in it:
-                            if chunk:
-                                f.write(chunk)
-                    return save_path
+                    first_chunk = b""
+                    async for chunk in resp.aiter_bytes(chunk_size=8192):
+                        if not first_chunk:
+                            first_chunk = chunk
+                            if not CrawlingService._is_pdf(resp, first_chunk):
+                                break
+                            cd = resp.headers.get("Content-Disposition", "")
+                            filename = CrawlingService._filename_from_cd(cd) or (a_tag.get_text(strip=True) or f"{attach_no}.pdf")
+                            root, ext = os.path.splitext(filename)
+                            if ext.lower() != ".pdf":
+                                filename = root + ".pdf"
+                            filename = CrawlingService._sanitize_filename(filename)
+                            save_path = os.path.join(out_dir, filename)
+                            f = open(save_path, "wb")
+                        
+                        if chunk:
+                            f.write(chunk)
+                    
+                    if first_chunk:
+                        f.close()
+                        return save_path
             except Exception as e:
                 last_error = e
                 continue
@@ -382,16 +385,17 @@ class CrawlingService:
         """
         오늘자 게시글의 PDF를 다운로드하고 제목과 함께 반환 (원본 by MinhaKim02)
         """
-        sess = requests.Session()
-        sess.headers.update({
+        headers = {
             'User-Agent': 'Mozilla/5.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
             'Referer': LIST_URL,
-        })
-        view_url, title_text = await CrawlingService._get_today_post_info(sess, LIST_URL)
-        pdf_path = await CrawlingService._download_from_view(sess, view_url, out_dir=out_dir)
-        return pdf_path, title_text
+        }
+        
+        async with httpx.AsyncClient(headers=headers) as client:
+            view_url, title_text = await CrawlingService._get_today_post_info(client, LIST_URL)
+            pdf_path = await CrawlingService._download_from_view(client, view_url, out_dir=out_dir)
+            return pdf_path, title_text
 
     # PDF 파싱 로직 (원본 by MinhaKim02)
     TIME_RE = re.compile(
@@ -511,7 +515,7 @@ class CrawlingService:
         return rows
 
     @staticmethod
-    def _convert_raw_events_to_db_format(raw_events: List[Dict]) -> List[Dict]:
+    async def _convert_raw_events_to_db_format(raw_events: List[Dict]) -> List[Dict]:
         """
         파싱된 PDF 데이터를 우리 events 테이블 형식으로 변환
         Integration: MinhaKim02의 파싱 결과를 우리 DB 스키마로 변환

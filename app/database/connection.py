@@ -2,7 +2,7 @@
 import sqlite3
 from contextlib import contextmanager
 from app.config.settings import settings
-from app.database.models import USERS_TABLE_SCHEMA, EVENTS_TABLE_SCHEMA
+from app.database.models import USERS_TABLE_SCHEMA, EVENTS_TABLE_SCHEMA, ALARM_TASKS_TABLE_SCHEMA
 
 
 DATABASE_PATH = settings.DATABASE_PATH
@@ -37,6 +37,9 @@ def init_db():
     
     # Events 테이블 생성 (통합 스키마 사용)
     cursor.execute(EVENTS_TABLE_SCHEMA)
+    
+    # Alarm Tasks 테이블 생성 (알림 상태 추적용)
+    cursor.execute(ALARM_TASKS_TABLE_SCHEMA)
     
     conn.commit()
     conn.close()
