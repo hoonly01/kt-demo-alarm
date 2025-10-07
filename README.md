@@ -1,6 +1,28 @@
 # KT Demo Alarm - 집회 알림 시스템
 
+![Branch](https://img.shields.io/badge/branch-main-blue)
+![Status](https://img.shields.io/badge/status-development-yellow)
+![Python](https://img.shields.io/badge/python-3.13+-green)
+![FastAPI](https://img.shields.io/badge/FastAPI-latest-teal)
+
 카카오톡을 통한 실시간 집회 알림 서비스입니다. Router-Service-Repository 패턴을 적용한 모듈화된 아키텍처로 구축되었습니다.
+
+## 📌 현재 상태
+
+- ✅ **로컬 개발 환경 구축 완료**
+- ✅ **Router-Service-Repository 패턴 적용**
+- ✅ **SMPA 크롤링 시스템 구현** (MinhaKim02 알고리즘)
+- ✅ **경로 기반 집회 감지 기능 완료**
+- ⏳ **알림 상태 추적 시스템** (PR #22 대기 중)
+- ⏳ **Docker 컨테이너화** (PR #22 대기 중)
+- ⏳ **테스트 인프라** (PR #22 대기 중)
+- ❌ **CI/CD 파이프라인** (Issue #23 계획)
+- ❌ **프로덕션 배포** (Issue #23 계획)
+
+**중요 링크:**
+- 📝 [Issue #23: 통합 개선 과제](https://github.com/hoonly01/kt-demo-alarm/issues/23)
+- 🔀 [PR #22: 현대화 및 성능 최적화](https://github.com/hoonly01/kt-demo-alarm/pull/22)
+- 🤖 [CLAUDE.md: AI 개발 가이드](./CLAUDE.md)
 
 ## 🏗️ 아키텍처
 
@@ -55,7 +77,7 @@ app/
 - **Pydantic**: 데이터 검증 및 직렬화
 - **SQLite**: 경량 데이터베이스
 - **APScheduler**: 작업 스케줄링
-- **httpx**: 비동기 HTTP 클라이언트
+- **requests**: HTTP 클라이언트 (httpx 마이그레이션 예정 - PR #22)
 
 ### Performance Optimization
 - **asyncio.gather()**: 병렬 비동기 처리
@@ -146,7 +168,7 @@ ngrok http 8000
 - `POST /alarms/send` - 개별 사용자 알림 전송
 - `POST /alarms/send-to-all` - 전체 활성 사용자 알림 전송
 - `POST /alarms/send-filtered` - 필터링된 사용자 알림 전송
-- `GET /alarms/status/{task_id}` - 알림 전송 상태 확인
+- `GET /alarms/status/{task_id}` - 알림 전송 상태 확인 (placeholder, 실제 추적 시스템은 PR #22에서 추가 예정)
 
 ### ⏰ 스케줄러 라우터 (`/scheduler`)
 - `POST /scheduler/crawl-events` - 집회 데이터 크롤링 및 동기화
@@ -201,6 +223,26 @@ CREATE TABLE events (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+### alarm_tasks 테이블 (PR #22에서 추가 예정)
+```sql
+CREATE TABLE alarm_tasks (
+    task_id TEXT PRIMARY KEY,
+    alarm_type TEXT NOT NULL,  -- individual, bulk, filtered
+    status TEXT DEFAULT 'pending',  -- pending, processing, completed, failed, partial
+    total_recipients INTEGER DEFAULT 0,
+    successful_sends INTEGER DEFAULT 0,
+    failed_sends INTEGER DEFAULT 0,
+    event_id INTEGER,  -- FK to events table
+    request_data TEXT,  -- JSON string
+    error_messages TEXT,  -- JSON array
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    FOREIGN KEY (event_id) REFERENCES events (id)
+);
+```
+> ⚠️ **알림 상태 추적 시스템**은 PR #22 머지 후 사용 가능합니다.
 
 ## 🔄 자동화 스케줄
 
@@ -323,6 +365,9 @@ kt-demo-alarm/
 ├── requirements.txt             # Python 의존성
 ├── .gitignore                   # Git 무시 파일 설정
 ├── README.md                    # 프로젝트 문서
+├── CLAUDE.md                    # Claude Code용 가이드
+├── .env.example                 # 환경변수 템플릿
+│
 ├── app/                         # 모듈화된 애플리케이션
 │   ├── config/                  # 애플리케이션 설정
 │   │   ├── __init__.py
@@ -330,13 +375,14 @@ kt-demo-alarm/
 │   ├── database/                # 데이터베이스 관련
 │   │   ├── __init__.py
 │   │   ├── connection.py        # DB 연결 및 초기화
-│   │   └── models.py            # SQLAlchemy 모델 정의
+│   │   └── models.py            # DB 스키마 정의
 │   ├── models/                  # Pydantic 모델들
 │   │   ├── __init__.py
 │   │   ├── alarm.py             # 알림 모델
 │   │   ├── event.py             # 집회 모델
 │   │   ├── kakao.py             # 카카오 API 모델
-│   │   └── user.py              # 사용자 모델
+│   │   ├── user.py              # 사용자 모델
+│   │   └── responses.py         # API 응답 모델 (PR #22)
 │   ├── routers/                 # API 라우터들
 │   │   ├── __init__.py
 │   │   ├── alarms.py            # 알림 전송 라우터
@@ -349,12 +395,26 @@ kt-demo-alarm/
 │   │   ├── crawling_service.py  # 집회 데이터 크롤링 서비스
 │   │   ├── event_service.py     # 집회 관리 서비스
 │   │   ├── notification_service.py  # 알림 전송 서비스
-│   │   └── user_service.py      # 사용자 관리 서비스
+│   │   ├── user_service.py      # 사용자 관리 서비스
+│   │   └── alarm_status_service.py  # 알림 상태 추적 (PR #22)
 │   └── utils/                   # 유틸리티 함수들
 │       ├── __init__.py
 │       ├── geo_utils.py         # 지리 계산 유틸리티
 │       └── scheduler_utils.py   # 스케줄러 유틸리티
+│
+├── tests/                       # 테스트 (PR #22)
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_database.py
+│   ├── test_api_basic.py
+│   └── test_alarm_status_service.py
+│
+├── Dockerfile                   # Docker 설정 (PR #22)
+├── docker-compose.yml           # Docker Compose (PR #22)
+└── pytest.ini                   # pytest 설정 (PR #22)
 ```
+
+> 📝 **PR #22** 표시 항목은 현재 main 브랜치에는 없고, PR 머지 후 추가됩니다.
 
 ### 커밋 컨벤션
 ```
@@ -402,6 +462,41 @@ test: 테스트 추가 또는 업데이트
 - ✅ **알림 시스템**: 배치 처리 최적화
 - ✅ **크롤링 시스템**: MinhaKim02 알고리즘 보존
 - ✅ **API 엔드포인트**: 라우터별 체계적 구성
+
+## 🚢 배포
+
+### 현재 상태 (main 브랜치)
+**로컬 개발 환경만 지원**
+```bash
+# 서버 수동 실행
+uvicorn main:app --reload --port 8000
+
+# ngrok 터널링 (테스트용)
+ngrok http 8000
+```
+
+**현재 배포 프로세스 없음:**
+- ❌ CI/CD 파이프라인 없음
+- ❌ Docker 컨테이너화 없음
+- ❌ 프로덕션 배포 가이드 없음
+
+### 향후 개선 예정 (PR #22, Issue #23)
+
+**PR #22에서 추가 예정:**
+- ✅ Docker 컨테이너화 (Dockerfile, docker-compose.yml)
+- ✅ 프로덕션 준비 설정
+- ✅ 헬스체크 설정
+
+**Issue #23에서 계획:**
+- 🔄 CI/CD 파이프라인 (GitHub Actions)
+- 🔄 자동 테스트 및 배포
+- 🔄 환경별 배포 전략 (dev/staging/prod)
+
+**배포 플랫폼 옵션:**
+1. **클라우드**: AWS ECS/Fargate, GCP Cloud Run, Azure Container Instances
+2. **PaaS**: Railway, Fly.io, Render
+3. **서버리스**: AWS Lambda + API Gateway
+4. **VPS**: DigitalOcean, Vultr 등에 Docker 배포
 
 ## 🔧 문제 해결
 
