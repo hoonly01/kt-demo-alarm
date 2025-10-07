@@ -1,0 +1,99 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # 수동 실행 가능
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          BOT_ID: ${{ secrets.BOT_ID }}
+        run: |
+          ssh ${EC2_USER}@${EC2_HOST} << 'EOF'
+            set -e
+
+            echo "📦 Deploying KT Demo Alarm to EC2..."
+
+            # 프로젝트 디렉토리로 이동
+            cd ~/kt-demo-alarm || exit 1
+
+            # Git pull
+            echo "⬇️  Pulling latest code..."
+            git pull origin main
+
+            # 환경변수 업데이트 (.env 파일 생성/업데이트)
+            echo "🔐 Updating environment variables..."
+            cat > .env << ENVEOF
+          KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
+          BOT_ID=${BOT_ID}
+          PORT=8000
+          DEBUG=false
+          LOG_LEVEL=INFO
+          DATABASE_PATH=/app/data/kt_demo_alarm.db
+          CRAWLING_HOUR=8
+          CRAWLING_MINUTE=30
+          ROUTE_CHECK_HOUR=7
+          ROUTE_CHECK_MINUTE=0
+          ENVEOF
+
+            # Docker 이미지 빌드
+            echo "🔨 Building Docker image..."
+            docker-compose build
+
+            # 기존 컨테이너 중지 및 제거
+            echo "🛑 Stopping old containers..."
+            docker-compose down || true
+
+            # 새 컨테이너 시작
+            echo "🚀 Starting new containers..."
+            docker-compose up -d
+
+            # 헬스체크
+            echo "🏥 Checking health..."
+            sleep 5
+            if curl -f http://localhost:8000/ > /dev/null 2>&1; then
+              echo "✅ Deployment successful!"
+            else
+              echo "❌ Health check failed!"
+              docker-compose logs --tail=50
+              exit 1
+            fi
+
+            # 로그 출력
+            echo "📊 Recent logs:"
+            docker-compose logs --tail=20
+          EOF
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -rf ~/.ssh/id_rsa
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "✅ Deployment completed successfully!"
+          else
+            echo "❌ Deployment failed!"
+          fi
