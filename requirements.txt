@@ -6,4 +6,7 @@ python-dotenv
 apscheduler
 beautifulsoup4
 pdfminer.six
-requests
+
+# Testing dependencies
+pytest
+pytest-asyncio

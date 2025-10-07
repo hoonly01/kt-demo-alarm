@@ -45,6 +45,24 @@ EVENTS_TABLE_SCHEMA = '''
     )
 '''
 
+ALARM_TASKS_TABLE_SCHEMA = '''
+    CREATE TABLE IF NOT EXISTS alarm_tasks (
+        task_id TEXT PRIMARY KEY,
+        alarm_type TEXT NOT NULL,  -- individual, bulk, filtered
+        status TEXT DEFAULT 'pending',  -- pending, processing, completed, failed, partial
+        total_recipients INTEGER DEFAULT 0,
+        successful_sends INTEGER DEFAULT 0,
+        failed_sends INTEGER DEFAULT 0,
+        event_id INTEGER,  -- FK to events table (if applicable)
+        request_data TEXT,  -- JSON string of original request
+        error_messages TEXT,  -- JSON array of error messages
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        FOREIGN KEY (event_id) REFERENCES events (id)
+    )
+'''
+
 # 동적으로 추가할 수 있는 컬럼 정의
 ROUTE_COLUMNS = [
     ('departure_name', 'TEXT'),
