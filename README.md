@@ -98,7 +98,29 @@ app/
 
 ## 🚀 빠른 시작
 
-### 1. 환경 설정
+### Windows에서 시작하기 (권장 - 팀 배포용)
+
+**15분 안에 서버 실행하기!** 👉 [SETUP_WINDOWS.md](./SETUP_WINDOWS.md)
+
+```powershell
+# PowerShell에서 실행
+
+# 1. Docker Desktop 설치 (https://www.docker.com/products/docker-desktop/)
+
+# 2. 프로젝트 클론
+git clone https://github.com/hoonly01/kt-demo-alarm.git
+cd kt-demo-alarm
+
+# 3. 자동 설정 실행 (관리자 권한)
+.\scripts\setup-windows.ps1
+
+# 4. 서버 시작
+.\scripts\start-server.ps1
+```
+
+### macOS/Linux에서 시작하기
+
+#### 1. 환경 설정
 ```bash
 # 저장소 클론
 git clone https://github.com/hoonly01/kt-demo-alarm.git
