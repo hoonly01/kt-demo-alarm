@@ -1,0 +1,66 @@
+name: Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with ruff (if available)
+        run: |
+          pip install ruff || true
+          ruff check . || echo "⚠️  Ruff not configured, skipping..."
+        continue-on-error: true
+
+      - name: Run tests with pytest
+        env:
+          KAKAO_REST_API_KEY: test_key
+          BOT_ID: test_bot_id
+          DATABASE_PATH: test.db
+        run: |
+          if [ -d "tests" ]; then
+            pytest tests/ -v --tb=short
+          else
+            echo "⚠️  No tests directory found, skipping tests..."
+          fi
+
+      - name: Check application starts
+        env:
+          KAKAO_REST_API_KEY: test_key
+          BOT_ID: test_bot_id
+          DATABASE_PATH: test.db
+        run: |
+          echo "🔍 Checking if FastAPI application can start..."
+          timeout 10s python -c "from main import app; print('✅ Application imports successfully')" || exit 1
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## Test Results for Python ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Python Version: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY

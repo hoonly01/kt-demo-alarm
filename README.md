@@ -98,7 +98,29 @@ app/
 
 ## 🚀 빠른 시작
 
-### 1. 환경 설정
+### Windows에서 시작하기 (권장 - 팀 배포용)
+
+**15분 안에 서버 실행하기!** 👉 [SETUP_WINDOWS.md](./SETUP_WINDOWS.md)
+
+```powershell
+# PowerShell에서 실행
+
+# 1. Docker Desktop 설치 (https://www.docker.com/products/docker-desktop/)
+
+# 2. 프로젝트 클론
+git clone https://github.com/hoonly01/kt-demo-alarm.git
+cd kt-demo-alarm
+
+# 3. 자동 설정 실행 (관리자 권한)
+.\scripts\setup-windows.ps1
+
+# 4. 서버 시작
+.\scripts\start-server.ps1
+```
+
+### macOS/Linux에서 시작하기
+
+#### 1. 환경 설정
 ```bash
 # 저장소 클론
 git clone https://github.com/hoonly01/kt-demo-alarm.git
@@ -465,38 +487,101 @@ test: 테스트 추가 또는 업데이트
 
 ## 🚢 배포
 
-### 현재 상태 (main 브랜치)
-**로컬 개발 환경만 지원**
-```bash
-# 서버 수동 실행
-uvicorn main:app --reload --port 8000
+### 프로덕션 배포 아키텍처
 
-# ngrok 터널링 (테스트용)
-ngrok http 8000
+```
+인터넷
+  ↓
+AWS EC2 (Ubuntu 22.04/24.04)
+  ↓
+Nginx (리버스 프록시, SSL/TLS)
+  ↓
+Docker Container
+  - Gunicorn (프로세스 매니저)
+  - Uvicorn Workers × 4 (ASGI)
+  - FastAPI Application
+  ↓
+SQLite (Volume 마운트)
 ```
 
-**현재 배포 프로세스 없음:**
-- ❌ CI/CD 파이프라인 없음
-- ❌ Docker 컨테이너화 없음
-- ❌ 프로덕션 배포 가이드 없음
+### 빠른 배포 (AWS EC2)
 
-### 향후 개선 예정 (PR #22, Issue #23)
+#### 1단계: EC2 초기 설정
+```bash
+# EC2 인스턴스 접속
+ssh -i your-key.pem ubuntu@your-ec2-ip
 
-**PR #22에서 추가 예정:**
-- ✅ Docker 컨테이너화 (Dockerfile, docker-compose.yml)
-- ✅ 프로덕션 준비 설정
-- ✅ 헬스체크 설정
+# 프로젝트 클론
+git clone https://github.com/hoonly01/kt-demo-alarm.git
+cd kt-demo-alarm
 
-**Issue #23에서 계획:**
-- 🔄 CI/CD 파이프라인 (GitHub Actions)
-- 🔄 자동 테스트 및 배포
-- 🔄 환경별 배포 전략 (dev/staging/prod)
+# Docker 환경 구축
+chmod +x scripts/setup-ec2-docker.sh
+./scripts/setup-ec2-docker.sh
+```
 
-**배포 플랫폼 옵션:**
-1. **클라우드**: AWS ECS/Fargate, GCP Cloud Run, Azure Container Instances
-2. **PaaS**: Railway, Fly.io, Render
-3. **서버리스**: AWS Lambda + API Gateway
-4. **VPS**: DigitalOcean, Vultr 등에 Docker 배포
+#### 2단계: 환경변수 설정
+```bash
+# .env 파일 생성 및 편집
+cp .env.production.example .env
+vim .env
+```
+
+#### 3단계: 애플리케이션 시작
+```bash
+# Docker Compose로 시작
+docker compose up -d
+
+# 로그 확인
+docker compose logs -f
+
+# 상태 확인
+curl http://localhost:8000/
+```
+
+#### 4단계: Nginx 설정
+```bash
+# Nginx 설치 및 설정
+chmod +x nginx/setup-nginx.sh
+./nginx/setup-nginx.sh
+```
+
+### GitHub Actions 자동 배포
+
+`main` 브랜치에 푸시하면 자동으로 EC2에 배포됩니다.
+
+**필요한 GitHub Secrets:**
+```
+EC2_HOST=your-ec2-ip
+EC2_USER=ubuntu
+EC2_SSH_KEY=<private-key>
+KAKAO_REST_API_KEY=<your-key>
+BOT_ID=<your-bot-id>
+```
+
+**배포 워크플로우:**
+```
+코드 푸시 → GitHub Actions 트리거
+  → EC2 SSH 접속
+  → Git pull
+  → Docker 이미지 빌드
+  → 컨테이너 재시작
+  → 헬스체크
+  → 완료!
+```
+
+### 상세 배포 가이드
+
+전체 배포 절차는 [DEPLOYMENT.md](./DEPLOYMENT.md)를 참조하세요:
+- EC2 초기 설정
+- SSL/HTTPS 설정
+- 모니터링 및 로그
+- 트러블슈팅
+
+### 관련 이슈
+
+- [#27: AWS EC2 Docker 배포 파이프라인](https://github.com/hoonly01/kt-demo-alarm/issues/27)
+- [#23: 통합 개선 과제 (CI/CD 포함)](https://github.com/hoonly01/kt-demo-alarm/issues/23)
 
 ## 🔧 문제 해결
 
