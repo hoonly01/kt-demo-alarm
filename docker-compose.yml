@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DEBUG=true
+      - DEBUG=false
       - LOG_LEVEL=INFO
       - DATABASE_PATH=/app/data/kt_demo_alarm.db
       - CRAWLING_HOUR=9
