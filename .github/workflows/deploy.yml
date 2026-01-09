@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: kt-demo-alarm-deploy
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -28,7 +32,7 @@ jobs:
         run: |
           pytest tests/ -v || echo "Tests completed"
 
-  build-and-push:
+  build:
     needs: test
     runs-on: ubuntu-latest
     name: Build Docker Image
@@ -36,17 +40,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build Docker image
         run: |
           docker build -t kt-demo-alarm:${{ github.sha }} .
           docker tag kt-demo-alarm:${{ github.sha }} kt-demo-alarm:latest
 
-      - name: Save Docker image
+      - name: Save Docker image (gzipped tar)
         run: |
-          docker save kt-demo-alarm:latest | gzip > kt-demo-alarm-image.tar.gz
+          docker save kt-demo-alarm:latest | gzip -c > kt-demo-alarm-image.tar.gz
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -56,7 +57,7 @@ jobs:
           retention-days: 1
 
   deploy:
-    needs: build-and-push
+    needs: build
     runs-on: ubuntu-latest
     name: Deploy to EC2
     steps:
@@ -67,7 +68,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: docker-image
-    
+
       - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -76,56 +77,97 @@ jobs:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           BOT_ID: ${{ secrets.BOT_ID }}
         run: |
+          set -euo pipefail
+
+          # SSH key
           echo "$EC2_SSH_KEY" > ec2-key.pem
           chmod 600 ec2-key.pem
 
+          # Create .env on runner (so secrets are guaranteed to be present)
           cat > .env <<EOF
-          KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
-          BOT_ID=${BOT_ID}
-          DEBUG=false
-          LOG_LEVEL=INFO
-          DATABASE_PATH=/app/data/kt_demo_alarm.db
-          CRAWLING_HOUR=8
-          CRAWLING_MINUTE=30
-          ROUTE_CHECK_HOUR=7
-          ROUTE_CHECK_MINUTE=0
-          EOF
+KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
+BOT_ID=${BOT_ID}
+DEBUG=false
+LOG_LEVEL=INFO
+DATABASE_PATH=/app/data/kt_demo_alarm.db
+CRAWLING_HOUR=8
+CRAWLING_MINUTE=30
+ROUTE_CHECK_HOUR=7
+ROUTE_CHECK_MINUTE=0
+EOF
 
+          # Upload artifacts/config to EC2
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             kt-demo-alarm-image.tar.gz \
-            ${EC2_USERNAME}@${EC2_HOST}:/tmp/
+            ${EC2_USERNAME}@${EC2_HOST}:/tmp/kt-demo-alarm-image.tar.gz
 
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
+          # Remote deploy
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
             ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
-            ...
+            set -euo pipefail
+            cd /opt/kt-demo-alarm
+
+            # Stop old stack (ignore if not running)
+            docker compose down || true
+
+            # Load new image (uploaded as gzip)
+            gunzip -c /tmp/kt-demo-alarm-image.tar.gz | docker load
+            rm -f /tmp/kt-demo-alarm-image.tar.gz
+
+            # Protect env file
+            chmod 600 .env || true
+
+            # Start without building (important!)
+            docker compose up -d --no-build
+
+            echo "Waiting for service health..."
+            for i in {1..24}; do
+              if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
+                echo "✅ Service is healthy on localhost:8000"
+                break
+              fi
+              echo "Attempt $i: not ready yet..."
+              sleep 5
+            done
+
+            echo "docker compose ps:"
+            docker compose ps
+
+            echo "Recent logs:"
+            docker compose logs --tail=50
+
+            echo "Cleanup old images (keep last 24h):"
+            docker image prune -af --filter "until=24h" || true
           ENDSSH
 
-          rm -f ec2-key.pem
+          # Cleanup runner files
+          rm -f ec2-key.pem .env
 
-      - name: Verify deployment
+      - name: Verify deployment (public)
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
-          echo "Checking application health..."
-          for i in {1..5}; do
-            if curl -f http://${EC2_HOST}:8000/ > /dev/null 2>&1; then
-              echo "✅ Application is running successfully!"
+          set -euo pipefail
+          echo "Checking public health endpoint..."
+          for i in {1..10}; do
+            if curl -fsS http://${EC2_HOST}:8000/ > /dev/null 2>&1; then
+              echo "✅ Application is reachable: http://${EC2_HOST}:8000/"
               exit 0
             fi
-            echo "Attempt $i: Waiting for application..."
+            echo "Attempt $i: waiting..."
             sleep 5
           done
-          echo "❌ Application health check failed"
+          echo "❌ Public health check failed (verify SG inbound 8000 + app binds 0.0.0.0)"
           exit 1
 
       - name: Notify deployment status
         if: always()
         run: |
-          if [ ${{ job.status }} == 'success' ]; then
+          if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Deployment successful!"
           else
             echo "❌ Deployment failed!"
