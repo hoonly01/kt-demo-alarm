@@ -142,11 +142,16 @@ async def initial_setup(request: InitialSetupRequest, db: sqlite3.Connection = D
     result = await UserService.save_user_route_info(request, db)
     
     if result["success"]:
-        return {
+        response = {
             "message": "초기 설정이 완료되었습니다",
             "departure": result["departure"],
             "arrival": result["arrival"]
         }
+        if result.get("marked_bus"):
+            response["marked_bus"] = result["marked_bus"]
+        if result.get("language"):
+            response["language"] = result["language"]
+        return response
     else:
         raise HTTPException(status_code=400, detail=result["error"])
 
