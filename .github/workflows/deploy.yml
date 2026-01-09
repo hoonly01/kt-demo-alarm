@@ -67,7 +67,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: docker-image
-
+    
       - name: Deploy to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -79,57 +79,29 @@ jobs:
           echo "$EC2_SSH_KEY" > ec2-key.pem
           chmod 600 ec2-key.pem
 
+          cat > .env <<EOF
+          KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
+          BOT_ID=${BOT_ID}
+          DEBUG=false
+          LOG_LEVEL=INFO
+          DATABASE_PATH=/app/data/kt_demo_alarm.db
+          CRAWLING_HOUR=8
+          CRAWLING_MINUTE=30
+          ROUTE_CHECK_HOUR=7
+          ROUTE_CHECK_MINUTE=0
+          EOF
+
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             kt-demo-alarm-image.tar.gz \
             ${EC2_USERNAME}@${EC2_HOST}:/tmp/
 
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            docker-compose.yml \
+            docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
             ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
-            set -e
-
-            cd /opt/kt-demo-alarm
-
-            docker compose down || true
-
-            docker load < /tmp/kt-demo-alarm-image.tar.gz
-            rm /tmp/kt-demo-alarm-image.tar.gz
-
-            if [ ! -f .env ]; then
-              echo "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" >> .env
-              echo "BOT_ID=${BOT_ID}" >> .env
-              echo "DEBUG=false" >> .env
-              echo "LOG_LEVEL=INFO" >> .env
-              echo "DATABASE_PATH=/app/data/kt_demo_alarm.db" >> .env
-              echo "CRAWLING_HOUR=8" >> .env
-              echo "CRAWLING_MINUTE=30" >> .env
-              echo "ROUTE_CHECK_HOUR=7" >> .env
-              echo "ROUTE_CHECK_MINUTE=0" >> .env
-              chmod 600 .env
-            fi
-
-            docker compose up -d
-
-            echo "Waiting for application to start..."
-            for i in {1..12}; do
-              if curl -f http://localhost:8000/ > /dev/null 2>&1; then
-                echo "Application is healthy!"
-                break
-              fi
-              echo "Attempt $i: Application not ready yet..."
-              sleep 5
-            done
-
-            echo "Recent logs:"
-            docker compose logs --tail=20
-
-            echo "Cleaning up old Docker images..."
-            docker image prune -af --filter "until=24h" || true
-
-            echo "Deployment completed successfully!"
+            ...
           ENDSSH
 
           rm -f ec2-key.pem

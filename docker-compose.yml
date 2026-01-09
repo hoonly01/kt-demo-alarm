@@ -2,9 +2,12 @@ version: '3.8'
 
 services:
   kt-demo-alarm:
-    build: .
+    image: kt-demo-alarm:latest
+    pull_policy: never   # (중요) 로컬에 load된 이미지 사용 강제
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - DEBUG=false
       - LOG_LEVEL=INFO
@@ -13,12 +16,9 @@ services:
       - CRAWLING_MINUTE=0
       - ROUTE_CHECK_HOUR=18
       - ROUTE_CHECK_MINUTE=30
-      # Kakao API credentials (set these in .env file or environment)
-      - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
-      - BOT_ID=${BOT_ID:-}
     volumes:
-      - ./data:/app/data  # Persist database
-      - ./logs:/app/logs  # Persist logs
+      - ./data:/app/data
+      - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
