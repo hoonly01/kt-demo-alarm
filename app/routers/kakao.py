@@ -63,8 +63,9 @@ async def kakao_channel_webhook(request: Request):
     
     # 이벤트 타입 확인
     event = body.get('event', '')
-    user_id = body.get('user_id', '')
-    
+    # 카카오 웹훅은 'id' 필드로 사용자 ID를 전달함 ('user_id' 아님)
+    user_id = body.get('id', '') or body.get('user_id', '')
+
     if not user_id:
         logger.warning("사용자 ID가 없는 웹훅 요청")
         return {"status": "error", "message": "사용자 ID 필요"}
@@ -75,17 +76,18 @@ async def kakao_channel_webhook(request: Request):
     
     try:
         with get_db_connection() as db:
-            if event == 'chat_room':
-                # 채팅방 입장 (채널 추가)
+            if event == 'added' or event == 'chat_room':
+                # 채널 추가
                 logger.info(f"✅ 채널 추가: {user_id}")
                 UserService.save_or_update_user(user_id, db, "채널 추가")
                 UserService.update_user_status(user_id, db, active=True)
-                
-            elif event == 'leave':
-                # 채팅방 나가기 (채널 차단)
+
+            elif event == 'blocked' or event == 'leave':
+                # 채널 차단
                 logger.info(f"❌ 채널 차단: {user_id}")
+                UserService.save_or_update_user(user_id, db, "채널 차단")
                 UserService.update_user_status(user_id, db, active=False)
-                
+
             else:
                 logger.warning(f"알 수 없는 이벤트: {event}")
     

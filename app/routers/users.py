@@ -135,11 +135,30 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
 
 
 @router.post("/initial-setup")
-async def initial_setup(request: InitialSetupRequest, db: sqlite3.Connection = Depends(get_db)):
+async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db)):
     """
-    사용자 초기 설정 (테스트용)
+    사용자 초기 설정 (카카오톡 형식과 일반 JSON 형식 모두 지원)
     """
-    result = await UserService.save_user_route_info(request, db)
+    logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
+
+    # 카카오톡 형식인지 확인
+    if 'userRequest' in request:
+        # 카카오톡 skill block 형식
+        user_id = request['userRequest']['user']['id']
+        params = request.get('action', {}).get('params', {})
+
+        setup_request = InitialSetupRequest(
+            bot_user_key=user_id,
+            departure=params.get('departure'),
+            arrival=params.get('arrival'),
+            marked_bus=params.get('marked_bus'),
+            language=params.get('language')
+        )
+    else:
+        # 일반 JSON 형식
+        setup_request = InitialSetupRequest(**request)
+
+    result = await UserService.save_user_route_info(setup_request, db)
     
     if result["success"]:
         response = {
