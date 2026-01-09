@@ -85,16 +85,16 @@ jobs:
 
           # Create .env on runner (so secrets are guaranteed to be present)
           cat > .env <<EOF
-KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
-BOT_ID=${BOT_ID}
-DEBUG=false
-LOG_LEVEL=INFO
-DATABASE_PATH=/app/data/kt_demo_alarm.db
-CRAWLING_HOUR=8
-CRAWLING_MINUTE=30
-ROUTE_CHECK_HOUR=7
-ROUTE_CHECK_MINUTE=0
-EOF
+          KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
+          BOT_ID=${BOT_ID}
+          DEBUG=false
+          LOG_LEVEL=INFO
+          DATABASE_PATH=/app/data/kt_demo_alarm.db
+          CRAWLING_HOUR=8
+          CRAWLING_MINUTE=30
+          ROUTE_CHECK_HOUR=7
+          ROUTE_CHECK_MINUTE=0
+          EOF
 
           # Upload artifacts/config to EC2
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
