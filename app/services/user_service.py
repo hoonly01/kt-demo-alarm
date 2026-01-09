@@ -100,19 +100,23 @@ class UserService:
             if not arrival_info:
                 return {"success": False, "error": "도착지를 찾을 수 없습니다"}
             
-            # 사용자 경로 정보 업데이트
+            # 사용자 경로 정보 및 개인화 설정 업데이트
             cursor.execute('''
-                UPDATE users SET 
+                UPDATE users SET
                     departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
                     arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
-                    route_updated_at = ?
+                    route_updated_at = ?,
+                    marked_bus = ?,
+                    language = ?
                 WHERE bot_user_key = ?
             ''', (
-                departure_info["name"], departure_info["address"], 
+                departure_info["name"], departure_info["address"],
                 departure_info["x"], departure_info["y"],
-                arrival_info["name"], arrival_info["address"], 
+                arrival_info["name"], arrival_info["address"],
                 arrival_info["x"], arrival_info["y"],
                 datetime.now(),
+                user_setup.marked_bus,
+                user_setup.language,
                 user_setup.bot_user_key
             ))
             
@@ -121,11 +125,17 @@ class UserService:
             logger.info(f"경로 정보 저장 완료 - 사용자: {user_setup.bot_user_key}")
             logger.info(f"출발지: {departure_info['name']} ({departure_info['x']}, {departure_info['y']})")
             logger.info(f"도착지: {arrival_info['name']} ({arrival_info['x']}, {arrival_info['y']})")
-            
+            if user_setup.marked_bus:
+                logger.info(f"즐겨찾는 버스: {user_setup.marked_bus}")
+            if user_setup.language:
+                logger.info(f"언어 설정: {user_setup.language}")
+
             return {
                 "success": True,
                 "departure": departure_info,
-                "arrival": arrival_info
+                "arrival": arrival_info,
+                "marked_bus": user_setup.marked_bus,
+                "language": user_setup.language
             }
             
         except Exception as e:
