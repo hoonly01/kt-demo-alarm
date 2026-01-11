@@ -137,40 +137,112 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
 @router.post("/initial-setup")
 async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db)):
     """
-    사용자 초기 설정 (카카오톡 형식과 일반 JSON 형식 모두 지원)
+    사용자 초기 설정 (Skill Block 전용)
+    - Skill Block에서 경로 등록 시 호출
+    - plusfriendUserKey를 primary identifier로 사용
     """
     logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
 
-    # 카카오톡 형식인지 확인
-    if 'userRequest' in request:
-        # 카카오톡 skill block 형식
-        user_id = request['userRequest']['user']['id']
-        params = request.get('action', {}).get('params', {})
+    # Skill Block 형식 파싱
+    user_request = request.get('userRequest', {})
+    user_info = user_request.get('user', {})
+    action = request.get('action', {})
+    params = action.get('params', {})
 
-        setup_request = InitialSetupRequest(
-            bot_user_key=user_id,
-            departure=params.get('departure'),
-            arrival=params.get('arrival'),
-            marked_bus=params.get('marked_bus'),
-            language=params.get('language')
+    # ID 추출
+    bot_user_key = user_info.get('id')
+    properties = user_info.get('properties', {})
+    plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
+
+    # 파라미터 추출
+    departure = params.get('departure')
+    arrival = params.get('arrival')
+    marked_bus = params.get('marked_bus')
+    language = params.get('language')
+
+    logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
+    logger.info(f"📍 경로: {departure} → {arrival}, 버스={marked_bus}, 언어={language}")
+
+    # InitialSetupRequest 생성 (plusfriend_key를 bot_user_key로 사용!)
+    setup_request = InitialSetupRequest(
+        bot_user_key=plusfriend_key,  # ← plusfriend_key를 primary key로 사용!
+        departure=departure,
+        arrival=arrival,
+        marked_bus=marked_bus,
+        language=language
+    )
+
+    # 사용자 정보 저장 (3개 ID 모두 저장)
+    from app.database.connection import get_db_connection
+    from datetime import datetime
+
+    with get_db_connection() as db_conn:
+        cursor = db_conn.cursor()
+
+        # plusfriend_key로 조회 (primary identifier)
+        cursor.execute(
+            "SELECT id, open_id FROM users WHERE plusfriend_user_key = ?",
+            (plusfriend_key,)
         )
-    else:
-        # 일반 JSON 형식
-        setup_request = InitialSetupRequest(**request)
+        existing = cursor.fetchone()
 
+        if existing:
+            # 기존 사용자 업데이트
+            logger.info(f"✅ 기존 사용자 발견: plusfriend={plusfriend_key}")
+            cursor.execute("""
+                UPDATE users
+                SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1
+                WHERE plusfriend_user_key = ?
+            """, (bot_user_key, datetime.now(), plusfriend_key))
+        else:
+            # 웹훅 사용자 찾기 시도 (open_id만 있는 경우)
+            cursor.execute("""
+                SELECT id, open_id FROM users
+                WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL
+                LIMIT 1
+            """)
+            orphan = cursor.fetchone()
+
+            if orphan:
+                # 웹훅 사용자 연결
+                logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan[1]} → plusfriend={plusfriend_key}")
+                cursor.execute("""
+                    UPDATE users
+                    SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?
+                    WHERE id = ?
+                """, (bot_user_key, plusfriend_key, datetime.now(), orphan[0]))
+            else:
+                # 완전 신규 사용자
+                logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
+                cursor.execute("""
+                    INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
+                    VALUES (?, ?, ?, ?, 1, 1)
+                """, (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
+
+        db_conn.commit()
+
+    # 경로 정보 저장
     result = await UserService.save_user_route_info(setup_request, db)
-    
+
     if result["success"]:
-        response = {
-            "message": "초기 설정이 완료되었습니다",
-            "departure": result["departure"],
-            "arrival": result["arrival"]
+        # Skill 응답 형식 (카카오톡 말풍선)
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": (
+                                f"📍 출발지: {departure}\n"
+                                f"📍 도착지: {arrival}\n\n"
+                                "✅ 경로 등록이 완료되었습니다!\n"
+                                "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다."
+                            )
+                        }
+                    }
+                ]
+            }
         }
-        if result.get("marked_bus"):
-            response["marked_bus"] = result["marked_bus"]
-        if result.get("language"):
-            response["language"] = result["language"]
-        return response
     else:
         raise HTTPException(status_code=400, detail=result["error"])
 
