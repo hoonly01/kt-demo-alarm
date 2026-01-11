@@ -138,24 +138,24 @@ class EventService:
     ) -> RouteEventCheck:
         """
         사용자 경로 기반 집회 확인
-        
+
         Args:
-            user_id: 사용자 ID
+            user_id: 사용자 ID (plusfriend_user_key 권장)
             auto_notify: 자동 알림 여부
             db: 데이터베이스 연결
-            
+
         Returns:
             RouteEventCheck: 경로 확인 결과
         """
         try:
             cursor = db.cursor()
-            
-            # 사용자 경로 정보 조회
+
+            # 사용자 경로 정보 조회 (plusfriend_user_key 우선 조회)
             cursor.execute('''
                 SELECT departure_name, departure_address, departure_x, departure_y,
                        arrival_name, arrival_address, arrival_x, arrival_y
-                FROM users WHERE bot_user_key = ?
-            ''', (user_id,))
+                FROM users WHERE plusfriend_user_key = ? OR bot_user_key = ?
+            ''', (user_id, user_id))
             
             user_row = cursor.fetchone()
             if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
@@ -253,61 +253,92 @@ class EventService:
     async def scheduled_route_check() -> Dict[str, Any]:
         """
         매일 아침 자동 실행되는 경로 기반 집회 확인 함수
-        
+        - plusfriend_user_key 기반 조회
+        - 조건에 맞는 사용자에게 일괄 전송
+
         Returns:
             Dict: 처리 결과
         """
         logger.info("=== 정기 집회 확인 시작 ===")
-        
+
         try:
             # 데이터베이스 연결
             db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-            
-            # 활성 사용자 조회
+
+            # 활성 사용자 조회 (plusfriend_user_key 필수!)
             cursor = db.cursor()
             cursor.execute('''
-                SELECT bot_user_key FROM users 
-                WHERE active = 1 
-                AND departure_x IS NOT NULL 
-                AND departure_y IS NOT NULL
-                AND arrival_x IS NOT NULL 
-                AND arrival_y IS NOT NULL
+                SELECT plusfriend_user_key, departure_name, arrival_name
+                FROM users
+                WHERE active = 1
+                  AND plusfriend_user_key IS NOT NULL
+                  AND departure_x IS NOT NULL
+                  AND departure_y IS NOT NULL
+                  AND arrival_x IS NOT NULL
+                  AND arrival_y IS NOT NULL
             ''')
-            
+
             users = cursor.fetchall()
             total_notifications = 0
-            
+
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
-            
-            # 모든 사용자에 대한 작업을 병렬로 실행 (성능 개선)
-            tasks = []
+
+            # 조건별로 그룹화 (예: 출발지가 같은 사용자끼리)
+            grouped_users = {}
             for user_row in users:
-                user_id = user_row[0]
-                tasks.append(EventService.check_route_events(user_id, auto_notify=True, db=db))
-            
-            # 모든 작업을 병렬로 실행
-            results_from_gather = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # 결과 처리
-            for i, result in enumerate(results_from_gather):
-                user_id = users[i][0]
-                if isinstance(result, Exception):
-                    logger.error(f"❌ 사용자 {user_id} 처리 실패: {str(result)}")
-                else:
-                    if result.events_found:
-                        total_notifications += 1
-                        logger.info(f"✅ {user_id}: {len(result.events_found)}개 집회 감지 및 알림 전송")
-            
+                plusfriend_key, departure, arrival = user_row
+
+                # 경로 확인
+                result = await EventService.check_route_events(plusfriend_key, auto_notify=False, db=db)
+
+                if result.events_found:
+                    # 조건별로 그룹화 (출발지 기준)
+                    if departure not in grouped_users:
+                        grouped_users[departure] = []
+                    grouped_users[departure].append({
+                        "plusfriend_key": plusfriend_key,
+                        "events": [
+                            {
+                                "id": event.id,
+                                "title": event.title,
+                                "location": event.location_name,
+                                "latitude": event.latitude,
+                                "longitude": event.longitude,
+                                "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
+                                "category": event.category,
+                                "severity_level": event.severity_level
+                            }
+                            for event in result.events_found
+                        ]
+                    })
+
+            # Event API로 일괄 전송
+            from app.services.notification_service import NotificationService
+            for departure, user_group in grouped_users.items():
+                user_ids = [u["plusfriend_key"] for u in user_group]
+                events_data = user_group[0]["events"]  # 공통 이벤트
+
+                logger.info(f"📢 출발지 '{departure}' 사용자 {len(user_ids)}명에게 알림 전송")
+
+                # Event API 호출 (type=plusfriendUserKey)
+                await NotificationService.send_bulk_alert(
+                    user_ids=user_ids,
+                    events_data=events_data,
+                    id_type="plusfriendUserKey"  # ← 타입 명시!
+                )
+
+                total_notifications += len(user_ids)
+
             db.close()
-            
+
             logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
-            
+
             return {
                 "success": True,
                 "total_users": len(users),
                 "notifications_sent": total_notifications
             }
-            
+
         except Exception as e:
             logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
             return {
