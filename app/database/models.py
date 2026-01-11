@@ -66,7 +66,7 @@ ALARM_TASKS_TABLE_SCHEMA = '''
 # 동적으로 추가할 수 있는 컬럼 정의
 ROUTE_COLUMNS = [
     ('departure_name', 'TEXT'),
-    ('departure_address', 'TEXT'), 
+    ('departure_address', 'TEXT'),
     ('departure_x', 'REAL'),
     ('departure_y', 'REAL'),
     ('arrival_name', 'TEXT'),
@@ -75,5 +75,7 @@ ROUTE_COLUMNS = [
     ('arrival_y', 'REAL'),
     ('route_updated_at', 'DATETIME'),
     ('marked_bus', 'TEXT'),
-    ('language', 'TEXT')
+    ('language', 'TEXT'),
+    ('open_id', 'TEXT'),  # 웹훅에서만 제공
+    ('plusfriend_user_key', 'TEXT')  # Skill Block에서 제공 (실질적 primary key)
 ]
