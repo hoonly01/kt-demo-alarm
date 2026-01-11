@@ -79,28 +79,41 @@ class UserService:
     async def save_user_route_info(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자의 출발지/도착지 정보를 저장
-        
+        - bot_user_key 파라미터에 plusfriend_user_key 값이 전달됨
+
         Args:
-            user_setup: 사용자 설정 요청 데이터
+            user_setup: 사용자 설정 요청 데이터 (bot_user_key에 plusfriend_user_key 포함)
             db: 데이터베이스 연결
-            
+
         Returns:
             Dict: 처리 결과
         """
         try:
             cursor = db.cursor()
-            
+
             # 출발지 정보 조회
             departure_info = await get_location_info(user_setup.departure)
             if not departure_info:
                 return {"success": False, "error": "출발지를 찾을 수 없습니다"}
-            
+
             # 도착지 정보 조회
             arrival_info = await get_location_info(user_setup.arrival)
             if not arrival_info:
                 return {"success": False, "error": "도착지를 찾을 수 없습니다"}
-            
-            # 사용자 경로 정보 및 개인화 설정 업데이트
+
+            # 사용자가 DB에 있는지 확인 (plusfriend_user_key로 조회)
+            cursor.execute('SELECT id FROM users WHERE plusfriend_user_key = ?', (user_setup.bot_user_key,))
+            user_exists = cursor.fetchone()
+
+            if not user_exists:
+                # 사용자가 없으면 먼저 생성 (plusfriend_user_key로 저장)
+                cursor.execute('''
+                    INSERT INTO users (plusfriend_user_key, first_message_at, last_message_at, message_count, active)
+                    VALUES (?, ?, ?, 1, 1)
+                ''', (user_setup.bot_user_key, datetime.now(), datetime.now()))
+                logger.info(f"새 사용자 생성 (plusfriend_key): {user_setup.bot_user_key}")
+
+            # 사용자 경로 정보 및 개인화 설정 업데이트 (plusfriend_user_key 기준)
             cursor.execute('''
                 UPDATE users SET
                     departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
@@ -108,7 +121,7 @@ class UserService:
                     route_updated_at = ?,
                     marked_bus = ?,
                     language = ?
-                WHERE bot_user_key = ?
+                WHERE plusfriend_user_key = ?
             ''', (
                 departure_info["name"], departure_info["address"],
                 departure_info["x"], departure_info["y"],
@@ -117,9 +130,9 @@ class UserService:
                 datetime.now(),
                 user_setup.marked_bus,
                 user_setup.language,
-                user_setup.bot_user_key
+                user_setup.bot_user_key  # ← 이제 plusfriend_user_key 값임!
             ))
-            
+
             db.commit()
             
             logger.info(f"경로 정보 저장 완료 - 사용자: {user_setup.bot_user_key}")
