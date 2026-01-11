@@ -18,19 +18,20 @@ class NotificationService:
     """알림 전송 비즈니스 로직"""
 
     @staticmethod
-    async def send_individual_alarm(alarm_request: AlarmRequest) -> Dict[str, Any]:
+    async def send_individual_alarm(alarm_request: AlarmRequest, id_type: str = "plusfriendUserKey") -> Dict[str, Any]:
         """
         개별 사용자에게 알림 전송
-        
+
         Args:
             alarm_request: 알림 요청 데이터
-            
+            id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
+
         Returns:
             Dict: 전송 결과
         """
         if not BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
-        
+
         try:
             event_api_request = EventAPIRequest(
                 botId=BOT_ID,
@@ -39,7 +40,7 @@ class NotificationService:
                     data=alarm_request.data
                 ),
                 user=EventUser(
-                    type="botUserKey",
+                    type=id_type,  # ← plusfriendUserKey 사용 (기본값)
                     id=alarm_request.user_id
                 )
             )
@@ -65,34 +66,36 @@ class NotificationService:
 
     @staticmethod
     async def send_bulk_alarm(
-        user_ids: List[str], 
-        event_name: str, 
+        user_ids: List[str],
+        event_name: str,
         data: Dict[str, Any],
-        batch_size: int = 100
+        batch_size: int = 100,
+        id_type: str = "plusfriendUserKey"
     ) -> Dict[str, Any]:
         """
         대량 사용자에게 배치 알림 전송
-        
+
         Args:
             user_ids: 사용자 ID 목록
             event_name: 이벤트 이름
             data: 전송 데이터
             batch_size: 배치 크기
-            
+            id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
+
         Returns:
             Dict: 전송 결과
         """
         if not BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
-        
+
         try:
             success_count = 0
             fail_count = 0
-            
+
             # 배치 단위로 병렬 처리 (성능 최적화)
             for i in range(0, len(user_ids), batch_size):
                 batch_users = user_ids[i:i + batch_size]
-                
+
                 # 배치 내 모든 사용자에게 병렬로 알림 전송
                 async def send_to_user(user_id: str) -> Dict[str, Any]:
                     try:
@@ -101,7 +104,7 @@ class NotificationService:
                             event_name=event_name,
                             data=data
                         )
-                        return await NotificationService.send_individual_alarm(alarm_request)
+                        return await NotificationService.send_individual_alarm(alarm_request, id_type=id_type)
                     except Exception as e:
                         logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
                         return {"success": False, "error": str(e)}
@@ -140,34 +143,35 @@ class NotificationService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    async def send_route_alert(user_id: str, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def send_route_alert(user_id: str, events: List[Dict[str, Any]], id_type: str = "plusfriendUserKey") -> Dict[str, Any]:
         """
         경로 기반 집회 알림 전송
-        
+
         Args:
-            user_id: 사용자 ID
+            user_id: 사용자 ID (plusfriend_user_key 권장)
             events: 감지된 집회 목록
-            
+            id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
+
         Returns:
             Dict: 전송 결과
         """
         if not events:
             return {"success": False, "error": "전송할 집회 정보가 없습니다"}
-        
+
         # 집회 정보를 알림 메시지로 구성
         event_messages = []
         for event in events:
             severity_emoji = "🔴" if event.get("severity_level", 1) >= 3 else "🟡" if event.get("severity_level", 1) >= 2 else "🟢"
-            
+
             event_messages.append(
                 f"{severity_emoji} {event['title']}\n"
                 f"📍 {event['location']}\n"
                 f"⏰ {event['start_date']}\n"
                 f"🏷️ {event.get('category', '일반')}"
             )
-        
+
         message_text = f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
-        
+
         # 알림 전송
         alarm_request = AlarmRequest(
             user_id=user_id,
@@ -178,8 +182,53 @@ class NotificationService:
                 "events": events
             }
         )
-        
-        return await NotificationService.send_individual_alarm(alarm_request)
+
+        return await NotificationService.send_individual_alarm(alarm_request, id_type=id_type)
+
+    @staticmethod
+    async def send_bulk_alert(
+        user_ids: List[str],
+        events_data: List[Dict[str, Any]],
+        id_type: str = "plusfriendUserKey"
+    ) -> Dict[str, Any]:
+        """
+        조건부 일괄 알림 전송 (Event API 사용)
+
+        Args:
+            user_ids: 사용자 ID 목록 (plusfriend_user_key 권장)
+            events_data: 집회 정보
+            id_type: 사용자 ID 타입
+
+        Returns:
+            Dict: 전송 결과
+        """
+        if not user_ids:
+            return {"success": False, "error": "수신자가 없습니다"}
+
+        # 집회 정보를 알림 메시지로 구성
+        event_messages = []
+        for event in events_data:
+            severity_emoji = "🔴" if event.get("severity_level", 1) >= 3 else "🟡" if event.get("severity_level", 1) >= 2 else "🟢"
+            event_messages.append(
+                f"{severity_emoji} {event['title']}\n"
+                f"📍 {event['location']}\n"
+                f"⏰ {event['start_date']}\n"
+                f"🏷️ {event.get('category', '일반')}"
+            )
+
+        message_text = f"⚠️ 경로상에 {len(events_data)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+
+        # Event API로 일괄 전송
+        return await NotificationService.send_bulk_alarm(
+            user_ids=user_ids,
+            event_name="route_rally_alert",
+            data={
+                "message": message_text,
+                "events_count": len(events_data),
+                "events": events_data
+            },
+            id_type=id_type
+        )
 
     @staticmethod
     def validate_event_data(event_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
