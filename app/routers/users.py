@@ -90,16 +90,22 @@ async def update_user_preferences(
 async def save_user_info(request: dict, background_tasks: BackgroundTasks):
     """
     카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
+    (DEPRECATED: /users/initial-setup 사용 권장)
     """
     logger.info(f"🔍 save_user_info 요청 body: {request}")
-    
-    # 카카오톡에서 온 요청인지 확인
+
+    # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
     if 'userRequest' in request:
-        user_id = request['userRequest']['user']['id']
+        user_info = request['userRequest']['user']
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+        # plusfriend_key 우선 사용
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
     else:  # 로컬 테스트용
         user_id = request.get('userId', 'test-user')
-    
-    # botUserKey를 받은 경우 사용자 생성/업데이트
+
+    # 사용자 생성/업데이트
     if 'userRequest' in request:
         from app.services.user_service import UserService
         from app.database.connection import get_db_connection
