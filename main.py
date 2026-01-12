@@ -14,7 +14,7 @@ from app.database.connection import init_db
 from app.utils.scheduler_utils import (
     scheduler, setup_scheduler, start_scheduler, shutdown_scheduler
 )
-from app.routers import users, events, alarms, kakao
+from app.routers import users, events, alarms, kakao, kakao_skills
 from app.routers import scheduler as scheduler_router
 from app.config.settings import settings, setup_logging
 from app.services.crawling_service import CrawlingService
@@ -82,6 +82,7 @@ app.include_router(users.router)
 app.include_router(events.router)
 app.include_router(alarms.router)
 app.include_router(kakao.router)
+app.include_router(kakao_skills.router)  # 카카오톡 Skill Block (prefix 없음)
 app.include_router(scheduler_router.router)
 
 
