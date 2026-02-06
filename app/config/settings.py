@@ -13,6 +13,10 @@ class Settings:
     # 카카오 API 설정
     KAKAO_REST_API_KEY: str = os.getenv("KAKAO_REST_API_KEY", "")
     BOT_ID: str = os.getenv("BOT_ID", "")
+
+    # Gemini API 설정 (버스 통제 알림용)
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     
     # 데이터베이스 설정
     DATABASE_PATH: str = os.getenv("DATABASE_PATH", "kt_demo_alarm.db")

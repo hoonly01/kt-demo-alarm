@@ -63,6 +63,13 @@ app/
 - **중복 제거**: 스마트 데이터 중복 방지
 - **완전한 CRUD**: 집회 정보 생성/조회/수정/삭제
 
+### 🚌 버스 통제 알림 (New!)
+- **실시간 데이터 수집**: TOPIS 버스 운행 변경 공지사항 자동 크롤링
+- **AI 기반 분석**: Gemini API를 활용한 비정형 데이터(텍스트, 첨부파일) 구조화
+- **시각화**: 우회 경로 및 통제 정보를 시각적인 이미지로 생성하여 제공
+- **카카오톡 챗봇**: "100번 확인해줘", "100번 이미지" 등의 명령어로 즉시 조회 가능
+
+
 ### 👥 사용자 관리
 - **자동 등록**: 카카오톡 메시지 시 자동 사용자 생성
 - **경로 설정**: 카카오 지도 API로 출발지/도착지 좌표 변환
@@ -89,7 +96,11 @@ app/
 - **카카오톡 Event API**: 실시간 알림 전송
 - **카카오 지도 API**: 장소 검색 및 좌표 변환
 - **카카오 Mobility API**: 보행 경로 계산
+- **카카오 Mobility API**: 보행 경로 계산
 - **SMPA 크롤링**: 집회 데이터 자동 수집
+- **TOPIS 크롤링**: 버스 통제 정보 수집
+- **Google Gemini API**: 공지사항 문서 분석 및 정보 추출
+
 
 ### Development
 - **Python 3.13+**: 최신 런타임
@@ -130,8 +141,12 @@ DEBUG=true
 
 # 데이터베이스 설정 (SQLite 파일은 자동 생성됨)
 DATABASE_PATH=users.db
+
+# Gemini API 설정 (버스 통제 알림용)
+GOOGLE_API_KEY=your_gemini_api_key_here
 EOF
 ```
+
 
 ### 3. 서버 실행
 ```bash
@@ -174,7 +189,15 @@ ngrok http 8000
 - `POST /scheduler/crawl-events` - 집회 데이터 크롤링 및 동기화
 - `POST /scheduler/check-routes` - 모든 사용자 경로 일괄 확인
 - `POST /scheduler/manual-test` - 수동 스케줄 테스트
+- `POST /scheduler/manual-test` - 수동 스케줄 테스트
 - `GET /scheduler/status` - 스케줄러 상태 확인
+
+### 🚌 버스 라우터 (`/bus`)
+- `POST /bus/webhook/bus_info` - 버스 정보 조회 (카카오 챗봇)
+- `POST /bus/webhook/route_check` - 노선 통제 확인 (콜백 지원)
+- `GET /bus/notices` - 공지사항 목록 조회
+- `GET /bus/routes/{route}/controls` - 노선별 통제 정보 상세 조회
+
 
 ## 💾 데이터베이스 스키마
 
@@ -389,14 +412,21 @@ kt-demo-alarm/
 │   │   ├── events.py            # 집회 관리 라우터
 │   │   ├── kakao.py             # 카카오톡 라우터
 │   │   ├── scheduler.py         # 스케줄러 라우터
-│   │   └── users.py             # 사용자 관리 라우터
+│   │   ├── users.py             # 사용자 관리 라우터
+│   │   └── bus_notice.py        # [NEW] 버스 통제 알림 라우터
 │   ├── services/                # 비즈니스 로직
 │   │   ├── __init__.py
 │   │   ├── crawling_service.py  # 집회 데이터 크롤링 서비스
 │   │   ├── event_service.py     # 집회 관리 서비스
 │   │   ├── notification_service.py  # 알림 전송 서비스
 │   │   ├── user_service.py      # 사용자 관리 서비스
-│   │   └── alarm_status_service.py  # 알림 상태 추적 (PR #22)
+│   │   ├── alarm_status_service.py  # 알림 상태 추적 (PR #22)
+│   │   ├── bus_notice_service.py # [NEW] 버스 통제 알림 서비스
+│   │   └── bus_logic/           # [NEW] 버스 통제 핵심 로직
+│   │       ├── restricted_bus.py    # TOPIS 크롤러 및 Gemini 연동
+│   │       ├── position_checker.py  # 위치 기반 조회 로직
+│   │       ├── hwpx2pdf.py          # HWP 변환 유틸리티
+│   │       └── extract_image.py     # 이미지 추출 유틸리티
 │   └── utils/                   # 유틸리티 함수들
 │       ├── __init__.py
 │       ├── geo_utils.py         # 지리 계산 유틸리티
@@ -407,9 +437,11 @@ kt-demo-alarm/
 │   ├── conftest.py
 │   ├── test_database.py
 │   ├── test_api_basic.py
-│   └── test_alarm_status_service.py
+│   ├── test_alarm_status_service.py
+│   └── test_bus_notice.py       # [NEW] 버스 통제 알림 테스트
 │
 ├── Dockerfile                   # Docker 설정 (PR #22)
+
 ├── docker-compose.yml           # Docker Compose (PR #22)
 └── pytest.ini                   # pytest 설정 (PR #22)
 ```
