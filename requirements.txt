@@ -10,3 +10,8 @@ pdfminer.six
 # Testing dependencies
 pytest
 pytest-asyncio
+google-generativeai
+pymupdf
+beautifulsoup4
+aiohttp
+pytz

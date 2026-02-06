@@ -7,6 +7,7 @@ Router-Service-Repository 패턴을 적용한 깔끔한 아키텍처
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import logging
 
 # 분리된 모듈들 import
@@ -16,8 +17,10 @@ from app.utils.scheduler_utils import (
 )
 from app.routers import users, events, alarms, kakao, kakao_skills
 from app.routers import scheduler as scheduler_router
+from app.routers.bus_notice import router as bus_router
 from app.config.settings import settings, setup_logging
 from app.services.crawling_service import CrawlingService
+from app.services.bus_notice_service import BusNoticeService
 
 from app.models.responses import HealthCheckResponse
 
@@ -44,6 +47,10 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     
     logger.info(f"스케줄러가 시작되었습니다: {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로체크")
+    
+    # 버스 알림 서비스 초기화
+    await BusNoticeService.initialize()
+
     
     yield
     
@@ -77,6 +84,9 @@ app = FastAPI(
     }
 )
 
+# 정적 파일 마운트 (버스 노선 이미지 등)
+app.mount("/static", StaticFiles(directory="topis_attachments"), name="static")
+
 # 라우터 등록
 app.include_router(users.router)
 app.include_router(events.router)
@@ -84,6 +94,7 @@ app.include_router(alarms.router)
 app.include_router(kakao.router)
 app.include_router(kakao_skills.router)  # 카카오톡 Skill Block (prefix 없음)
 app.include_router(scheduler_router.router)
+app.include_router(bus_router)
 
 
 @app.get("/", response_model=HealthCheckResponse, tags=["Health"])
