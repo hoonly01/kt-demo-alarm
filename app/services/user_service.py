@@ -51,7 +51,6 @@ class UserService:
         except Exception as e:
             logger.error(f"사용자 저장/업데이트 실패: {str(e)}")
             raise
-            raise
 
     @staticmethod
     def sync_kakao_user(bot_user_key: str, plusfriend_key: Optional[str], db: sqlite3.Connection) -> None:
@@ -94,6 +93,7 @@ class UserService:
                 cursor.execute("""
                     SELECT id, open_id FROM users
                     WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL
+                    ORDER BY first_message_at ASC, id ASC
                     LIMIT 1
                 """)
                 orphan = cursor.fetchone()
@@ -168,15 +168,19 @@ class UserService:
                     departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
                     arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
                     route_updated_at = ?
-                WHERE plusfriend_user_key = ? OR bot_user_key = ?
+                WHERE plusfriend_user_key = ?
             ''', (
                 departure_info["name"], departure_info["address"],
                 departure_info["x"], departure_info["y"],
                 arrival_info["name"], arrival_info["address"],
                 arrival_info["x"], arrival_info["y"],
                 datetime.now(),
-                user_id, user_id # plusfriend_key 또는 bot_user_key로 조회
+                user_id
             ))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
             if cursor.rowcount == 0:
                 logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
@@ -249,10 +253,15 @@ class UserService:
                 update_query += ", language=?"
                 params.append(user_setup.language)
                 
-            update_query += " WHERE plusfriend_user_key = ? OR bot_user_key = ?"
-            params.extend([user_setup.bot_user_key, user_setup.bot_user_key])
+            update_query += " WHERE plusfriend_user_key = ?"
+            params.append(user_setup.bot_user_key)
             
             cursor.execute(update_query, params)
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"프로필 업데이트 대상 사용자를 찾을 수 없음: {user_setup.bot_user_key}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
             db.commit()
 
             logger.info(f"프로필(Full Setup) 설정 완료 - 사용자: {user_setup.bot_user_key}")

@@ -98,6 +98,10 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
     """
     logger.info(f"🔍 save_user_info 요청 body: {request}")
 
+    # 기본값 초기화
+    bot_user_key = None
+    plusfriend_key = None
+
     # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
     if 'userRequest' in request:
         user_info = request['userRequest']['user']
@@ -108,6 +112,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
         user_id = plusfriend_key if plusfriend_key else bot_user_key
     else:  # 로컬 테스트용
         user_id = request.get('userId', 'test-user')
+        bot_user_key = "test_user_key" # 테스트용 기본값
 
     # 사용자 생성/업데이트
     if 'userRequest' in request:

@@ -5,7 +5,7 @@ services:
     image: kt-demo-alarm:latest
     pull_policy: never # (중요) 로컬에 load된 이미지 사용 강제
     ports:
-      - "${PORT:-8000}:8000"
+      - "8000:8000"
     env_file:
       - .env
     environment:

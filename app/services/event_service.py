@@ -366,7 +366,8 @@ class EventService:
             
             # KST 현재 시간
             now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-            
+            now_str = now_kst.strftime("%Y-%m-%d %H:%M:%S")
+
             # SQLite에서는 날짜 비교를 위해 문자열 ISO format이나 datetime 객체를 사용
             # 여기서는 datetime 객체를 파라미터로 넘김 (adapter가 처리)
             # 또는 문자열로 변환하여 비교: now_kst.strftime("%Y-%m-%d %H:%M:%S")
@@ -379,7 +380,7 @@ class EventService:
                 WHERE status = 'active' AND start_date >= ?
                 ORDER BY start_date ASC
                 LIMIT ?
-            ''', (now_kst, limit))
+            ''', (now_str, limit))
             
             events = []
             for row in cursor.fetchall():

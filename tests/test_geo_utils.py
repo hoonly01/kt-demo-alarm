@@ -73,12 +73,14 @@ async def test_get_location_info_mocked():
         
         # Test internal client creation (patch httpx.AsyncClient)
         with patch("httpx.AsyncClient") as MockClient:
-            instance = MockClient.return_value
-            instance.__aenter__.return_value.get.return_value = MagicMock(
+            # Configure the mock client returned by the context manager
+            mock_client_instance = MockClient.return_value.__aenter__.return_value
+            mock_client_instance.get.return_value = MagicMock(
                 status_code=200,
                 json=lambda: mock_response,
-                raise_for_status=lambda: None
+                raise_for_status=lambda: None,
             )
+            
             result = await get_location_info("query")
             assert result["name"] == "Test Place"
 

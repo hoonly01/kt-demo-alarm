@@ -13,7 +13,8 @@ def test_db():
     from unittest.mock import patch
     
     # Use a temporary database for testing
-    test_db_path = tempfile.mktemp(suffix=".db")
+    fd, test_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
     
     # Patch settings
     with patch("app.config.settings.settings.DATABASE_PATH", test_db_path), \

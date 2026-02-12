@@ -242,7 +242,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
         from app.database.connection import get_db_connection
         try:
             with get_db_connection() as conn:
-                # [REFACTOR] 경로 정보만 업데이트하는 메서드 호춢
+                # [REFACTOR] 경로 정보만 업데이트하는 메서드 호출
                 result = await UserService.update_user_route(
                     user_id=user_id,
                     departure=departure,
