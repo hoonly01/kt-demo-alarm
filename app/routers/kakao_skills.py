@@ -1,5 +1,5 @@
 """카카오톡 Skill Block 전용 라우터 (prefix 없음)"""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 import sqlite3
 import logging
 
@@ -189,6 +189,91 @@ async def check_user_route_events(
                 {
                     "simpleText": {
                         "text": message_text
+                    }
+                }
+            ]
+        }
+    }
+
+
+@router.post("/save_user_info")
+async def save_user_info(request: dict, background_tasks: BackgroundTasks):
+    """
+    카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
+    - 출발지와 도착지만 저장 (간단 버전)
+    - 백그라운드 처리로 빠른 응답
+
+    Parameters in action.params:
+    - departure: 출발지 (예: "영통역")
+    - arrival: 도착지 (예: "광화문역")
+    """
+    logger.info(f"🔍 /save_user_info 요청: {request}")
+
+    # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
+    user_request = request.get('userRequest', {})
+    user_info = user_request.get('user', {})
+    bot_user_key = user_info.get('id')
+    properties = user_info.get('properties', {})
+    plusfriend_key = properties.get('plusfriendUserKey')
+
+    # plusfriend_key 우선 사용
+    user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+    logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
+
+    # 출발지와 도착지 정보 추출
+    params = request.get('action', {}).get('params', {})
+    departure = params.get('departure', '')
+    arrival = params.get('arrival', '')
+
+    logger.info(f"📍 경로: {departure} → {arrival}")
+
+    # 사용자 생성/업데이트 (동기화)
+    from app.services.user_service import UserService
+    from app.database.connection import get_db_connection
+
+    with get_db_connection() as db:
+        # [REFACTOR] 통합된 사용자 동기화 로직 사용
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+    # 백그라운드에서 경로 정보 저장 (Route Only Update)
+    async def save_route_to_db_task(user_id: str, departure: str, arrival: str):
+        """백그라운드 작업: 경로 정보만 업데이트"""
+        from app.database.connection import get_db_connection
+        try:
+            with get_db_connection() as conn:
+                # [REFACTOR] 경로 정보만 업데이트하는 메서드 호춢
+                result = await UserService.update_user_route(
+                    user_id=user_id,
+                    departure=departure,
+                    arrival=arrival,
+                    db=conn
+                )
+
+                if result["success"]:
+                    logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
+                else:
+                    logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
+
+        except Exception as e:
+            logger.error(f"경로 정보 저장 중 오류: {str(e)}")
+
+    background_tasks.add_task(save_route_to_db_task, user_id, departure, arrival)
+
+    # 즉시 응답 (사용자 대기 시간 단축)
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "simpleText": {
+                        "text": (
+                            f"📍 출발지: {departure}\n"
+                            f"📍 도착지: {arrival}\n\n"
+                            "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
+                            "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                        )
                     }
                 }
             ]

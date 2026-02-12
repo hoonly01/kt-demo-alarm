@@ -11,7 +11,9 @@ from app.models.responses import (
 )
 from app.database.connection import get_db
 from app.services.notification_service import NotificationService
+from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
+from app.services.auth_service import verify_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/alarms", tags=["alarms"])
@@ -19,7 +21,10 @@ router = APIRouter(prefix="/alarms", tags=["alarms"])
 
 @router.post("/send", response_model=AlarmSendResponse, 
           responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
-async def send_individual_alarm(alarm_request: AlarmRequest):
+async def send_individual_alarm(
+    alarm_request: AlarmRequest,
+    api_key: str = Depends(verify_api_key)
+):
     """개별 사용자에게 알림 전송
     
     지정된 사용자에게 개별 알림을 전송합니다.
@@ -90,7 +95,8 @@ async def send_individual_alarm(alarm_request: AlarmRequest):
 async def send_alarm_to_all(
     event_name: str,
     data: Dict[str, Any],
-    db: sqlite3.Connection = Depends(get_db)
+    db: sqlite3.Connection = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
 ):
     """전체 활성 사용자에게 알림 전송"""
     try:
@@ -123,7 +129,8 @@ async def send_alarm_to_all(
 @router.post("/send-filtered")
 async def send_filtered_alarm(
     request: FilteredAlarmRequest,
-    db: sqlite3.Connection = Depends(get_db)
+    db: sqlite3.Connection = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
 ):
     """필터링된 사용자에게 알림 전송"""
     try:
@@ -243,7 +250,10 @@ async def get_recent_alarm_tasks(limit: int = Query(50, ge=1, le=100, descriptio
 
 
 @router.post("/cleanup-old-tasks", response_model=CleanupResponse)
-async def cleanup_old_alarm_tasks(days: int = Query(30, ge=1, le=365, description="보관 기간 (일)")):
+async def cleanup_old_alarm_tasks(
+    days: int = Query(30, ge=1, le=365, description="보관 기간 (일)"),
+    api_key: str = Depends(verify_api_key)
+):
     """오래된 알림 작업 정리
     
     지정된 기간보다 오래된 알림 작업들을 삭제합니다.

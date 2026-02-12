@@ -52,7 +52,9 @@ def test_alarm_status_nonexistent_task(test_client):
 
 def test_cleanup_old_tasks_endpoint(test_client, clean_test_db):
     """Test cleanup old alarm tasks endpoint"""
-    response = test_client.post("/alarms/cleanup-old-tasks?days=30")
+    # API Key 인증 필요 (headers에 추가)
+    headers = {"x-api-key": "test-api-key"}
+    response = test_client.post("/alarms/cleanup-old-tasks?days=30", headers=headers)
     assert response.status_code == 200
     
     data = response.json()

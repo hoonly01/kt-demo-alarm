@@ -3,38 +3,65 @@ import asyncio
 import logging
 import httpx
 import json
-import os
 from typing import List, Dict, Any, Optional
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
 from app.models.kakao import EventAPIRequest, Event, EventUser
+from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
-
-# 환경변수에서 카카오 설정 로드
-BOT_ID = os.getenv("BOT_ID")
 
 
 class NotificationService:
     """알림 전송 비즈니스 로직"""
 
     @staticmethod
-    async def send_individual_alarm(alarm_request: AlarmRequest, id_type: str = "plusfriendUserKey") -> Dict[str, Any]:
+    def _format_event_message(events: List[Dict[str, Any]]) -> str:
+        """
+        집회 정보를 텍스트 메시지로 포맷팅
+        
+        Args:
+            events: 집회 정보 목록
+            
+        Returns:
+            str: 포맷팅된 메시지 텍스트
+        """
+        event_messages = []
+        for event in events:
+            severity_level = event.get("severity_level", 1)
+            severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+
+            event_messages.append(
+                f"{severity_emoji} {event['title']}\n"
+                f"📍 {event['location']}\n"
+                f"⏰ {event['start_date']}\n"
+                f"🏷️ {event.get('category', '일반')}"
+            )
+
+        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+
+    @staticmethod
+    async def send_individual_alarm(
+        alarm_request: AlarmRequest, 
+        id_type: str = "plusfriendUserKey",
+        client: Optional[httpx.AsyncClient] = None
+    ) -> Dict[str, Any]:
         """
         개별 사용자에게 알림 전송
-
+        
         Args:
             alarm_request: 알림 요청 데이터
             id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
-
+            client: 재사용할 HTTP 클라이언트 (Optional)
+            
         Returns:
             Dict: 전송 결과
         """
-        if not BOT_ID:
+        if not settings.BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
 
         try:
             event_api_request = EventAPIRequest(
-                botId=BOT_ID,
+                botId=settings.BOT_ID,
                 event=Event(
                     name=alarm_request.event_name,
                     data=alarm_request.data
@@ -45,89 +72,109 @@ class NotificationService:
                 )
             )
             
-            async with httpx.AsyncClient() as client:
+            # 클라이언트 컨텍스트 관리
+            if client:
                 response = await client.post(
-                    "https://bot-api.kakao.com/v1/bots/message/send",
+                    settings.KAKAO_BOT_API_URL,
                     json=event_api_request.model_dump(),
                     headers={"Content-Type": "application/json"},
-                    timeout=10.0
+                    timeout=settings.NOTIFICATION_TIMEOUT
                 )
-                
-                if response.status_code == 200:
-                    logger.info(f"개별 알림 전송 성공: {alarm_request.user_id}")
-                    return {"success": True, "response": response.json()}
-                else:
-                    logger.error(f"개별 알림 전송 실패: {response.status_code} - {response.text}")
-                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+                return NotificationService._process_response(response, alarm_request.user_id)
+            else:
+                async with httpx.AsyncClient() as new_client:
+                    response = await new_client.post(
+                        settings.KAKAO_BOT_API_URL,
+                        json=event_api_request.model_dump(),
+                        headers={"Content-Type": "application/json"},
+                        timeout=settings.NOTIFICATION_TIMEOUT
+                    )
+                    return NotificationService._process_response(response, alarm_request.user_id)
                     
         except Exception as e:
             logger.error(f"개별 알림 전송 중 오류: {str(e)}")
             return {"success": False, "error": str(e)}
 
     @staticmethod
+    def _process_response(response: httpx.Response, user_id: str) -> Dict[str, Any]:
+        """HTTP 응답 처리 헬퍼"""
+        if response.status_code == 200:
+            logger.info(f"개별 알림 전송 성공: {user_id}")
+            return {"success": True, "response": response.json()}
+        else:
+            logger.error(f"개별 알림 전송 실패: {response.status_code} - {response.text}")
+            return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+
+    @staticmethod
     async def send_bulk_alarm(
         user_ids: List[str],
         event_name: str,
         data: Dict[str, Any],
-        batch_size: int = 100,
+        batch_size: int = 100,  # settings.BATCH_SIZE를 기본값으로 사용하고 싶지만 staticmethod라 인자 기본값에 접근 주의
         id_type: str = "plusfriendUserKey"
     ) -> Dict[str, Any]:
         """
-        대량 사용자에게 배치 알림 전송
-
+        대량 사용자에게 배치 알림 전송 (HTTP 세션 재사용)
+        
         Args:
             user_ids: 사용자 ID 목록
             event_name: 이벤트 이름
             data: 전송 데이터
             batch_size: 배치 크기
-            id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
-
+            id_type: 사용자 ID 타입
+            
         Returns:
             Dict: 전송 결과
         """
-        if not BOT_ID:
+        if not settings.BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
+
+        actual_batch_size = batch_size if batch_size > 0 else settings.BATCH_SIZE
 
         try:
             success_count = 0
             fail_count = 0
 
-            # 배치 단위로 병렬 처리 (성능 최적화)
-            for i in range(0, len(user_ids), batch_size):
-                batch_users = user_ids[i:i + batch_size]
+            # 하나의 세션을 생성하여 모든 요청에 재사용
+            async with httpx.AsyncClient() as client:
+                # 배치 단위로 처리
+                for i in range(0, len(user_ids), actual_batch_size):
+                    batch_users = user_ids[i:i + actual_batch_size]
 
-                # 배치 내 모든 사용자에게 병렬로 알림 전송
-                async def send_to_user(user_id: str) -> Dict[str, Any]:
-                    try:
-                        alarm_request = AlarmRequest(
-                            user_id=user_id,
-                            event_name=event_name,
-                            data=data
-                        )
-                        return await NotificationService.send_individual_alarm(alarm_request, id_type=id_type)
-                    except Exception as e:
-                        logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
-                        return {"success": False, "error": str(e)}
-                
-                # 배치 내 모든 작업을 동시에 실행
-                batch_tasks = [send_to_user(user_id) for user_id in batch_users]
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                
-                # 결과 집계
-                batch_success = 0
-                batch_fail = 0
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        batch_fail += 1
-                        logger.error(f"배치 알림 전송 중 예외: {str(result)}")
-                    elif result.get("success"):
-                        batch_success += 1
-                        success_count += 1
-                    else:
-                        batch_fail += 1
-                        fail_count += 1
-                
-                logger.info(f"배치 {i//batch_size + 1} 완료: 성공 {batch_success}/{len(batch_users)}")
+                    # 배치 내 모든 사용자에게 병렬로 알림 전송
+                    async def send_to_user(user_id: str) -> Dict[str, Any]:
+                        try:
+                            alarm_request = AlarmRequest(
+                                user_id=user_id,
+                                event_name=event_name,
+                                data=data
+                            )
+                            # 생성한 클라이언트를 주입
+                            return await NotificationService.send_individual_alarm(
+                                alarm_request, 
+                                id_type=id_type,
+                                client=client
+                            )
+                        except Exception as e:
+                            logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
+                            return {"success": False, "error": str(e)}
+                    
+                    # 배치 내 모든 작업을 동시에 실행
+                    batch_tasks = [send_to_user(user_id) for user_id in batch_users]
+                    batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                    
+                    # 결과 집계
+                    batch_success = 0
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            fail_count += 1
+                        elif result.get("success"):
+                            batch_success += 1
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                    
+                    logger.info(f"배치 {i//actual_batch_size + 1} 완료: 성공 {batch_success}/{len(batch_users)}")
             
             logger.info(f"대량 알림 전송 완료: 성공 {success_count}건, 실패 {fail_count}건")
             
@@ -144,33 +191,11 @@ class NotificationService:
 
     @staticmethod
     async def send_route_alert(user_id: str, events: List[Dict[str, Any]], id_type: str = "plusfriendUserKey") -> Dict[str, Any]:
-        """
-        경로 기반 집회 알림 전송
-
-        Args:
-            user_id: 사용자 ID (plusfriend_user_key 권장)
-            events: 감지된 집회 목록
-            id_type: 사용자 ID 타입 (plusfriendUserKey, botUserKey, appUserId)
-
-        Returns:
-            Dict: 전송 결과
-        """
+        """경로 기반 집회 알림 전송"""
         if not events:
             return {"success": False, "error": "전송할 집회 정보가 없습니다"}
 
-        # 집회 정보를 알림 메시지로 구성
-        event_messages = []
-        for event in events:
-            severity_emoji = "🔴" if event.get("severity_level", 1) >= 3 else "🟡" if event.get("severity_level", 1) >= 2 else "🟢"
-
-            event_messages.append(
-                f"{severity_emoji} {event['title']}\n"
-                f"📍 {event['location']}\n"
-                f"⏰ {event['start_date']}\n"
-                f"🏷️ {event.get('category', '일반')}"
-            )
-
-        message_text = f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+        message_text = NotificationService._format_event_message(events)
 
         # 알림 전송
         alarm_request = AlarmRequest(
@@ -191,32 +216,11 @@ class NotificationService:
         events_data: List[Dict[str, Any]],
         id_type: str = "plusfriendUserKey"
     ) -> Dict[str, Any]:
-        """
-        조건부 일괄 알림 전송 (Event API 사용)
-
-        Args:
-            user_ids: 사용자 ID 목록 (plusfriend_user_key 권장)
-            events_data: 집회 정보
-            id_type: 사용자 ID 타입
-
-        Returns:
-            Dict: 전송 결과
-        """
+        """조건부 일괄 알림 전송"""
         if not user_ids:
             return {"success": False, "error": "수신자가 없습니다"}
 
-        # 집회 정보를 알림 메시지로 구성
-        event_messages = []
-        for event in events_data:
-            severity_emoji = "🔴" if event.get("severity_level", 1) >= 3 else "🟡" if event.get("severity_level", 1) >= 2 else "🟢"
-            event_messages.append(
-                f"{severity_emoji} {event['title']}\n"
-                f"📍 {event['location']}\n"
-                f"⏰ {event['start_date']}\n"
-                f"🏷️ {event.get('category', '일반')}"
-            )
-
-        message_text = f"⚠️ 경로상에 {len(events_data)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+        message_text = NotificationService._format_event_message(events_data)
 
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(
@@ -232,16 +236,7 @@ class NotificationService:
 
     @staticmethod
     def validate_event_data(event_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        이벤트 데이터 검증
-        
-        Args:
-            event_name: 이벤트 이름
-            data: 이벤트 데이터
-            
-        Returns:
-            Dict: 검증 결과
-        """
+        """이벤트 데이터 검증"""
         if not event_name:
             return {"valid": False, "error": "이벤트 이름이 필요합니다"}
         
