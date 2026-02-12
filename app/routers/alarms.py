@@ -11,7 +11,6 @@ from app.models.responses import (
 )
 from app.database.connection import get_db
 from app.services.notification_service import NotificationService
-from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
 from app.services.auth_service import verify_api_key
 
