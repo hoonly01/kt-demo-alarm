@@ -30,7 +30,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v || echo "Tests completed"
+          pytest tests/ -v
 
   build:
     needs: test
@@ -76,6 +76,7 @@ jobs:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           BOT_ID: ${{ secrets.BOT_ID }}
+          API_KEY: ${{ secrets.API_KEY }}
         run: |
           set -euo pipefail
 
@@ -87,6 +88,7 @@ jobs:
           cat > .env <<EOF
           KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
           BOT_ID=${BOT_ID}
+          API_KEY=${API_KEY}
           DEBUG=false
           LOG_LEVEL=INFO
           DATABASE_PATH=/app/data/kt_demo_alarm.db

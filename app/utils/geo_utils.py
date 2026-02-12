@@ -1,9 +1,10 @@
 """지리 계산 관련 유틸리티 함수들"""
 import math
-import httpx
 import os
-from typing import List, Tuple, Optional, Dict
 import logging
+from typing import Optional
+
+import httpx
 
 logger = logging.getLogger(__name__)
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
@@ -45,7 +46,7 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
 def is_point_near_route(start_lat: float, start_lon: float, end_lat: float, end_lon: float, 
                        point_lat: float, point_lon: float, threshold_meters: float = 500) -> bool:
     """
-    한 점이 두 지점을 잇는 직선 경로 근처에 있는지 확인
+    한 점이 두 지점을 잇는 직선 경로 근처에 있는지 확인 (단순 직선 거리 근사)
     
     Args:
         start_lat, start_lon: 출발지 좌표
@@ -78,7 +79,7 @@ def is_point_near_route(start_lat: float, start_lon: float, end_lat: float, end_
     return False
 
 
-def is_event_near_route_accurate(route_coordinates: List[Tuple[float, float]], 
+def is_event_near_route_accurate(route_coordinates: list[tuple[float, float]], 
                                 event_lat: float, event_lon: float, 
                                 threshold_meters: float = 500) -> bool:
     """
@@ -105,15 +106,16 @@ def is_event_near_route_accurate(route_coordinates: List[Tuple[float, float]],
     return False
 
 
-async def get_location_info(query: str) -> Optional[Dict]:
+async def get_location_info(query: str, client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
     """
     카카오 지도 API를 사용하여 검색어를 장소 정보로 변환
     
     Args:
         query: 검색할 장소명
+        client: 재사용할 HTTP 클라이언트 (Optional)
     
     Returns:
-        Dict: 장소 정보 (name, address, x, y) 또는 None
+        dict: 장소 정보 (name, address, x, y) 또는 None
     """
     if not KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
@@ -124,49 +126,57 @@ async def get_location_info(query: str) -> Optional[Dict]:
     params = {"query": query}
 
     try:
-        async with httpx.AsyncClient() as client:
+        if client:
             response = await client.get(url, headers=headers, params=params)
+        else:
+            async with httpx.AsyncClient() as new_client:
+                response = await new_client.get(url, headers=headers, params=params)
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                if data.get("documents"):
-                    doc = data["documents"][0]  # 첫 번째 검색 결과 사용
-                    return {
-                        "name": doc["place_name"],
-                        "address": doc.get("road_address_name") or doc.get("address_name"),
-                        "x": float(doc["x"]),  # 경도
-                        "y": float(doc["y"])   # 위도
-                    }
-                else:
-                    logger.warning(f"검색 결과가 없습니다: {query}")
-                    return None
-            else:
-                logger.error(f"카카오 지도 API 오류: {response.status_code}")
-                return None
-                
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("documents"):
+            doc = data["documents"][0]  # 첫 번째 검색 결과 사용
+            return {
+                "name": doc["place_name"],
+                "address": doc.get("road_address_name") or doc.get("address_name"),
+                "x": float(doc["x"]),  # 경도
+                "y": float(doc["y"])   # 위도
+            }
+        else:
+            logger.warning(f"검색 결과가 없습니다: {query}")
+            return None
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"카카오 지도 API HTTP 오류: {e.response.status_code} - {e.response.text}")
+        return None
+    except httpx.RequestError as e:
+        logger.error(f"카카오 지도 API 요청 오류: {str(e)}")
+        return None
     except Exception as e:
-        logger.error(f"장소 정보 조회 중 오류 발생: {str(e)}")
+        logger.error(f"장소 정보 조회 중 예기치 못한 오류 발생: {str(e)}")
         return None
 
 
 async def get_route_coordinates(start_x: float, start_y: float, 
-                              end_x: float, end_y: float) -> List[Tuple[float, float]]:
+                              end_x: float, end_y: float,
+                              client: Optional[httpx.AsyncClient] = None) -> list[tuple[float, float]]:
     """
     카카오 Mobility API를 사용하여 실제 보행 경로 좌표를 가져옴
     
     Args:
         start_x, start_y: 출발지 경도, 위도
         end_x, end_y: 도착지 경도, 위도
+        client: 재사용할 HTTP 클라이언트 (Optional)
     
     Returns:
-        List[Tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
+        list[tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
     """
     if not KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
         return []
         
-    url = f"https://apis-navi.kakaomobility.com/v1/directions"
+    url = "https://apis-navi.kakaomobility.com/v1/directions"
     headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
     params = {
         "origin": f"{start_x},{start_y}",
@@ -175,37 +185,43 @@ async def get_route_coordinates(start_x: float, start_y: float,
     }
     
     try:
-        async with httpx.AsyncClient() as client:
+        if client:
             response = await client.get(url, headers=headers, params=params)
+        else:
+            async with httpx.AsyncClient() as new_client:
+                response = await new_client.get(url, headers=headers, params=params)
             
-            if response.status_code == 200:
-                data = response.json()
-                
-                if data.get("routes") and len(data["routes"]) > 0:
-                    route = data["routes"][0]
-                    
-                    # 경로상의 모든 좌표 추출
-                    coordinates = []
-                    
-                    for section in route.get("sections", []):
-                        for road in section.get("roads", []):
-                            vertexes = road.get("vertexes", [])
-                            # vertexes는 [경도, 위도, 경도, 위도, ...] 형태의 평면 배열
-                            for i in range(0, len(vertexes), 2):
-                                if i + 1 < len(vertexes):
-                                    lon = vertexes[i]      # 경도
-                                    lat = vertexes[i + 1]  # 위도
-                                    coordinates.append((lat, lon))  # (위도, 경도) 순서로 반환
-                    
-                    logger.info(f"경로 좌표 {len(coordinates)}개 추출됨")
-                    return coordinates
-                else:
-                    logger.warning("경로를 찾을 수 없습니다.")
-                    return []
-            else:
-                logger.error(f"카카오 Mobility API 오류: {response.status_code}")
-                return []
-                
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get("routes") and len(data["routes"]) > 0:
+            route = data["routes"][0]
+            
+            # 경로상의 모든 좌표 추출
+            coordinates = []
+            
+            for section in route.get("sections", []):
+                for road in section.get("roads", []):
+                    vertexes = road.get("vertexes", [])
+                    # vertexes는 [경도, 위도, 경도, 위도, ...] 형태의 평면 배열
+                    for i in range(0, len(vertexes), 2):
+                        if i + 1 < len(vertexes):
+                            lon = vertexes[i]      # 경도
+                            lat = vertexes[i + 1]  # 위도
+                            coordinates.append((lat, lon))  # (위도, 경도) 순서로 반환
+            
+            logger.info(f"경로 좌표 {len(coordinates)}개 추출됨")
+            return coordinates
+        else:
+            logger.warning("경로를 찾을 수 없습니다.")
+            return []
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"카카오 Mobility API HTTP 오류: {e.response.status_code} - {e.response.text}")
+        return []
+    except httpx.RequestError as e:
+        logger.error(f"카카오 Mobility API 요청 오류: {str(e)}")
+        return []
     except Exception as e:
-        logger.error(f"경로 좌표 조회 중 오류 발생: {str(e)}")
+        logger.error(f"경로 좌표 조회 중 예기치 못한 오류 발생: {str(e)}")
         return []
