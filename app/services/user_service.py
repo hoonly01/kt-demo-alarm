@@ -53,14 +53,77 @@ class UserService:
             raise
 
     @staticmethod
+    def sync_kakao_user(bot_user_key: str, plusfriend_key: Optional[str], db: sqlite3.Connection) -> None:
+        """
+        카카오톡 사용자 동기화 (식별 및 매칭)
+        - plusfriend_user_key를 우선 식별자로 사용
+        - 웹훅 연동으로 생성된 '고아 사용자(orphan)' 매칭 로직 포함
+        
+        Args:
+            bot_user_key: 봇 사용자 키 (필수)
+            plusfriend_key: 카카오 채널 사용자 키 (권장)
+            db: 데이터베이스 연결
+        """
+        try:
+            cursor = db.cursor()
+            
+            if not plusfriend_key:
+                # plusfriend_key가 없는 경우 기존 레거시 로직(bot_user_key 기준) 사용
+                logger.warning(f"plusfriend_key 누락. bot_user_key({bot_user_key})로 대체합니다.")
+                UserService.save_or_update_user(bot_user_key, db)
+                return
+
+            # plusfriend_key로 조회 (primary identifier)
+            cursor.execute(
+                "SELECT id, open_id FROM users WHERE plusfriend_user_key = ?",
+                (plusfriend_key,)
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                # 기존 사용자 업데이트
+                logger.debug(f"✅ 기존 사용자 발견: plusfriend={plusfriend_key}")
+                cursor.execute("""
+                    UPDATE users
+                    SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1
+                    WHERE plusfriend_user_key = ?
+                """, (bot_user_key, datetime.now(), plusfriend_key))
+            else:
+                # 웹훅 사용자 찾기 시도 (open_id만 있는 경우)
+                cursor.execute("""
+                    SELECT id, open_id FROM users
+                    WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL
+                    ORDER BY first_message_at ASC, id ASC
+                    LIMIT 1
+                """)
+                orphan = cursor.fetchone()
+
+                if orphan:
+                    # 웹훅 사용자 연결 (Orphan Matching)
+                    logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan[1]} → plusfriend={plusfriend_key}")
+                    cursor.execute("""
+                        UPDATE users
+                        SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?
+                        WHERE id = ?
+                    """, (bot_user_key, plusfriend_key, datetime.now(), orphan[0]))
+                else:
+                    # 완전 신규 사용자
+                    logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
+                    cursor.execute("""
+                        INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
+                        VALUES (?, ?, ?, ?, 1, 1)
+                    """, (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
+            
+            db.commit()
+            
+        except Exception as e:
+            logger.error(f"카카오 사용자 동기화 실패: {str(e)}")
+            raise
+
+    @staticmethod
     def update_user_status(bot_user_key: str, db: sqlite3.Connection, active: bool) -> None:
         """
         사용자 활성 상태 업데이트
-        
-        Args:
-            bot_user_key: 사용자 식별 키
-            db: 데이터베이스 연결
-            active: 활성 상태
         """
         try:
             cursor = db.cursor()
@@ -76,51 +139,35 @@ class UserService:
             raise
 
     @staticmethod
-    async def save_user_route_info(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
+    async def update_user_route(user_id: str, departure: str, arrival: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
-        사용자의 출발지/도착지 정보를 저장
-        - bot_user_key 파라미터에 plusfriend_user_key 값이 전달됨
-
+        사용자 경로 정보만 업데이트 (출발지/도착지)
+        - marked_bus, language 등 개인화 설정은 건드리지 않음
+        
         Args:
-            user_setup: 사용자 설정 요청 데이터 (bot_user_key에 plusfriend_user_key 포함)
+            user_id: 사용자 ID (plusfriend_user_key)
+            departure: 출발지 검색어
+            arrival: 도착지 검색어
             db: 데이터베이스 연결
-
-        Returns:
-            Dict: 처리 결과
         """
         try:
             cursor = db.cursor()
 
-            # 출발지 정보 조회
-            departure_info = await get_location_info(user_setup.departure)
+            # 1. 지오코딩
+            departure_info = await get_location_info(departure)
             if not departure_info:
                 return {"success": False, "error": "출발지를 찾을 수 없습니다"}
 
-            # 도착지 정보 조회
-            arrival_info = await get_location_info(user_setup.arrival)
+            arrival_info = await get_location_info(arrival)
             if not arrival_info:
                 return {"success": False, "error": "도착지를 찾을 수 없습니다"}
 
-            # 사용자가 DB에 있는지 확인 (plusfriend_user_key로 조회)
-            cursor.execute('SELECT id FROM users WHERE plusfriend_user_key = ?', (user_setup.bot_user_key,))
-            user_exists = cursor.fetchone()
-
-            if not user_exists:
-                # 사용자가 없으면 먼저 생성 (plusfriend_user_key로 저장)
-                cursor.execute('''
-                    INSERT INTO users (plusfriend_user_key, first_message_at, last_message_at, message_count, active)
-                    VALUES (?, ?, ?, 1, 1)
-                ''', (user_setup.bot_user_key, datetime.now(), datetime.now()))
-                logger.info(f"새 사용자 생성 (plusfriend_key): {user_setup.bot_user_key}")
-
-            # 사용자 경로 정보 및 개인화 설정 업데이트 (plusfriend_user_key 기준)
+            # 2. 경로 정보만 업데이트
             cursor.execute('''
                 UPDATE users SET
                     departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
                     arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
-                    route_updated_at = ?,
-                    marked_bus = ?,
-                    language = ?
+                    route_updated_at = ?
                 WHERE plusfriend_user_key = ?
             ''', (
                 departure_info["name"], departure_info["address"],
@@ -128,31 +175,107 @@ class UserService:
                 arrival_info["name"], arrival_info["address"],
                 arrival_info["x"], arrival_info["y"],
                 datetime.now(),
-                user_setup.marked_bus,
-                user_setup.language,
-                user_setup.bot_user_key  # ← 이제 plusfriend_user_key 값임!
+                user_id
             ))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
             db.commit()
             
-            logger.info(f"경로 정보 저장 완료 - 사용자: {user_setup.bot_user_key}")
-            logger.info(f"출발지: {departure_info['name']} ({departure_info['x']}, {departure_info['y']})")
-            logger.info(f"도착지: {arrival_info['name']} ({arrival_info['x']}, {arrival_info['y']})")
-            if user_setup.marked_bus:
-                logger.info(f"즐겨찾는 버스: {user_setup.marked_bus}")
-            if user_setup.language:
-                logger.info(f"언어 설정: {user_setup.language}")
+            logger.info(f"경로(Route Only) 업데이트 완료 - 사용자: {user_id}")
+            logger.info(f"출발: {departure_info['name']}, 도착: {arrival_info['name']}")
 
             return {
                 "success": True,
                 "departure": departure_info,
-                "arrival": arrival_info,
-                "marked_bus": user_setup.marked_bus,
-                "language": user_setup.language
+                "arrival": arrival_info
             }
             
         except Exception as e:
-            logger.error(f"경로 정보 저장 실패: {str(e)}")
+            logger.error(f"경로 정보 업데이트 실패: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    async def setup_user_profile(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 프로필 전체 설정 (초기 설정용)
+        - 경로(출발/도착) + 개인화 설정(버스, 언어) 모두 업데이트
+        
+        Args:
+            user_setup: 설정 요청 객체
+            db: 데이터베이스 연결
+        """
+        try:
+            cursor = db.cursor()
+
+            # 1. 지오코딩 (경로 정보가 있는 경우)
+            dep_info = None
+            arr_info = None
+            
+            if user_setup.departure:
+                dep_info = await get_location_info(user_setup.departure)
+                if not dep_info:
+                    return {"success": False, "error": "출발지를 찾을 수 없습니다"}
+            
+            if user_setup.arrival:
+                arr_info = await get_location_info(user_setup.arrival)
+                if not arr_info:
+                    return {"success": False, "error": "도착지를 찾을 수 없습니다"}
+
+            # 2. 전체 필드 업데이트 쿼리 구성
+            # 주의: 값이 없는 필드는 NULL로 하거나, 기존 값을 유지해야 하는데
+            # Initial Setup의 목적상 입력된 값으로 덮어쓰는 것이 일반적임.
+            # 하지만 여기선 입력된 값만 업데이트하도록 동적 쿼리 사용 권장, 
+            # 단순화를 위해 모두 업데이트 (None이면 NULL 처리될 수 있음에 유의)
+            
+            update_query = "UPDATE users SET route_updated_at = ?"
+            params = [datetime.now()]
+            
+            if dep_info:
+                update_query += ", departure_name=?, departure_address=?, departure_x=?, departure_y=?"
+                params.extend([dep_info["name"], dep_info["address"], dep_info["x"], dep_info["y"]])
+                
+            if arr_info:
+                update_query += ", arrival_name=?, arrival_address=?, arrival_x=?, arrival_y=?"
+                params.extend([arr_info["name"], arr_info["address"], arr_info["x"], arr_info["y"]])
+                
+            if user_setup.marked_bus:
+                update_query += ", marked_bus=?"
+                params.append(user_setup.marked_bus)
+                
+            if user_setup.language:
+                update_query += ", language=?"
+                params.append(user_setup.language)
+                
+            update_query += " WHERE plusfriend_user_key = ?"
+            params.append(user_setup.bot_user_key)
+            
+            cursor.execute(update_query, params)
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"프로필 업데이트 대상 사용자를 찾을 수 없음: {user_setup.bot_user_key}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+
+            logger.info(f"프로필(Full Setup) 설정 완료 - 사용자: {user_setup.bot_user_key}")
+            
+            return {
+                "success": True,
+                "departure": dep_info,
+                "arrival": arr_info,
+                "marked_bus": user_setup.marked_bus,
+                "language": user_setup.language
+            }
+
+        except Exception as e:
+            logger.error(f"프로필 설정 실패: {str(e)}")
             return {"success": False, "error": str(e)}
 
     @staticmethod
