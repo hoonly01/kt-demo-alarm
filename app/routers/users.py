@@ -217,7 +217,19 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
             }
         }
     else:
-        raise HTTPException(status_code=400, detail=result["error"])
+        # 실패 시에도 200 OK 리턴하고 에러 메시지를 사용자에게 전달
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": result["error"]
+                        }
+                    }
+                ]
+            }
+        }
 
 
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
