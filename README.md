@@ -189,7 +189,6 @@ ngrok http 8000
 - `POST /scheduler/crawl-events` - 집회 데이터 크롤링 및 동기화
 - `POST /scheduler/check-routes` - 모든 사용자 경로 일괄 확인
 - `POST /scheduler/manual-test` - 수동 스케줄 테스트
-- `POST /scheduler/manual-test` - 수동 스케줄 테스트
 - `GET /scheduler/status` - 스케줄러 상태 확인
 
 ### 🚌 버스 라우터 (`/bus`)
