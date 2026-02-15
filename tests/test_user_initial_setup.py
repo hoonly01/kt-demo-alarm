@@ -26,24 +26,25 @@ def mock_payload():
         }
     }
 
-@pytest.mark.asyncio
-async def test_initial_setup_logic_error(clean_test_db, mock_payload):
+def test_initial_setup_logic_error(clean_test_db, mock_payload):
     """
     Test that invalid input (logic error) returns 200 OK with specific error message.
     """
-    # Mock UserService.setup_user_profile to return logic failure
-    with patch("app.services.user_service.UserService.setup_user_profile", new_callable=AsyncMock) as mock_setup:
-        mock_setup.return_value = {"success": False, "error": "출발지를 찾을 수 없습니다"}
+    # Mock UserService.sync_kakao_user to avoid live DB call
+    with patch("app.services.user_service.UserService.sync_kakao_user"):
+        # Mock UserService.setup_user_profile to return logic failure
+        with patch("app.services.user_service.UserService.setup_user_profile", new_callable=AsyncMock) as mock_setup:
+            mock_setup.return_value = {"success": False, "error": "출발지를 찾을 수 없습니다"}
 
-        response = client.post("/users/initial-setup", json=mock_payload)
+            response = client.post("/users/initial-setup", json=mock_payload)
 
-        assert response.status_code == 200
-        data = response.json()
-        text = data["template"]["outputs"][0]["simpleText"]["text"]
-        assert "출발지를 찾을 수 없습니다" in text
+            assert response.status_code == 200
+            data = response.json()
+            text = data["template"]["outputs"][0]["simpleText"]["text"]
+            assert "출발지를 찾을 수 없습니다" in text
 
-@pytest.mark.asyncio
-async def test_initial_setup_system_error_in_service(clean_test_db, mock_payload):
+
+def test_initial_setup_system_error_in_service(clean_test_db, mock_payload):
     """
     Test that exception in Service layer is caught and returns friendly message (200 OK).
     """
@@ -57,7 +58,7 @@ async def test_initial_setup_system_error_in_service(clean_test_db, mock_payload
     with patch("app.services.user_service.get_location_info", new_callable=AsyncMock) as mock_geo:
         mock_geo.side_effect = Exception("Unexpected API Fail")
         
-        # We also need to mock sync_kakao_user because it interacts with DB and might fail or succeed independently
+        # Mock sync_kakao_user as well
         with patch("app.services.user_service.UserService.sync_kakao_user"):
              response = client.post("/users/initial-setup", json=mock_payload)
 
@@ -67,8 +68,7 @@ async def test_initial_setup_system_error_in_service(clean_test_db, mock_payload
              # Should be the safe message we added in user_service.py
              assert "일시적인 오류가 발생했습니다" in text
 
-@pytest.mark.asyncio
-async def test_initial_setup_system_error_in_router(clean_test_db, mock_payload):
+def test_initial_setup_system_error_in_router(clean_test_db, mock_payload):
     """
     Test that exception in Router layer (before Service call) is caught and returns friendly message (200 OK).
     """
