@@ -174,6 +174,20 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
         properties = user_info.get('properties', {})
         plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
 
+        if not plusfriend_key:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."
+                            }
+                        }
+                    ]
+                }
+            }
+
         # 파라미터 추출
         departure = params.get('departure')
         arrival = params.get('arrival')
@@ -233,7 +247,7 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
             }
 
     except Exception as e:
-        logger.error(f"초기 설정 중 시스템 오류 발생: {str(e)}")
+        logger.exception("초기 설정 중 시스템 오류 발생")
         # 시스템 오류 시에도 200 OK 리턴
         return {
             "version": "2.0",

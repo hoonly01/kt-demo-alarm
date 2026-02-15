@@ -182,10 +182,6 @@ class UserService:
                 logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
-            if cursor.rowcount == 0:
-                logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
-                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
-
             db.commit()
             
             logger.info(f"경로(Route Only) 업데이트 완료 - 사용자: {user_id}")
