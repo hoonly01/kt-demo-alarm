@@ -276,7 +276,7 @@ class UserService:
 
         except Exception as e:
             logger.error(f"프로필 설정 실패: {str(e)}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
     @staticmethod
     def update_user_preferences(user_id: str, preferences: UserPreferences, db: sqlite3.Connection) -> Dict[str, Any]:
