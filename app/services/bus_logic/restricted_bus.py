@@ -500,7 +500,8 @@ class TOPISCrawler:
                         file_b64 = record.get('apndFile')
                         if file_b64:
                             file_bytes = base64.b64decode(file_b64)
-                except:
+                except Exception:
+                    # JSON 응답이 아닌 경우(예: 바이너리 응답)는 무시하고 아래에서 바이너리로 처리
                     pass
                 
                 # 바이너리 응답인 경우
