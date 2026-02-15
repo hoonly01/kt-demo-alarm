@@ -127,11 +127,24 @@ async def get_position_controls(request: Request):
     tm_x = body.get('tm_x')
     tm_y = body.get('tm_y')
     radius = body.get('radius', 500)
-    
-    if not tm_x or not tm_y:
+
+    # 좌표 존재 여부 검증 (0 / 0.0 은 허용)
+    if tm_x is None or tm_y is None:
         raise HTTPException(status_code=400, detail="Coordinates required")
-        
-    stations = BusNoticeService.get_nearby_controls(tm_x, tm_y, radius)
+
+    # 좌표 및 반경 값 형식 검증 및 변환
+    try:
+        tm_x_val = float(tm_x)
+        tm_y_val = float(tm_y)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid coordinate format")
+
+    try:
+        radius_val = float(radius)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid radius")
+
+    stations = BusNoticeService.get_nearby_controls(tm_x_val, tm_y_val, radius_val)
     return {
         "success": True,
         "count": len(stations),
