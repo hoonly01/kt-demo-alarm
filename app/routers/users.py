@@ -160,71 +160,88 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
     - Skill Block에서 경로 등록 시 호출
     - plusfriendUserKey를 primary identifier로 사용
     """
-    logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
+    try:
+        logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
 
-    # Skill Block 형식 파싱
-    user_request = request.get('userRequest', {})
-    user_info = user_request.get('user', {})
-    action = request.get('action', {})
-    params = action.get('params', {})
+        # Skill Block 형식 파싱
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        action = request.get('action', {})
+        params = action.get('params', {})
 
-    # ID 추출
-    bot_user_key = user_info.get('id')
-    properties = user_info.get('properties', {})
-    plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
+        # ID 추출
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
 
-    # 파라미터 추출
-    departure = params.get('departure')
-    arrival = params.get('arrival')
-    marked_bus = params.get('marked_bus')
-    language = params.get('language')
+        # 파라미터 추출
+        departure = params.get('departure')
+        arrival = params.get('arrival')
+        marked_bus = params.get('marked_bus')
+        language = params.get('language')
 
-    logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
-    logger.info(f"📍 경로: {departure} → {arrival}, 버스={marked_bus}, 언어={language}")
+        logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
+        logger.info(f"📍 경로: {departure} → {arrival}, 버스={marked_bus}, 언어={language}")
 
-    # InitialSetupRequest 생성 (plusfriend_key를 bot_user_key로 사용!)
-    setup_request = InitialSetupRequest(
-        bot_user_key=plusfriend_key,  # ← plusfriend_key를 primary key로 사용!
-        departure=departure,
-        arrival=arrival,
-        marked_bus=marked_bus,
-        language=language
-    )
+        # InitialSetupRequest 생성 (plusfriend_key를 bot_user_key로 사용!)
+        setup_request = InitialSetupRequest(
+            bot_user_key=plusfriend_key,  # ← plusfriend_key를 primary key로 사용!
+            departure=departure,
+            arrival=arrival,
+            marked_bus=marked_bus,
+            language=language
+        )
 
-    # [REFACTOR] 통합된 사용자 동기화 로직 사용
-    UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+        # [REFACTOR] 통합된 사용자 동기화 로직 사용
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
 
-    # [REFACTOR] 전체 프로필 설정 (경로 + 설정)
-    result = await UserService.setup_user_profile(setup_request, db)
+        # [REFACTOR] 전체 프로필 설정 (경로 + 설정)
+        result = await UserService.setup_user_profile(setup_request, db)
 
-    if result["success"]:
-        # Skill 응답 형식 (카카오톡 말풍선)
-        return {
-            "version": "2.0",
-            "template": {
-                "outputs": [
-                    {
-                        "simpleText": {
-                            "text": (
-                                f"📍 출발지: {departure}\n"
-                                f"📍 도착지: {arrival}\n\n"
-                                "✅ 경로 등록이 완료되었습니다!\n"
-                                "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다."
-                            )
+        if result["success"]:
+            # Skill 응답 형식 (카카오톡 말풍선)
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"📍 출발지: {departure}\n"
+                                    f"📍 도착지: {arrival}\n\n"
+                                    "✅ 경로 등록이 완료되었습니다!\n"
+                                    "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다."
+                                )
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
             }
-        }
-    else:
-        # 실패 시에도 200 OK 리턴하고 에러 메시지를 사용자에게 전달
+        else:
+            # 실패 시에도 200 OK 리턴하고 에러 메시지를 사용자에게 전달
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": result["error"]
+                            }
+                        }
+                    ]
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"초기 설정 중 시스템 오류 발생: {str(e)}")
+        # 시스템 오류 시에도 200 OK 리턴
         return {
             "version": "2.0",
             "template": {
                 "outputs": [
                     {
                         "simpleText": {
-                            "text": result["error"]
+                            "text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                         }
                     }
                 ]
