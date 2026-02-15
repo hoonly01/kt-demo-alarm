@@ -52,8 +52,7 @@ except ImportError:
 class TOPISCrawler:
     def __init__(self, gemini_api_key=None, cache_file="topis_cache.json"):
         """TOPIS 크롤러 초기화"""
-        self.base_url = "https://topis.seoul.go.kr"
-        self.service_key = '9bGy9ZjwCHHVmm2vedRonmGrxsfjeo4HMPvyN+R43n5GtRnF10GcHruamRZ7pjfxZjXEQF2Jd+MWxt0ztc5oZg=='
+        self.service_key = os.environ.get("SEOUL_BUS_API_KEY")
         
         # 캐시 및 다운로드 폴더 경로 조정 (프로젝트 루트 기준)
         self.cache_file = cache_file
