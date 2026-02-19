@@ -32,7 +32,12 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
     """노선 통제 확인 (콜백 지원)"""
     try:
         body = await request.json()
-        logger.info(f"Route Check Request: {body}")
+        # 민감 정보(callbackUrl, user.id 등) 마스킹 후 로깅
+        safe_log = {
+            "action": body.get("action"),
+            "userRequest": {"type": body.get("userRequest", {}).get("type")}
+        }
+        logger.info(f"Route Check Request: {safe_log}")
         
         user_request = body.get('userRequest', {})
         action = body.get('action', {})
@@ -72,7 +77,7 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
             
         text = f"🚌 노선 {route_number} 통제 정보 ({len(controls)}건)\n📅 {date_str}\n\n"
         for c in controls[:3]:
-            text += f"📄 {c['notice_title'][:20]}...\n"
+            text += f"📄 {c.get('notice_title', '제목없음')[:20]}...\n"
             text += f"🔄 {c.get('detour_route', '정보없음')[:30]}...\n\n"
             
         return {
