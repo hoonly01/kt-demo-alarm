@@ -43,7 +43,8 @@ async def lifespan(app: FastAPI):
     from app.services.event_service import EventService
     setup_scheduler(
         crawling_func=CrawlingService.crawl_and_sync_events,  # 실제 크롤링 서비스 연동
-        route_check_func=EventService.scheduled_route_check
+        route_check_func=EventService.scheduled_route_check,
+        bus_crawling_func=BusNoticeService.refresh,           # 버스 통제 공지 재크롤링
     )
     start_scheduler()
     
