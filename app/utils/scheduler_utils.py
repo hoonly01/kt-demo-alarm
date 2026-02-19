@@ -10,13 +10,14 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
-def setup_scheduler(crawling_func, route_check_func):
+def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None):
     """
     스케줄러 설정 및 작업 등록
     
     Args:
-        crawling_func: 크롤링 함수
+        crawling_func: 크롤링 함수 (SMPA 집회 데이터)
         route_check_func: 경로 확인 함수
+        bus_crawling_func: 버스 통제 공지 재크롤링 함수 (선택)
     """
     # 설정된 시간에 SMPA 집회 데이터 크롤링 및 동기화
     scheduler.add_job(
@@ -36,6 +37,16 @@ def setup_scheduler(crawling_func, route_check_func):
         replace_existing=True
     )
     
+    # 버스 통제 공지 재크롤링 (매일 CRAWLING_HOUR:CRAWLING_MINUTE)
+    if bus_crawling_func:
+        scheduler.add_job(
+            bus_crawling_func,
+            CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE),
+            id="daily_bus_crawling",
+            name="Daily Bus Control Crawling",
+            replace_existing=True
+        )
+
     logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인")
 
 

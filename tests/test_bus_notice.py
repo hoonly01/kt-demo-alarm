@@ -36,6 +36,35 @@ async def test_bus_notice_service_initialization(monkeypatch):
         assert BusNoticeService.cached_notices["1"]["title"] == "Test Notice"
 
 
+@pytest.mark.asyncio
+async def test_bus_notice_service_refresh(monkeypatch):
+    """refresh()가 크롤러를 재호출하고 캐시를 갱신하는지 검증"""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
+    with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
+        mock_instance = MockCrawler.return_value
+        mock_instance.crawl_notices.return_value = (
+            {"2": {"seq": "2", "title": "갱신된 공지"}}, True
+        )
+        # 이미 초기화된 상태 모사
+        BusNoticeService.crawler = mock_instance
+        BusNoticeService.cached_notices = {"1": {"seq": "1", "title": "기존 공지"}}
+
+        await BusNoticeService.refresh()
+
+        assert "2" in BusNoticeService.cached_notices
+        assert BusNoticeService.cached_notices["2"]["title"] == "갱신된 공지"
+        assert BusNoticeService.last_update is not None
+        mock_instance.crawl_notices.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bus_notice_service_refresh_without_crawler():
+    """크롤러가 초기화되지 않은 상태에서 refresh()를 호출해도 예외가 발생하지 않는지 검증"""
+    BusNoticeService.crawler = None
+    # 예외 없이 조기 반환되어야 함
+    await BusNoticeService.refresh()
+
+
 def test_get_notices_endpoint():
     print("Testing GET /bus/notices endpoint...")
     # Mock cached notices
