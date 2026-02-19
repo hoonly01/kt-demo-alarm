@@ -22,15 +22,15 @@ class BusNoticeService:
     async def initialize(cls):
         """크롤러 초기화 및 데이터 로드"""
         try:
-            if not settings.GOOGLE_API_KEY and not settings.GEMINI_API_KEY:
-                logger.warning("⚠️ GOOGLE_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+            if not settings.GEMINI_API_KEY:
+                logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
                 return
 
             logger.info("🚌 BusNoticeService 초기화 중...")
             
             # 크롤러 인스턴스 생성
             cls.crawler = TOPISCrawler(
-                gemini_api_key=settings.GOOGLE_API_KEY or settings.GEMINI_API_KEY,
+                gemini_api_key=settings.GEMINI_API_KEY,
                 cache_file="topis_cache.json"  # 프로젝트 루트에 저장
             )
             
