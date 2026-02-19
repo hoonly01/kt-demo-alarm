@@ -338,8 +338,9 @@ class BusNoticeService:
         """실제 콜백 요청 전송 (aiohttp 사용)"""
         import aiohttp
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=data, timeout=5) as response:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=data) as response:
                     logger.info(f"콜백 전송 결과: {response.status}")
         except Exception as e:
             logger.error(f"콜백 전송 실패: {e}")
