@@ -101,7 +101,7 @@ jobs:
           # Upload artifacts/config to EC2
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             kt-demo-alarm-image.tar.gz \
-            ${EC2_USERNAME}@${EC2_HOST}:/tmp/kt-demo-alarm-image.tar.gz
+            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
 
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             docker-compose.yml .env \
@@ -117,8 +117,8 @@ jobs:
             docker compose down || true
 
             # Load new image (uploaded as gzip)
-            gunzip -c /tmp/kt-demo-alarm-image.tar.gz | docker load
-            rm -f /tmp/kt-demo-alarm-image.tar.gz
+            gunzip -c /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz | docker load
+            rm -f /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
 
             # Protect env file
             chmod 600 .env || true
