@@ -88,7 +88,7 @@ def convert_hwpx_to_pdf_simple(folder_path):
                         hwp.HParameterSet.HFileOpenSave.Format = "PDF"
                         hwp.HAction.Execute("FileSaveAsPdf", hwp.HParameterSet.HFileOpenSave.HSet)
                         time.sleep(1)
-                    except:
+                    except Exception:
                         raise Exception("모든 PDF 저장 방법 실패")
             
             # 변환 완료 확인
@@ -110,7 +110,7 @@ def convert_hwpx_to_pdf_simple(folder_path):
                     hwp.Clear(1)  # 문서 닫기
                     hwp.Quit()    # 한글 종료
                     time.sleep(0.5)
-                except:
+                except Exception:
                     pass  # 종료 시 오류 무시
             
             print(f"  한글 프로그램 종료\n")
