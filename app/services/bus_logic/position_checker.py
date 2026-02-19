@@ -62,7 +62,7 @@ def check_control_by_position(crawler, notices, tm_x, tm_y, radius=500, target_d
         print(f"조회 날짜: {target_date}")
     print(f"{'='*60}")
     
-    # 통제 정류소 목록 수집
+    # 통제 정류소 목록 수집 (동일 station_id 등장 시 merge)
     controlled_stations = {}
     notice_by_station = {}
     
@@ -71,15 +71,22 @@ def check_control_by_position(crawler, notices, tm_x, tm_y, radius=500, target_d
         detour_routes = notice.get('detour_routes', {})
         
         for station_id, info in station_info.items():
-            controlled_stations[station_id] = {
-                'name': info.get('name', ''),
-                'periods': info.get('periods', []),
-                'affected_routes': info.get('affected_routes', [])
-            }
-            notice_by_station[station_id] = {
-                'title': notice['title'],
-                'detour_routes': detour_routes
-            }
+            if station_id in controlled_stations:
+                # 기존 항목에 기간·노선 병합
+                existing = controlled_stations[station_id]
+                existing['periods'] = list(set(existing['periods'] + info.get('periods', [])))
+                existing['affected_routes'] = list(set(existing['affected_routes'] + info.get('affected_routes', [])))
+                notice_by_station[station_id]['detour_routes'].update(detour_routes)
+            else:
+                controlled_stations[station_id] = {
+                    'name': info.get('name', ''),
+                    'periods': list(info.get('periods', [])),
+                    'affected_routes': list(info.get('affected_routes', []))
+                }
+                notice_by_station[station_id] = {
+                    'title': notice['title'],
+                    'detour_routes': dict(detour_routes)
+                }
     
     # 주변 정류소와 통제 정류소 매칭
     found_controlled = False
@@ -102,14 +109,23 @@ def check_control_by_position(crawler, notices, tm_x, tm_y, radius=500, target_d
             matched_control = controlled_stations[station_id]
             matched_key = station_id
         
-        # 이름으로 매칭 시도
+        # 이름으로 매칭 시도 (exact match 우선, 실패 시 substring fallback)
         else:
+            # 1단계: 정확히 일치하는 이름 우선
             for ctrl_id, ctrl_info in controlled_stations.items():
                 ctrl_name = ctrl_info['name']
-                if ctrl_name and (station_name in ctrl_name or ctrl_name in station_name):
+                if ctrl_name and ctrl_name == station_name:
                     matched_control = ctrl_info
                     matched_key = ctrl_id
                     break
+            # 2단계: 부분 문자열 매칭 fallback
+            if not matched_control:
+                for ctrl_id, ctrl_info in controlled_stations.items():
+                    ctrl_name = ctrl_info['name']
+                    if ctrl_name and (station_name in ctrl_name or ctrl_name in station_name):
+                        matched_control = ctrl_info
+                        matched_key = ctrl_id
+                        break
         
         # 매칭된 통제 정류소가 있으면 출력
         if matched_control and matched_key:

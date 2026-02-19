@@ -85,9 +85,9 @@ app = FastAPI(
     }
 )
 
-# 정적 파일 마운트 (버스 노선 이미지 등)
-os.makedirs("topis_attachments", exist_ok=True)
-app.mount("/static", StaticFiles(directory="topis_attachments"), name="static")
+# 정적 파일 마운트 (버스 노선 이미지 전용)
+os.makedirs("topis_attachments/route_images", exist_ok=True)
+app.mount("/static", StaticFiles(directory="topis_attachments/route_images"), name="static")
 
 # 라우터 등록
 app.include_router(users.router)
