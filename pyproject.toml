@@ -22,7 +22,7 @@ dependencies = [
     "pillow",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest",
     "pytest-asyncio",
