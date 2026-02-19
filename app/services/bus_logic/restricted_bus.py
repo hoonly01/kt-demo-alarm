@@ -12,7 +12,10 @@ import os
 import re
 import tempfile
 import base64
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET  # fallback: defusedxml 설치 권장
 import pandas as pd
 import shutil
 from datetime import datetime, timedelta
@@ -341,7 +344,6 @@ class TOPISCrawler:
             
             response = requests.get(url, params=params, timeout=5, verify=False)
             if response.status_code == 200:
-                import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(response.content.decode('utf-8'))
                 except ET.ParseError:
@@ -367,7 +369,6 @@ class TOPISCrawler:
                 
                 response = requests.get(url, params=params, timeout=5, verify=False)
                 if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
                     except ET.ParseError:
@@ -392,7 +393,6 @@ class TOPISCrawler:
                 
                 response = requests.get(url, params=params, timeout=5, verify=False)
                 if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
                     except ET.ParseError:
