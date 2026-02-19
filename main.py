@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import logging
+import os
 
 # 분리된 모듈들 import
 from app.database.connection import init_db
@@ -85,6 +86,7 @@ app = FastAPI(
 )
 
 # 정적 파일 마운트 (버스 노선 이미지 등)
+os.makedirs("topis_attachments", exist_ok=True)
 app.mount("/static", StaticFiles(directory="topis_attachments"), name="static")
 
 # 라우터 등록
