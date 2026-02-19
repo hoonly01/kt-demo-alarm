@@ -14,6 +14,10 @@ class Settings:
     KAKAO_REST_API_KEY: str = os.getenv("KAKAO_REST_API_KEY", "")
     BOT_ID: str = os.getenv("BOT_ID", "")
     KAKAO_BOT_API_URL: str = os.getenv("KAKAO_BOT_API_URL", "https://bot-api.kakao.com/v1/bots/message/send")
+
+    # Gemini API 설정 (버스 통제 알림용)
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     
     # --- Security Configuration ---
     API_KEY: str = os.getenv("API_KEY", "")
