@@ -54,10 +54,21 @@ class BusNoticeService:
 
     @classmethod
     async def refresh(cls):
-        """매일 버스 통제 공지 재크롤링 (스케줄러에서 호출)"""
-        if not cls.crawler:
-            logger.warning("⚠️ 크롤러가 초기화되지 않아 refresh를 수행할 수 없습니다.")
+        """매일 버스 통제 공지 재크롤링 (스케줄러에서 호출)
+        
+        크롤러가 초기화되지 않은 경우(서버 최초 기동 후 첫 실행) 자동으로 초기화합니다.
+        """
+        if not settings.GEMINI_API_KEY:
+            logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
             return
+
+        # 크롤러 미초기화 시 자동 생성 (서버 시작 후 첫 스케줄러 실행)
+        if not cls.crawler:
+            logger.info("🚌 BusNoticeService 크롤러 최초 초기화...")
+            cls.crawler = TOPISCrawler(
+                gemini_api_key=settings.GEMINI_API_KEY,
+                cache_file="topis_cache/topis_cache.json"
+            )
 
         logger.info("🔄 버스 통제 공지 재갱신 시작...")
         try:
