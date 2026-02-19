@@ -8,13 +8,18 @@ import asyncio
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.database.connection import get_db
 from app.services.event_service import EventService
+from app.services.auth_service import verify_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.post("", response_model=EventResponse)
-async def create_event(event_data: EventCreate, db: sqlite3.Connection = Depends(get_db)):
+async def create_event(
+    event_data: EventCreate, 
+    db: sqlite3.Connection = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
+):
     """새로운 집회/이벤트 생성"""
     result = EventService.create_event(event_data, db)
     
@@ -121,7 +126,10 @@ async def check_user_route_events(
 
 
 @router.post("/auto-check-all-routes")
-async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
+async def auto_check_all_routes(
+    db: sqlite3.Connection = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
+):
     """
     모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
     (관리자용 또는 수동 트리거)
@@ -193,7 +201,7 @@ async def auto_check_all_routes(db: sqlite3.Connection = Depends(get_db)):
 
 
 @router.post("/crawl-and-sync")
-async def crawl_and_sync_events():
+async def crawl_and_sync_events(api_key: str = Depends(verify_api_key)):
     """SMPA 집회 데이터 크롤링 및 동기화"""
     try:
         from app.services.crawling_service import CrawlingService
