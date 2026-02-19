@@ -51,6 +51,27 @@ class BusNoticeService:
             cls.cached_notices = []
 
     @classmethod
+    async def refresh(cls):
+        """매일 버스 통제 공지 재크롤링 (스케줄러에서 호출)"""
+        if not cls.crawler:
+            logger.warning("⚠️ 크롤러가 초기화되지 않아 refresh를 수행할 수 없습니다.")
+            return
+
+        logger.info("🔄 버스 통제 공지 재갱신 시작...")
+        try:
+            cls.cached_notices, _ = await asyncio.to_thread(cls.crawler.crawl_notices)
+            cls.last_update = datetime.now(KST)
+            logger.info(f"✅ 재갱신 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
+
+            # 이미지 재생성 (백그라운드)
+            cls._image_task = asyncio.create_task(cls.generate_all_route_images())
+            cls._image_task.add_done_callback(
+                lambda t: logger.error(f"이미지 재생성 오류: {t.exception()}") if not t.cancelled() and t.exception() else None
+            )
+        except Exception as e:
+            logger.error(f"❌ 버스 통제 공지 재갱신 실패: {e}")
+
+    @classmethod
     def get_korean_time(cls):
         return datetime.now(KST)
 
