@@ -7,13 +7,17 @@ import logging
 from app.models.user import UserPreferences, InitialSetupRequest
 from app.database.connection import get_db
 from app.services.user_service import UserService
+from app.services.auth_service import verify_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.get("")
-async def get_users(db: sqlite3.Connection = Depends(get_db)):
+async def get_users(
+    db: sqlite3.Connection = Depends(get_db),
+    api_key: str = Depends(verify_api_key)
+):
     """등록된 사용자 목록 조회 (경로 정보 포함)"""
     try:
         cursor = db.cursor()
@@ -94,6 +98,10 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
     """
     logger.info(f"🔍 save_user_info 요청 body: {request}")
 
+    # 기본값 초기화
+    bot_user_key = None
+    plusfriend_key = None
+
     # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
     if 'userRequest' in request:
         user_info = request['userRequest']['user']
@@ -104,20 +112,25 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
         user_id = plusfriend_key if plusfriend_key else bot_user_key
     else:  # 로컬 테스트용
         user_id = request.get('userId', 'test-user')
+        bot_user_key = "test_user_key" # 테스트용 기본값
 
     # 사용자 생성/업데이트
     if 'userRequest' in request:
         from app.services.user_service import UserService
         from app.database.connection import get_db_connection
+        
+        # [REFACTOR] 통합된 사용자 동기화 로직 사용
         with get_db_connection() as db:
-            UserService.save_or_update_user(user_id, db, f"경로 등록: {request.get('action', {}).get('params', {}).get('departure', '')} → {request.get('action', {}).get('params', {}).get('arrival', '')}")
+            UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
     
     # 출발지와 도착지 정보 추출
     departure = request.get('action', {}).get('params', {}).get('departure', '')
     arrival = request.get('action', {}).get('params', {}).get('arrival', '')
     
     # 백그라운드에서 경로 정보 저장
-    background_tasks.add_task(save_route_to_db, user_id, departure, arrival)
+    # user_id는 plusfriend_key가 있으면 그것을, 없으면 bot_user_key를 사용 (기존 로직 유지)
+    target_user_id = plusfriend_key if plusfriend_key else bot_user_key
+    background_tasks.add_task(save_route_to_db, target_user_id, departure, arrival)
     
     # 즉시 응답 (사용자 대기 시간 단축)
     return {
@@ -147,123 +160,121 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
     - Skill Block에서 경로 등록 시 호출
     - plusfriendUserKey를 primary identifier로 사용
     """
-    logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
+    try:
+        logger.info(f"🔍 /users/initial-setup 요청 body: {request}")
 
-    # Skill Block 형식 파싱
-    user_request = request.get('userRequest', {})
-    user_info = user_request.get('user', {})
-    action = request.get('action', {})
-    params = action.get('params', {})
+        # Skill Block 형식 파싱
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        action = request.get('action', {})
+        params = action.get('params', {})
 
-    # ID 추출
-    bot_user_key = user_info.get('id')
-    properties = user_info.get('properties', {})
-    plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
+        # ID 추출
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')  # ← 핵심!
 
-    # 파라미터 추출
-    departure = params.get('departure')
-    arrival = params.get('arrival')
-    marked_bus = params.get('marked_bus')
-    language = params.get('language')
+        if not plusfriend_key:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."
+                            }
+                        }
+                    ]
+                }
+            }
 
-    logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
-    logger.info(f"📍 경로: {departure} → {arrival}, 버스={marked_bus}, 언어={language}")
+        # 파라미터 추출
+        departure = params.get('departure')
+        arrival = params.get('arrival')
+        marked_bus = params.get('marked_bus')
+        language = params.get('language')
 
-    # InitialSetupRequest 생성 (plusfriend_key를 bot_user_key로 사용!)
-    setup_request = InitialSetupRequest(
-        bot_user_key=plusfriend_key,  # ← plusfriend_key를 primary key로 사용!
-        departure=departure,
-        arrival=arrival,
-        marked_bus=marked_bus,
-        language=language
-    )
+        logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
+        logger.info(f"📍 경로: {departure} → {arrival}, 버스={marked_bus}, 언어={language}")
 
-    # 사용자 정보 저장 (3개 ID 모두 저장)
-    from app.database.connection import get_db_connection
-    from datetime import datetime
-
-    with get_db_connection() as db_conn:
-        cursor = db_conn.cursor()
-
-        # plusfriend_key로 조회 (primary identifier)
-        cursor.execute(
-            "SELECT id, open_id FROM users WHERE plusfriend_user_key = ?",
-            (plusfriend_key,)
+        # InitialSetupRequest 생성 (plusfriend_key를 bot_user_key로 사용!)
+        setup_request = InitialSetupRequest(
+            bot_user_key=plusfriend_key,  # ← plusfriend_key를 primary key로 사용!
+            departure=departure,
+            arrival=arrival,
+            marked_bus=marked_bus,
+            language=language
         )
-        existing = cursor.fetchone()
 
-        if existing:
-            # 기존 사용자 업데이트
-            logger.info(f"✅ 기존 사용자 발견: plusfriend={plusfriend_key}")
-            cursor.execute("""
-                UPDATE users
-                SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1
-                WHERE plusfriend_user_key = ?
-            """, (bot_user_key, datetime.now(), plusfriend_key))
+        # [REFACTOR] 통합된 사용자 동기화 로직 사용
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # [REFACTOR] 전체 프로필 설정 (경로 + 설정)
+        result = await UserService.setup_user_profile(setup_request, db)
+
+        if result["success"]:
+            # Skill 응답 형식 (카카오톡 말풍선)
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"📍 출발지: {departure}\n"
+                                    f"📍 도착지: {arrival}\n\n"
+                                    "✅ 경로 등록이 완료되었습니다!\n"
+                                    "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다."
+                                )
+                            }
+                        }
+                    ]
+                }
+            }
         else:
-            # 웹훅 사용자 찾기 시도 (open_id만 있는 경우)
-            cursor.execute("""
-                SELECT id, open_id FROM users
-                WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL
-                LIMIT 1
-            """)
-            orphan = cursor.fetchone()
+            # 실패 시에도 200 OK 리턴하고 에러 메시지를 사용자에게 전달
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": result["error"]
+                            }
+                        }
+                    ]
+                }
+            }
 
-            if orphan:
-                # 웹훅 사용자 연결
-                logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan[1]} → plusfriend={plusfriend_key}")
-                cursor.execute("""
-                    UPDATE users
-                    SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?
-                    WHERE id = ?
-                """, (bot_user_key, plusfriend_key, datetime.now(), orphan[0]))
-            else:
-                # 완전 신규 사용자
-                logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
-                cursor.execute("""
-                    INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
-                    VALUES (?, ?, ?, ?, 1, 1)
-                """, (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
-
-        db_conn.commit()
-
-    # 경로 정보 저장
-    result = await UserService.save_user_route_info(setup_request, db)
-
-    if result["success"]:
-        # Skill 응답 형식 (카카오톡 말풍선)
+    except Exception as e:
+        logger.exception("초기 설정 중 시스템 오류 발생")
+        # 시스템 오류 시에도 200 OK 리턴
         return {
             "version": "2.0",
             "template": {
                 "outputs": [
                     {
                         "simpleText": {
-                            "text": (
-                                f"📍 출발지: {departure}\n"
-                                f"📍 도착지: {arrival}\n\n"
-                                "✅ 경로 등록이 완료되었습니다!\n"
-                                "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다."
-                            )
+                            "text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                         }
                     }
                 ]
             }
         }
-    else:
-        raise HTTPException(status_code=400, detail=result["error"])
 
 
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
-    """백그라운드 작업: 경로 정보 저장"""
+    """백그라운드 작업: 경로 정보만 업데이트"""
     from app.database.connection import DATABASE_PATH
     try:
         conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        user_setup = InitialSetupRequest(
-            bot_user_key=user_id,
-            departure=departure,
-            arrival=arrival
+        # [REFACTOR] 경로 정보만 업데이트
+        result = await UserService.update_user_route(
+            user_id=user_id, 
+            departure=departure, 
+            arrival=arrival, 
+            db=conn
         )
-        result = await UserService.save_user_route_info(user_setup, conn)
         conn.close()
         
         if result["success"]:
