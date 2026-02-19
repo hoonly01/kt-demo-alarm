@@ -117,8 +117,9 @@ jobs:
             set -euo pipefail
             cd /opt/kt-demo-alarm
 
-            # bind mount 폴더 생성 및 모든 권한 부여 (컨테이너 내부 appuser가 쓸 수 있게 함)
-            mkdir -p data logs topis_attachments topis_cache
+            # Make directory with sudo and change owner to $USER
+            sudo mkdir -p data logs topis_attachments topis_cache
+            sudo chown -R $USER:$USER data logs topis_attachments topis_cache
             chmod -R 777 data logs topis_attachments topis_cache
 
             # Stop old stack (ignore if not running)
@@ -134,8 +135,8 @@ jobs:
             # Start without building (important!)
             docker compose up -d --no-build
 
-            # 실행 중인 컨테이너 안에서 appuser가 소유권을 갖도록 한 번 더 확인
-            docker compose exec -u root kt-demo-alarm chown -R appuser:appuser /app/data /app/topis_attachments
+            # Ensure appuser owns data and attachments inside container
+            docker compose exec -u root kt-demo-alarm chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache
 
             echo "Waiting for service health..."
             for i in {1..24}; do
