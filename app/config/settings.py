@@ -16,8 +16,13 @@ class Settings:
     KAKAO_BOT_API_URL: str = os.getenv("KAKAO_BOT_API_URL", "https://bot-api.kakao.com/v1/bots/message/send")
 
     # Gemini API 설정 (버스 통제 알림용)
+    # Deprecated: GEMINI_API_KEY 사용 권장 (하위 호환성을 위해 유지)
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+
+    # --- Bus API Configuration ---
+    SEOUL_BUS_API_KEY: str = os.getenv("SEOUL_BUS_API_KEY", "")
+    RENDER_EXTERNAL_URL: str = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
     
     # --- Security Configuration ---
     API_KEY: str = os.getenv("API_KEY", "")

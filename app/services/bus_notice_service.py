@@ -296,7 +296,7 @@ class BusNoticeService:
         # 도메인 추가 (이미지 URL이 상대경로인 경우)
         full_image_url = image_url
         if image_url.startswith("/"):
-            base_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+            base_url = settings.RENDER_EXTERNAL_URL
             full_image_url = f"{base_url}{image_url}"
 
         callback_message = {
