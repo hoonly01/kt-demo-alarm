@@ -1,9 +1,15 @@
-"""집회 데이터 크롤링 서비스"""
+"""집회 데이터 크롤링 서비스
+
+SMPA(서울경찰청) + SPATIC 양쪽 소스에서 집회 정보를 수집하여
+events 테이블에 동기화합니다.
+"""
+import asyncio
 import logging
 import sqlite3
 import os
 import re
 import json
+import time
 import urllib.parse
 import shutil
 from datetime import datetime
@@ -15,12 +21,24 @@ from pdfminer.high_level import extract_text
 from zoneinfo import ZoneInfo
 
 from app.database.connection import DATABASE_PATH
+from app.services.spatic_crawler import scrape_spatic, split_places
 
 logger = logging.getLogger(__name__)
 
 # SMPA 크롤링 상수들 (MinhaKim02 구현 기반)
 BASE_URL = "https://www.smpa.go.kr"
 LIST_URL = f"{BASE_URL}/user/nd54882.do"
+
+# 지명 치환 맵 (v2 지오코딩 정확도 향상)
+PLACE_NAME_REPLACE_MAP = {
+    "효자파출소": "청운파출소",
+    "효자치안센터": "청운파출소",
+    "남대문서": "남대문경찰서",
+    "파이낸스": "서울파이낸스센터",
+    "의사당역": "국회의사당역",
+    "사랑채": "청와대 사랑채",
+    "전쟁기념관": "용산 전쟁기념관",
+}
 
 
 class CrawlingService:
@@ -80,21 +98,41 @@ class CrawlingService:
     @staticmethod
     async def _crawl_and_parse_today_events() -> List[Dict[str, Any]]:
         """
-        오늘 집회 정보를 크롤링하고 파싱하여 DB 형식으로 반환
-        MinhaKim02의 완전한 크롤링 알고리즘 구현
-        
-        Returns:
-            List[Dict]: DB 형식으로 변환된 집회 정보
+        오늘 집회 정보를 SMPA + SPATIC 양쪽에서 크롤링하고 파싱하여 DB 형식으로 반환
+        """
+        # 1. SMPA 크롤링 (기존 PDF 기반)
+        smpa_events = await CrawlingService._crawl_smpa_events()
+        logger.info(f"SMPA 크롤링 결과: {len(smpa_events)}건")
+
+        # 2. SPATIC 크롤링 (신규, Selenium 기반 — 실패 시 빈 리스트)
+        spatic_events = await CrawlingService._crawl_spatic_events()
+        logger.info(f"SPATIC 크롤링 결과: {len(spatic_events)}건")
+
+        # 3. 병합 및 중복 제거
+        raw_events = CrawlingService._merge_and_deduplicate(smpa_events, spatic_events)
+        logger.info(f"병합 후 총: {len(raw_events)}건")
+
+        if not raw_events:
+            return []
+
+        # 4. DB 형식으로 변환
+        logger.info("DB 형식으로 데이터 변환 시작")
+        db_events = await CrawlingService._convert_raw_events_to_db_format(raw_events)
+        logger.info(f"DB 형식 변환 완료: {len(db_events)}개 이벤트")
+
+        return db_events
+
+    @staticmethod
+    async def _crawl_smpa_events() -> List[Dict[str, Any]]:
+        """
+        SMPA(서울경찰청) PDF 기반 크롤링 (기존 로직 분리)
         """
         temp_dir = "temp_pdfs"
-        
         try:
-            # 1. SMPA 사이트에서 오늘자 PDF 다운로드
             logger.info("SMPA 사이트에서 오늘자 PDF 다운로드 시작")
             pdf_path, title_text = await CrawlingService._download_today_pdf_with_title(out_dir=temp_dir)
             logger.info(f"PDF 다운로드 성공: {pdf_path}")
-            
-            # 2. 제목에서 날짜 추출
+
             ymd = CrawlingService._extract_ymd_from_title(title_text)
             if ymd:
                 logger.info(f"제목에서 날짜 추출: {ymd[0]}-{ymd[1]}-{ymd[2]}")
@@ -102,36 +140,85 @@ class CrawlingService:
                 logger.warning("제목에서 날짜 추출 실패, 현재 날짜 사용")
                 now = datetime.now()
                 ymd = (str(now.year), f"{now.month:02d}", f"{now.day:02d}")
-            
-            # 3. PDF 파싱
+
             logger.info("PDF 파싱 시작")
             raw_events = CrawlingService._parse_pdf(pdf_path, ymd=ymd)
             logger.info(f"PDF 파싱 완료: {len(raw_events)}개 집회 정보 추출")
-            
-            # 4. DB 형식으로 변환  
-            logger.info("DB 형식으로 데이터 변환 시작")
-            db_events = await CrawlingService._convert_raw_events_to_db_format(raw_events)
-            logger.info(f"DB 형식 변환 완료: {len(db_events)}개 이벤트")
-            
-            # 5. 임시 파일 정리
+
+            # SMPA 결과에 장소_원본 필드 추가 (병합 호환)
+            for row in raw_events:
+                place_raw = str(row.get('장소', '')).strip()
+                if place_raw.startswith('[') and place_raw.endswith(']'):
+                    try:
+                        places = json.loads(place_raw)
+                    except json.JSONDecodeError:
+                        places = split_places(place_raw)
+                else:
+                    places = split_places(place_raw) if place_raw else []
+                row['장소_원본'] = places
+                row['비고'] = row.get('비고', '') or 'SMPA'
+
             try:
                 os.remove(pdf_path)
-                logger.debug(f"임시 PDF 파일 삭제: {pdf_path}")
             except OSError:
                 pass
-            
-            return db_events
-            
+
+            return raw_events
+
         except Exception as e:
-            logger.error(f"집회 정보 크롤링 및 파싱 실패: {e}")
+            logger.error(f"SMPA 크롤링 실패: {e}")
             return []
         finally:
-            # 임시 디렉토리 정리
             try:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
             except OSError:
                 pass
+
+    @staticmethod
+    async def _crawl_spatic_events() -> List[Dict[str, Any]]:
+        """
+        SPATIC(경찰청 집회 시스템) 크롤링 — Selenium 필요, 실패 시 빈 리스트
+        """
+        try:
+            # 동기 함수를 비동기로 실행
+            rows = await asyncio.to_thread(scrape_spatic)
+            return rows
+        except Exception as e:
+            logger.warning(f"SPATIC 크롤링 실패 (무시): {e}")
+            return []
+
+    @staticmethod
+    def _merge_and_deduplicate(
+        smpa_list: List[Dict], spatic_list: List[Dict]
+    ) -> List[Dict]:
+        """
+        SMPA와 SPATIC 결과를 병합하고 중복 제거 (v2 로직 포팅)
+        """
+        combined = smpa_list + spatic_list
+        merged = []
+        seen = set()
+
+        for row in combined:
+            y = row.get("년", "")
+            m = row.get("월", "")
+            d = row.get("일", "")
+            start = row.get("start_time", "")
+            places = row.get("장소_원본", [])
+
+            unique_places = []
+            for p in places:
+                key = f"{y}{m}{d}_{start}_{re.sub(r'\\s+', '', p)}"
+                if key not in seen:
+                    seen.add(key)
+                    unique_places.append(p)
+
+            if unique_places:
+                new_row = row.copy()
+                new_row["장소_원본"] = unique_places
+                merged.append(new_row)
+
+        return merged
 
     @staticmethod
     async def _sync_events_to_db(events: List[Dict[str, Any]], db: sqlite3.Connection) -> int:
@@ -619,13 +706,98 @@ class CrawlingService:
             return "09:00"
 
     @staticmethod
+    def _normalize_place_name(place: str) -> str:
+        """장소명 정규화 — 노이즈 제거 및 지명 치환 (v2 로직)"""
+        t = place.strip()
+
+        # 노이즈 제거
+        t = t.replace("구)", "").replace("(구)", "")
+        t = re.sub(r'\d+(\.\d+)?km', '', t)
+        t = re.sub(r'[<\[\(].*?[>\]\)]', '', t)
+        t = re.sub(r'\(.*$', '', t)
+
+        # 지명 치환
+        for old_name, new_name in PLACE_NAME_REPLACE_MAP.items():
+            if old_name in t and new_name not in t:
+                t = t.replace(old_name, new_name)
+
+        # 방향 분리자 처리
+        split_chars = r'[⇄↔→~]'
+        if re.search(split_chars, t):
+            parts = re.split(split_chars, t)
+            if parts:
+                t = parts[0].strip()
+
+        # 출구 표기 정리
+        t = re.sub(r'(\d+)\s*出', r'\1번출구', t)
+        t = t.replace('出', '출구')
+
+        # 방향 지시어 제거
+        noise_regex = (
+            r'(동측|서측|남측|북측|동쪽|서쪽|남쪽|북쪽|건너편|맞은편|옆|'
+            r'방향|방면|부근|일대|진입로|사거리|교차로|삼거리|오거리|'
+            r'출구|입구|인근|앞|뒤|안|밖)'
+        )
+        t = re.sub(noise_regex, ' ', t)
+        t = re.sub(r'[^\w\s\d]', ' ', t)
+        t = re.sub(r'\s+', ' ', t).strip()
+
+        return t
+
+    @staticmethod
+    async def _kakao_geocode_multi(place: str) -> Tuple[Optional[float], Optional[float]]:
+        """
+        다중 쿼리 전략으로 카카오 지오코딩 (v2 로직 적용)
+        서울 외 지역 결과는 필터링합니다.
+        """
+        from app.utils.geo_utils import get_location_info
+
+        clean_name = CrawlingService._normalize_place_name(place)
+        if not clean_name or len(clean_name) < 2:
+            return None, None
+
+        # 다중 후보 쿼리 생성
+        candidates = [f"서울 {clean_name}", clean_name]
+        tokens = clean_name.split()
+        if len(tokens) > 1:
+            candidates.append(f"서울 {tokens[-1]}")
+            candidates.append(f"서울 {tokens[0]}")
+        if not clean_name.endswith("역") and len(clean_name) <= 5:
+            candidates.append(f"서울 {clean_name}역")
+
+        for query in candidates:
+            if len(query.replace("서울", "").strip()) < 2:
+                continue
+            try:
+                loc_info = await get_location_info(query)
+                if loc_info:
+                    addr = loc_info.get("address", "")
+                    # 서울 지역만 허용
+                    if addr and "서울" not in addr[:5]:
+                        logger.debug(f"서울 외 결과 무시: {query} -> {addr}")
+                        continue
+                    return loc_info["y"], loc_info["x"]
+            except Exception:
+                continue
+            await asyncio.sleep(0.05)
+
+        return None, None
+
+    @staticmethod
     async def _resolve_location_info(row: Dict, row_index: int) -> Tuple[str, float, float]:
-        """장소명과 좌표 결정"""
+        """장소명과 좌표 결정 — v2 다중 지오코딩 전략 적용"""
+        # 장소_원본 필드 우선 사용 (병합 후 존재)
+        places = row.get('장소_원본', [])
         location_raw = str(row.get('장소', '')).strip()
+
+        # 장소명 결정
         location_name = "알 수 없는 장소"
-        
-        # 장소명 파싱
-        if location_raw:
+        if places and isinstance(places, list):
+            for p in places:
+                if p and str(p).strip():
+                    location_name = str(p).strip()
+                    break
+        elif location_raw:
             if location_raw.startswith('[') and location_raw.endswith(']'):
                 try:
                     locations = json.loads(location_raw)
@@ -641,35 +813,30 @@ class CrawlingService:
                         location_name = parts[0]
             else:
                 location_name = location_raw
-        
+
         # 좌표 파싱 (PDF 데이터 우선)
         latitude = 37.5709
         longitude = 126.9769
         coords_found = False
-        
+
         try:
             lat_val = CrawlingService._parse_coordinate_value(row.get('위도'))
             lon_val = CrawlingService._parse_coordinate_value(row.get('경도'))
-            
             if lat_val and lon_val:
                 latitude = lat_val
                 longitude = lon_val
                 coords_found = True
         except Exception as e:
             logger.debug(f"행 {row_index+1} PDF 좌표 파싱 실패: {e}")
-            
-        # 카카오 API 폴백
+
+        # 카카오 API 다중 쿼리 폴백 (v2 개선)
         if not coords_found and location_name != "알 수 없는 장소":
-            try:
-                from app.utils.geo_utils import get_location_info
-                loc_info = await get_location_info(location_name)
-                if loc_info:
-                    latitude = loc_info["y"]
-                    longitude = loc_info["x"]
-                    logger.debug(f"카카오 API 좌표 획득: {location_name}")
-            except Exception as e:
-                logger.warning(f"카카오 API 좌표 조회 실패: {e}")
-                
+            lat, lon = await CrawlingService._kakao_geocode_multi(location_name)
+            if lat and lon:
+                latitude = lat
+                longitude = lon
+                logger.debug(f"카카오 다중 쿼리 좌표 획득: {location_name}")
+
         return location_name, latitude, longitude
 
     @staticmethod
