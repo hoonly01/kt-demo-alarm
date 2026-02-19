@@ -13,9 +13,9 @@
 - ✅ **Router-Service-Repository 패턴 적용**
 - ✅ **SMPA 크롤링 시스템 구현** (MinhaKim02 알고리즘)
 - ✅ **경로 기반 집회 감지 기능 완료**
-- ⏳ **알림 상태 추적 시스템** (PR #22 대기 중)
-- ⏳ **Docker 컨테이너화** (PR #22 대기 중)
-- ⏳ **테스트 인프라** (PR #22 대기 중)
+- ✅ **알림 상태 추적 시스템** (완료)
+- ✅ **Docker 컨테이너화** (완료)
+- ⚠️ **테스트 인프라** (기초 구축 완료)
 - ❌ **CI/CD 파이프라인** (Issue #23 계획)
 - ❌ **프로덕션 배포** (Issue #23 계획)
 
@@ -125,6 +125,7 @@ pip install -r requirements.txt
 
 ### 2. 환경변수 설정
 `.env` 파일 생성 (git ignored):
+> **보안 주의**: `API_KEY`는 관리자 및 API 클라이언트 인증에 필수입니다. 강력한 난수를 사용하세요.
 ```bash
 # .env.example 파일을 복사하여 시작
 cp .env.example .env
@@ -134,6 +135,9 @@ cat > .env << EOF
 # 카카오 API 설정
 KAKAO_REST_API_KEY=your_kakao_rest_api_key
 BOT_ID=your_bot_id
+
+# 보안 설정 (필수)
+API_KEY=your_secure_random_api_key
 
 # 서버 설정
 PORT=8000
