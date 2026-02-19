@@ -115,6 +115,27 @@ async def webhook_help():
 
 # --- REST Endpoints ---
 
+@router.get("/status")
+async def get_bus_service_status():
+    """버스 서비스 상태 조회 (크롤러 초기화 여부, 캐시 개수, 마지막 갱신 시각)"""
+    return {
+        "crawler_initialized": BusNoticeService.crawler is not None,
+        "cached_count": len(BusNoticeService.cached_notices),
+        "last_update": BusNoticeService.last_update.isoformat() if BusNoticeService.last_update else None,
+    }
+
+@router.post("/refresh")
+async def manual_bus_refresh():
+    """버스 통제 공지 수동 재크롤링 (테스트/운영용)"""
+    if not BusNoticeService.crawler:
+        raise HTTPException(status_code=503, detail="크롤러가 초기화되지 않았습니다. (GEMINI_API_KEY 확인)")
+    await BusNoticeService.refresh()
+    return {
+        "message": "버스 통제 공지 재크롤링 완료",
+        "cached_count": len(BusNoticeService.cached_notices),
+        "last_update": BusNoticeService.last_update.isoformat() if BusNoticeService.last_update else None,
+    }
+
 @router.get("/notices")
 async def get_notices(date: Optional[str] = None):
     """공지사항 목록"""
