@@ -607,7 +607,7 @@ class TOPISCrawler:
 - 불분명한 경우 "전체통제"로 간주
 
 날짜 표준화 규칙:
-- '8.15', '8월 15일' → '2025-08-15' (현재년도 기준)
+- '8.15', '8월 15일' → '{datetime.now().year}-08-15' (현재년도 기준)
 - 시간 없으면 시작: 00:00, 종료: 23:59
 - 종료일 없으면 시작일과 동일
 
@@ -616,17 +616,17 @@ class TOPISCrawler:
 JSON 형식:
 {{
   "control_type": "우회",
-  "general_periods": ["2025-08-15 09:00~2025-08-15 18:00"],
+  "general_periods": ["{datetime.now().year}-08-15 09:00~{datetime.now().year}-08-15 18:00"],
   "station_info": {{
     "01126": {{
       "name": "서울역버스환승센터",
-      "periods": ["2025-08-10 00:00~2025-08-16 18:00"],
+      "periods": ["{datetime.now().year}-08-10 00:00~{datetime.now().year}-08-16 18:00"],
       "affected_routes": ["7016", "262", "9401"],
       "control_scope": "특정노선"
     }},
     "01234": {{
       "name": "시청앞",
-      "periods": ["2025-08-15 09:00~2025-08-15 18:00"],
+      "periods": ["{datetime.now().year}-08-15 09:00~{datetime.now().year}-08-15 18:00"],
       "affected_routes": [],
       "control_scope": "전체통제"
     }}
