@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   kt-demo-alarm:
     image: kt-demo-alarm:latest
