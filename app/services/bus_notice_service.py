@@ -14,7 +14,7 @@ KST = pytz.timezone('Asia/Seoul')
 
 class BusNoticeService:
     crawler: Optional[TOPISCrawler] = None
-    cached_notices: List[Dict] = []
+    cached_notices: Dict[str, Dict] = {}
     last_update: Optional[datetime] = None
     _image_task: Optional[asyncio.Task] = None  # GC 방지를 위한 태스크 참조 보관
     
@@ -31,7 +31,7 @@ class BusNoticeService:
             # 크롤러 인스턴스 생성
             cls.crawler = TOPISCrawler(
                 gemini_api_key=settings.GEMINI_API_KEY,
-                cache_file="topis_cache.json"  # 프로젝트 루트에 저장
+                cache_file="topis_cache/topis_cache.json"  # Docker 볼륨 마운트 경로 내 저장
             )
             
             # 초기 데이터 로드 (동기 함수를 비동기로 실행)
@@ -41,14 +41,16 @@ class BusNoticeService:
             logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
             
             # 백그라운드 이미지 생성 시작 (참조 보관 → GC 방지 + 예외 로깅)
+            def _log_task_error(task: asyncio.Task):
+                if not task.cancelled() and task.exception():
+                    logger.error(f"이미지 생성 태스크 오류: {task.exception()}")
+
             cls._image_task = asyncio.create_task(cls.generate_all_route_images())
-            cls._image_task.add_done_callback(
-                lambda t: logger.error(f"이미지 생성 태스크 오류: {t.exception()}") if not t.cancelled() and t.exception() else None
-            )
+            cls._image_task.add_done_callback(_log_task_error)
             
         except Exception as e:
             logger.error(f"❌ BusNoticeService 초기화 실패: {e}")
-            cls.cached_notices = []
+            cls.cached_notices = {}
 
     @classmethod
     async def refresh(cls):
@@ -64,12 +66,18 @@ class BusNoticeService:
             logger.info(f"✅ 재갱신 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
 
             # 이미지 재생성 (백그라운드)
+            # 이전 태스크가 아직 실행 중이면 취소 후 교체
+            if cls._image_task and not cls._image_task.done():
+                cls._image_task.cancel()
+
+            def _log_image_error(task: asyncio.Task):
+                if not task.cancelled() and task.exception():
+                    logger.error(f"이미지 재생성 오류: {task.exception()}")
+
             cls._image_task = asyncio.create_task(cls.generate_all_route_images())
-            cls._image_task.add_done_callback(
-                lambda t: logger.error(f"이미지 재생성 오류: {t.exception()}") if not t.cancelled() and t.exception() else None
-            )
-        except Exception as e:
-            logger.error(f"❌ 버스 통제 공지 재갱신 실패: {e}")
+            cls._image_task.add_done_callback(_log_image_error)
+        except Exception:
+            logger.exception("❌ 버스 통제 공지 재갱신 실패")
 
     @classmethod
     def get_korean_time(cls):
