@@ -1,5 +1,8 @@
 import requests
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET  # fallback: defusedxml 설치 권장
 
 
 def get_stations_by_position(service_key, tm_x, tm_y, radius=500):
