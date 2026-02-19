@@ -247,21 +247,28 @@ class AlarmStatusService:
             int: 삭제된 작업 수
         """
         try:
+            from datetime import timedelta
+            
+            # Python에서 날짜 계산
+            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            
             with get_db_connection() as db:
                 cursor = db.cursor()
                 cursor.execute(
                     """
                     DELETE FROM alarm_tasks 
-                    WHERE created_at < datetime('now', '-' || ? || ' days')
+                    WHERE created_at < ?
                     """,
-                    (days,)
+                    (cutoff_date,)
                 )
                 db.commit()
                 deleted_count = cursor.rowcount
                 
-                logger.info(f"오래된 알림 작업 {deleted_count}개 정리 완료 ({days}일 이전)")
+                logger.info(f"오래된 알림 작업 {deleted_count}개 정리 완료 ({days}일 이전, {cutoff_date} 기준)")
                 return deleted_count
                 
         except Exception as e:
             logger.error(f"오래된 알림 작업 정리 실패: {e}")
+            # 테스트 실패 원인이 될 수 있으므로 예외를 다시 발생시키거나 0 반환
+            # 여기서는 0 반환하고 로그만 남김 (기존 로직 유지)
             return 0

@@ -10,27 +10,34 @@ from app.database.connection import init_db, DATABASE_PATH
 @pytest.fixture(scope="session")
 def test_db():
     """Create a test database for the session"""
+    from unittest.mock import patch
+    
     # Use a temporary database for testing
-    test_db_path = tempfile.mktemp(suffix=".db")
+    fd, test_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
     
-    # Temporarily override the database path
-    original_db_path = DATABASE_PATH
-    import app.database.connection as db_module
-    db_module.DATABASE_PATH = test_db_path
-    
-    # Initialize test database
-    init_db()
-    
-    yield test_db_path
-    
-    # Cleanup
-    try:
-        os.remove(test_db_path)
-    except FileNotFoundError:
-        pass
-    
-    # Restore original database path
-    db_module.DATABASE_PATH = original_db_path
+    # Patch settings
+    with patch("app.config.settings.settings.DATABASE_PATH", test_db_path), \
+         patch("app.config.settings.settings.API_KEY", "test-api-key"):
+        
+        # Also need to patch the variable in connection module if it was already imported
+        import app.database.connection as db_module
+        original_db_path = db_module.DATABASE_PATH
+        db_module.DATABASE_PATH = test_db_path
+        
+        # Initialize test database
+        init_db()
+        
+        yield test_db_path
+        
+        # Cleanup
+        try:
+            os.remove(test_db_path)
+        except FileNotFoundError:
+            pass
+        
+        # Restore original database path (although patch handles settings, module var needs manual restore)
+        db_module.DATABASE_PATH = original_db_path
 
 
 @pytest.fixture(scope="function")

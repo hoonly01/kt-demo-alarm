@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.utils.geo_utils import haversine_distance, get_route_coordinates, is_event_near_route_accurate, is_point_near_route
 from app.database.connection import DATABASE_PATH
+from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,6 @@ class EventService:
             # 자동 알림 전송 (옵션)
             if auto_notify and route_events:
                 # auto_notify_route_events 함수 호출
-                from app.services.notification_service import NotificationService
                 events_data = []
                 for event in route_events:
                     events_data.append({
@@ -313,7 +313,6 @@ class EventService:
                     })
 
             # Event API로 일괄 전송
-            from app.services.notification_service import NotificationService
             for departure, user_group in grouped_users.items():
                 user_ids = [u["plusfriend_key"] for u in user_group]
                 events_data = user_group[0]["events"]  # 공통 이벤트
@@ -352,7 +351,7 @@ class EventService:
         db: sqlite3.Connection = None
     ) -> List[EventResponse]:
         """
-        다가오는 집회 목록 조회 (오늘 포함 이후)
+        다가오는 집회 목록 조회 (현재 시간 이후, KST 기준)
         
         Args:
             limit: 조회 제한 (기본 5개)
@@ -362,17 +361,26 @@ class EventService:
             List[EventResponse]: 다가오는 집회 목록
         """
         try:
+            from zoneinfo import ZoneInfo
             cursor = db.cursor()
+            
+            # KST 현재 시간
+            now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+            now_str = now_kst.strftime("%Y-%m-%d %H:%M:%S")
+
+            # SQLite에서는 날짜 비교를 위해 문자열 ISO format이나 datetime 객체를 사용
+            # 여기서는 datetime 객체를 파라미터로 넘김 (adapter가 처리)
+            # 또는 문자열로 변환하여 비교: now_kst.strftime("%Y-%m-%d %H:%M:%S")
             
             cursor.execute('''
                 SELECT id, title, description, location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
-                WHERE status = 'active' AND date(start_date) >= date('now')
+                WHERE status = 'active' AND start_date >= ?
                 ORDER BY start_date ASC
                 LIMIT ?
-            ''', (limit,))
+            ''', (now_str, limit))
             
             events = []
             for row in cursor.fetchall():
@@ -404,7 +412,7 @@ class EventService:
         db: sqlite3.Connection = None
     ) -> List[EventResponse]:
         """
-        오늘 진행되는 집회 목록 조회
+        오늘 진행되는 집회 목록 조회 (오늘 날짜, KST 기준)
         
         Args:
             db: 데이터베이스 연결
@@ -413,16 +421,20 @@ class EventService:
             List[EventResponse]: 오늘 집회 목록
         """
         try:
+            from zoneinfo import ZoneInfo
             cursor = db.cursor()
+            
+            # KST 오늘 날짜 문자열 (YYYY-MM-DD)
+            today_kst_str = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
             
             cursor.execute('''
                 SELECT id, title, description, location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
-                WHERE status = 'active' AND date(start_date) = date('now')
+                WHERE status = 'active' AND date(start_date) = ?
                 ORDER BY start_date ASC
-            ''')
+            ''', (today_kst_str,))
             
             events = []
             for row in cursor.fetchall():
