@@ -1,6 +1,5 @@
 import requests
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -67,6 +66,9 @@ class TOPISCrawler:
         self.cache_data = self._load_cache()
         
         # 세션 설정
+        # 주의: TOPIS 사이트가 자체 서명 인증서를 사용하므로 SSL 검증을 비활성화합니다.
+        # 네트워크 환경이 변경 시 verify=True로 전환을 검토하세요.
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
