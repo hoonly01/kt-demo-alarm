@@ -22,7 +22,7 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_bus_notice_service_initialization(monkeypatch):
-    monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test_key")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
     print("Testing BusNoticeService initialization...")
     # Mock TOPISCrawler
     with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
