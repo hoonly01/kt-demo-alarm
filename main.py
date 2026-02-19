@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import logging
+import os
 
 # 분리된 모듈들 import
 from app.database.connection import init_db
@@ -42,7 +43,8 @@ async def lifespan(app: FastAPI):
     from app.services.event_service import EventService
     setup_scheduler(
         crawling_func=CrawlingService.crawl_and_sync_events,  # 실제 크롤링 서비스 연동
-        route_check_func=EventService.scheduled_route_check
+        route_check_func=EventService.scheduled_route_check,
+        bus_crawling_func=BusNoticeService.refresh,           # 버스 통제 공지 재크롤링
     )
     start_scheduler()
     
@@ -84,8 +86,9 @@ app = FastAPI(
     }
 )
 
-# 정적 파일 마운트 (버스 노선 이미지 등)
-app.mount("/static", StaticFiles(directory="topis_attachments"), name="static")
+# 정적 파일 마운트 (버스 노선 이미지 전용)
+os.makedirs("topis_attachments/route_images", exist_ok=True)
+app.mount("/static", StaticFiles(directory="topis_attachments/route_images"), name="static")
 
 # 라우터 등록
 app.include_router(users.router)
