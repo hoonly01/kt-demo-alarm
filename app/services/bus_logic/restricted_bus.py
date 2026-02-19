@@ -338,14 +338,14 @@ class TOPISCrawler:
                 import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(response.content.decode('utf-8'))
-                except:
+                except ET.ParseError:
                     root = ET.fromstring(response.content)
                 
                 st_nm = root.find('.//itemList/stNm')
                 
                 if st_nm is not None and st_nm.text:
                     return st_nm.text
-        except:
+        except Exception:
             return None
         return None
 
@@ -364,7 +364,7 @@ class TOPISCrawler:
                     import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
-                    except:
+                    except ET.ParseError:
                         root = ET.fromstring(response.content)
                     
                     gps_x = root.find('.//itemList/gpsX')
@@ -389,7 +389,7 @@ class TOPISCrawler:
                     import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
-                    except:
+                    except ET.ParseError:
                         root = ET.fromstring(response.content)
                     
                     # 첫 번째 매칭 결과 사용
