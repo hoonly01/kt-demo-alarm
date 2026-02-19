@@ -47,7 +47,8 @@ def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None):
             replace_existing=True
         )
 
-    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인")
+    bus_job_info = f", {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 버스 통제 공지 갱신" if bus_crawling_func else ""
+    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인{bus_job_info}")
 
 
 def start_scheduler():
