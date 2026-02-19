@@ -2,7 +2,7 @@
 import os
 import sys
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 # Add project root to sys.path
@@ -46,10 +46,11 @@ async def test_bus_notice_service_refresh(monkeypatch):
             {"2": {"seq": "2", "title": "갱신된 공지"}}, True
         )
         # 이미 초기화된 상태 모사
-        BusNoticeService.crawler = mock_instance
-        BusNoticeService.cached_notices = {"1": {"seq": "1", "title": "기존 공지"}}
+        monkeypatch.setattr(BusNoticeService, "crawler", mock_instance)
+        monkeypatch.setattr(BusNoticeService, "cached_notices", {"1": {"seq": "1", "title": "기존 공지"}})
 
-        await BusNoticeService.refresh()
+        with patch.object(BusNoticeService, "generate_all_route_images", new_callable=AsyncMock):
+            await BusNoticeService.refresh()
 
         assert "2" in BusNoticeService.cached_notices
         assert BusNoticeService.cached_notices["2"]["title"] == "갱신된 공지"
@@ -58,9 +59,9 @@ async def test_bus_notice_service_refresh(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_bus_notice_service_refresh_without_crawler():
+async def test_bus_notice_service_refresh_without_crawler(monkeypatch):
     """크롤러가 초기화되지 않은 상태에서 refresh()를 호출해도 예외가 발생하지 않는지 검증"""
-    BusNoticeService.crawler = None
+    monkeypatch.setattr(BusNoticeService, "crawler", None)
     # 예외 없이 조기 반환되어야 함
     await BusNoticeService.refresh()
 
