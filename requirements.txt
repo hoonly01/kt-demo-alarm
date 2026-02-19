@@ -6,6 +6,11 @@ python-dotenv
 apscheduler
 beautifulsoup4
 pdfminer.six
+google-generativeai
+pymupdf
+aiohttp
+pytz
+defusedxml
 
 # Testing dependencies
 pytest
