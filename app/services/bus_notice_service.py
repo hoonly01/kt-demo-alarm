@@ -16,6 +16,7 @@ class BusNoticeService:
     crawler: Optional[TOPISCrawler] = None
     cached_notices: List[Dict] = []
     last_update: Optional[datetime] = None
+    _image_task: Optional[asyncio.Task] = None  # GC 방지를 위한 태스크 참조 보관
     
     @classmethod
     async def initialize(cls):
@@ -39,8 +40,11 @@ class BusNoticeService:
             
             logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
             
-            # 백그라운드 이미지 생성 시작
-            asyncio.create_task(cls.generate_all_route_images())
+            # 백그라운드 이미지 생성 시작 (참조 보관 → GC 방지 + 예외 로깅)
+            cls._image_task = asyncio.create_task(cls.generate_all_route_images())
+            cls._image_task.add_done_callback(
+                lambda t: logger.error(f"이미지 생성 태스크 오류: {t.exception()}") if not t.cancelled() and t.exception() else None
+            )
             
         except Exception as e:
             logger.error(f"❌ BusNoticeService 초기화 실패: {e}")
