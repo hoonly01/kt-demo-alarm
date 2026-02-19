@@ -13,7 +13,7 @@ def get_stations_by_position(service_key, tm_x, tm_y, radius=500):
     }
     
     try:
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         root = ET.fromstring(response.content.decode('utf-8'))
         
