@@ -14,23 +14,24 @@ KST = pytz.timezone('Asia/Seoul')
 
 class BusNoticeService:
     crawler: Optional[TOPISCrawler] = None
-    cached_notices: List[Dict] = []
+    cached_notices: Dict[str, Dict] = {}
     last_update: Optional[datetime] = None
+    _image_task: Optional[asyncio.Task] = None  # GC 방지를 위한 태스크 참조 보관
     
     @classmethod
     async def initialize(cls):
         """크롤러 초기화 및 데이터 로드"""
         try:
-            if not settings.GOOGLE_API_KEY and not settings.GEMINI_API_KEY:
-                logger.warning("⚠️ GOOGLE_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+            if not settings.GEMINI_API_KEY:
+                logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
                 return
 
             logger.info("🚌 BusNoticeService 초기화 중...")
             
             # 크롤러 인스턴스 생성
             cls.crawler = TOPISCrawler(
-                gemini_api_key=settings.GOOGLE_API_KEY or settings.GEMINI_API_KEY,
-                cache_file="topis_cache.json"  # 프로젝트 루트에 저장
+                gemini_api_key=settings.GEMINI_API_KEY,
+                cache_file="topis_cache/topis_cache.json"  # Docker 볼륨 마운트 경로 내 저장
             )
             
             # 초기 데이터 로드 (동기 함수를 비동기로 실행)
@@ -39,12 +40,44 @@ class BusNoticeService:
             
             logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
             
-            # 백그라운드 이미지 생성 시작
-            asyncio.create_task(cls.generate_all_route_images())
+            # 백그라운드 이미지 생성 시작 (참조 보관 → GC 방지 + 예외 로깅)
+            def _log_task_error(task: asyncio.Task):
+                if not task.cancelled() and task.exception():
+                    logger.error(f"이미지 생성 태스크 오류: {task.exception()}")
+
+            cls._image_task = asyncio.create_task(cls.generate_all_route_images())
+            cls._image_task.add_done_callback(_log_task_error)
             
         except Exception as e:
             logger.error(f"❌ BusNoticeService 초기화 실패: {e}")
-            cls.cached_notices = []
+            cls.cached_notices = {}
+
+    @classmethod
+    async def refresh(cls):
+        """매일 버스 통제 공지 재크롤링 (스케줄러에서 호출)"""
+        if not cls.crawler:
+            logger.warning("⚠️ 크롤러가 초기화되지 않아 refresh를 수행할 수 없습니다.")
+            return
+
+        logger.info("🔄 버스 통제 공지 재갱신 시작...")
+        try:
+            cls.cached_notices, _ = await asyncio.to_thread(cls.crawler.crawl_notices)
+            cls.last_update = datetime.now(KST)
+            logger.info(f"✅ 재갱신 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
+
+            # 이미지 재생성 (백그라운드)
+            # 이전 태스크가 아직 실행 중이면 취소 후 교체
+            if cls._image_task and not cls._image_task.done():
+                cls._image_task.cancel()
+
+            def _log_image_error(task: asyncio.Task):
+                if not task.cancelled() and task.exception():
+                    logger.error(f"이미지 재생성 오류: {task.exception()}")
+
+            cls._image_task = asyncio.create_task(cls.generate_all_route_images())
+            cls._image_task.add_done_callback(_log_image_error)
+        except Exception:
+            logger.exception("❌ 버스 통제 공지 재갱신 실패")
 
     @classmethod
     def get_korean_time(cls):
@@ -279,11 +312,7 @@ class BusNoticeService:
                 info_text += f"⏰ 통제기간: {unique_periods[0]}\n"
             else:
                 main_period = unique_periods[0]
-                info_text += f"⏰ 통제기간: {main_period}"
-                if len(unique_periods) > 1:
-                    info_text += f" 외 {len(unique_periods)-1}개 구간\n"
-                else:
-                    info_text += "\n"
+                info_text += f"⏰ 통제기간: {main_period} 외 {len(unique_periods)-1}개 구간\n"
         
         if notice_title:
             title_short = notice_title[:50] + '...' if len(notice_title) > 50 else notice_title
@@ -296,7 +325,7 @@ class BusNoticeService:
         # 도메인 추가 (이미지 URL이 상대경로인 경우)
         full_image_url = image_url
         if image_url.startswith("/"):
-            base_url = os.getenv("RENDER_EXTERNAL_URL", "http://localhost:8000")
+            base_url = settings.RENDER_EXTERNAL_URL
             full_image_url = f"{base_url}{image_url}"
 
         callback_message = {
@@ -338,8 +367,9 @@ class BusNoticeService:
         """실제 콜백 요청 전송 (aiohttp 사용)"""
         import aiohttp
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=data, timeout=5) as response:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=data) as response:
                     logger.info(f"콜백 전송 결과: {response.status}")
         except Exception as e:
             logger.error(f"콜백 전송 실패: {e}")

@@ -1,6 +1,5 @@
 import requests
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -13,7 +12,10 @@ import os
 import re
 import tempfile
 import base64
-import xml.etree.ElementTree as ET
+try:
+    import defusedxml.ElementTree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET  # fallback: defusedxml 설치 권장
 import pandas as pd
 import shutil
 from datetime import datetime, timedelta
@@ -52,7 +54,12 @@ except ImportError:
 class TOPISCrawler:
     def __init__(self, gemini_api_key=None, cache_file="topis_cache.json"):
         """TOPIS 크롤러 초기화"""
-        self.service_key = os.environ.get("SEOUL_BUS_API_KEY")
+        self.base_url = "https://topis.seoul.go.kr"
+        try:
+            from app.config.settings import settings as _settings
+            self.service_key = _settings.SEOUL_BUS_API_KEY or os.environ.get("SEOUL_BUS_API_KEY")
+        except ImportError:
+            self.service_key = os.environ.get("SEOUL_BUS_API_KEY")
         
         # 캐시 및 다운로드 폴더 경로 조정 (프로젝트 루트 기준)
         self.cache_file = cache_file
@@ -66,6 +73,9 @@ class TOPISCrawler:
         self.cache_data = self._load_cache()
         
         # 세션 설정
+        # 주의: TOPIS 사이트가 자체 서명 인증서를 사용하므로 SSL 검증을 비활성화합니다.
+        # 네트워크 환경이 변경 시 verify=True로 전환을 검토하세요.
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -76,7 +86,7 @@ class TOPISCrawler:
         
         # Gemini 설정
         if not gemini_api_key:
-            gemini_api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
         
@@ -334,17 +344,16 @@ class TOPISCrawler:
             
             response = requests.get(url, params=params, timeout=5, verify=False)
             if response.status_code == 200:
-                import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(response.content.decode('utf-8'))
-                except:
+                except ET.ParseError:
                     root = ET.fromstring(response.content)
                 
                 st_nm = root.find('.//itemList/stNm')
                 
                 if st_nm is not None and st_nm.text:
                     return st_nm.text
-        except:
+        except Exception:
             return None
         return None
 
@@ -360,10 +369,9 @@ class TOPISCrawler:
                 
                 response = requests.get(url, params=params, timeout=5, verify=False)
                 if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
-                    except:
+                    except ET.ParseError:
                         root = ET.fromstring(response.content)
                     
                     gps_x = root.find('.//itemList/gpsX')
@@ -385,10 +393,9 @@ class TOPISCrawler:
                 
                 response = requests.get(url, params=params, timeout=5, verify=False)
                 if response.status_code == 200:
-                    import xml.etree.ElementTree as ET
                     try:
                         root = ET.fromstring(response.content.decode('utf-8'))
-                    except:
+                    except ET.ParseError:
                         root = ET.fromstring(response.content)
                     
                     # 첫 번째 매칭 결과 사용
@@ -600,7 +607,7 @@ class TOPISCrawler:
 - 불분명한 경우 "전체통제"로 간주
 
 날짜 표준화 규칙:
-- '8.15', '8월 15일' → '2025-08-15' (현재년도 기준)
+- '8.15', '8월 15일' → '{datetime.now().year}-08-15' (현재년도 기준)
 - 시간 없으면 시작: 00:00, 종료: 23:59
 - 종료일 없으면 시작일과 동일
 
@@ -609,17 +616,17 @@ class TOPISCrawler:
 JSON 형식:
 {{
   "control_type": "우회",
-  "general_periods": ["2025-08-15 09:00~2025-08-15 18:00"],
+  "general_periods": ["{datetime.now().year}-08-15 09:00~{datetime.now().year}-08-15 18:00"],
   "station_info": {{
     "01126": {{
       "name": "서울역버스환승센터",
-      "periods": ["2025-08-10 00:00~2025-08-16 18:00"],
+      "periods": ["{datetime.now().year}-08-10 00:00~{datetime.now().year}-08-16 18:00"],
       "affected_routes": ["7016", "262", "9401"],
       "control_scope": "특정노선"
     }},
     "01234": {{
       "name": "시청앞",
-      "periods": ["2025-08-15 09:00~2025-08-15 18:00"],
+      "periods": ["{datetime.now().year}-08-15 09:00~{datetime.now().year}-08-15 18:00"],
       "affected_routes": [],
       "control_scope": "전체통제"
     }}
@@ -769,7 +776,7 @@ JSON 형식:
             for gemini_file in gemini_files:
                 try:
                     genai.delete_file(gemini_file.name)
-                except:
+                except Exception:
                     pass
             
             # 임시 파일 정리 (save_attachments=False인 경우만)
@@ -782,7 +789,7 @@ JSON 형식:
                         temp_dir = os.path.dirname(temp_file)
                         if temp_dir != self.download_folder and os.path.exists(temp_dir):
                             shutil.rmtree(temp_dir, ignore_errors=True)
-                    except:
+                    except Exception:
                         pass
         
         # 기본값 반환

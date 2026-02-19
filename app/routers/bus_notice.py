@@ -32,7 +32,12 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
     """노선 통제 확인 (콜백 지원)"""
     try:
         body = await request.json()
-        logger.info(f"Route Check Request: {body}")
+        # 민감 정보(callbackUrl, user.id 등) 마스킹 후 로깅
+        safe_log = {
+            "action": body.get("action"),
+            "userRequest": {"type": body.get("userRequest", {}).get("type")}
+        }
+        logger.info(f"Route Check Request: {safe_log}")
         
         user_request = body.get('userRequest', {})
         action = body.get('action', {})
@@ -72,7 +77,7 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
             
         text = f"🚌 노선 {route_number} 통제 정보 ({len(controls)}건)\n📅 {date_str}\n\n"
         for c in controls[:3]:
-            text += f"📄 {c['notice_title'][:20]}...\n"
+            text += f"📄 {c.get('notice_title', '제목없음')[:20]}...\n"
             text += f"🔄 {c.get('detour_route', '정보없음')[:30]}...\n\n"
             
         return {
@@ -109,6 +114,27 @@ async def webhook_help():
     }
 
 # --- REST Endpoints ---
+
+@router.get("/status")
+async def get_bus_service_status():
+    """버스 서비스 상태 조회 (크롤러 초기화 여부, 캐시 개수, 마지막 갱신 시각)"""
+    return {
+        "crawler_initialized": BusNoticeService.crawler is not None,
+        "cached_count": len(BusNoticeService.cached_notices),
+        "last_update": BusNoticeService.last_update.isoformat() if BusNoticeService.last_update else None,
+    }
+
+@router.post("/refresh")
+async def manual_bus_refresh():
+    """버스 통제 공지 수동 재크롤링 (테스트/운영용)"""
+    if not BusNoticeService.crawler:
+        raise HTTPException(status_code=503, detail="크롤러가 초기화되지 않았습니다. (GEMINI_API_KEY 확인)")
+    await BusNoticeService.refresh()
+    return {
+        "message": "버스 통제 공지 재크롤링 완료",
+        "cached_count": len(BusNoticeService.cached_notices),
+        "last_update": BusNoticeService.last_update.isoformat() if BusNoticeService.last_update else None,
+    }
 
 @router.get("/notices")
 async def get_notices(date: Optional[str] = None):
