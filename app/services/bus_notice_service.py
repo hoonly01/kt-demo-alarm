@@ -283,11 +283,7 @@ class BusNoticeService:
                 info_text += f"⏰ 통제기간: {unique_periods[0]}\n"
             else:
                 main_period = unique_periods[0]
-                info_text += f"⏰ 통제기간: {main_period}"
-                if len(unique_periods) > 1:
-                    info_text += f" 외 {len(unique_periods)-1}개 구간\n"
-                else:
-                    info_text += "\n"
+                info_text += f"⏰ 통제기간: {main_period} 외 {len(unique_periods)-1}개 구간\n"
         
         if notice_title:
             title_short = notice_title[:50] + '...' if len(notice_title) > 50 else notice_title

@@ -86,7 +86,7 @@ class TOPISCrawler:
         
         # Gemini 설정
         if not gemini_api_key:
-            gemini_api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            gemini_api_key = os.environ.get("GEMINI_API_KEY")
         if not gemini_api_key:
             raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
         
@@ -776,7 +776,7 @@ JSON 형식:
             for gemini_file in gemini_files:
                 try:
                     genai.delete_file(gemini_file.name)
-                except:
+                except Exception:
                     pass
             
             # 임시 파일 정리 (save_attachments=False인 경우만)
@@ -789,7 +789,7 @@ JSON 형식:
                         temp_dir = os.path.dirname(temp_file)
                         if temp_dir != self.download_folder and os.path.exists(temp_dir):
                             shutil.rmtree(temp_dir, ignore_errors=True)
-                    except:
+                    except Exception:
                         pass
         
         # 기본값 반환

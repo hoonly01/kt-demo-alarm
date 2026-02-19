@@ -25,7 +25,7 @@ async def test_bus_notice_service_initialization(monkeypatch):
     monkeypatch.setattr(settings, "GOOGLE_API_KEY", "test_key")
     print("Testing BusNoticeService initialization...")
     # Mock TOPISCrawler
-    with patch("app.services.bus_logic.restricted_bus.TOPISCrawler") as MockCrawler:
+    with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
         mock_instance = MockCrawler.return_value
         mock_instance.crawl_notices.return_value = ({"1": {"seq": "1", "title": "Test Notice"}}, True)
 
