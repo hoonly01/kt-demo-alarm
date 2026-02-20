@@ -367,8 +367,8 @@ class CrawlingService:
         _, _, board_no = parsed
 
         for url in CrawlingService._build_view_urls(board_no):
-            resp = session.get(url, timeout=20)
-            if resp.ok and "html" in (resp.headers.get("Content-Type") or "").lower():
+            resp = await client.get(url, timeout=20)
+            if resp.status_code == 200 and "html" in (resp.headers.get("Content-Type") or "").lower():
                 return url, (target_title or "")
         raise RuntimeError("View 페이지 요청에 실패했습니다.")
 
