@@ -300,7 +300,7 @@ ZONE_INFO = {
     },
 }
 
-# zone 파라미터 값 → zone 번호 매핑
+# zone 파라미터 값 → zone 매핑
 ZONE_PARAM_MAP = {
     "1구역": 1,
     "2구역": 2,
@@ -436,3 +436,76 @@ async def save_favorite_zone(
                 "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
             }
         }
+
+
+@router.post("/save_marked_bus")
+async def save_marked_bus(request: dict, background_tasks: BackgroundTasks):
+    """
+    카카오톡 스킬 블록에서 사용자의 marked_bus 정보를 저장하는 엔드포인트
+
+    Parameters in action.params:
+    - marked_bus: 버스 번호/노선명 (예: "7016")
+    """
+    logger.info(f"🔍 /save_marked_bus 요청: {request}")
+
+    # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
+    user_request = request.get('userRequest', {})
+    user_info = user_request.get('user', {})
+    bot_user_key = user_info.get('id')
+    properties = user_info.get('properties', {})
+    plusfriend_key = properties.get('plusfriendUserKey')
+
+    user_id = plusfriend_key if plusfriend_key else bot_user_key
+    logger.info(f"📝 사용자 ID: botUserKey={bot_user_key}, plusfriend={plusfriend_key} -> user_id={user_id}")
+
+    # params에서 marked_bus 추출
+    params = request.get('action', {}).get('params', {})
+    marked_bus = (params.get('marked_bus') or "").strip()
+
+    if not marked_bus:
+        return {
+            "version": "2.0",
+            "template": {"outputs": [{"simpleText": {"text": "🚌 버스 번호가 비어있어요. 예: 7016"}}]}
+        }
+
+    from app.services.user_service import UserService
+    from app.database.connection import get_db_connection
+
+    # 사용자 동기화
+    with get_db_connection() as db:
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+    # 백그라운드 저장
+    async def save_marked_bus_task(user_id: str, marked_bus: str):
+        from app.database.connection import get_db_connection
+        from app.services.user_service import UserService
+        try:
+            with get_db_connection() as conn:
+                result = await UserService.update_marked_bus(
+                    user_id=user_id,
+                    marked_bus=marked_bus,
+                    db=conn
+                )
+                if result["success"]:
+                    logger.info(f"✅ marked_bus 저장 완료: {user_id} -> {marked_bus}")
+                else:
+                    logger.error(f"❌ marked_bus 저장 실패: {result.get('error')}")
+        except Exception as e:
+            logger.error(f"🚨 marked_bus 저장 중 오류: {str(e)}")
+
+    background_tasks.add_task(save_marked_bus_task, user_id, marked_bus)
+
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [{
+                "simpleText": {
+                    "text": (
+                        f"✅ 자주 타는 버스가 등록되었습니다!\n"
+                        f"🚌 {marked_bus}\n\n"
+                        "🔄 변경하고 싶으면 다시 등록해 주세요."
+                    )
+                }
+            }]
+        }
+    }
