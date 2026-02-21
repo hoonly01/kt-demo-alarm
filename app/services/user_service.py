@@ -283,6 +283,39 @@ class UserService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
+    async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자의 marked_bus(자주 타는 버스)만 업데이트
+        - route 정보는 건드리지 않음
+        - plusfriend_user_key 기준 업데이트
+        """
+        try:
+            cursor = db.cursor()
+
+            cursor.execute('''
+                UPDATE users SET
+                    marked_bus = ?,
+                    last_message_at = ?
+                WHERE plusfriend_user_key = ?
+            ''', (
+                marked_bus,
+                datetime.now(),
+                user_id
+            ))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"marked_bus 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            logger.info(f"marked_bus 업데이트 완료 - 사용자: {user_id}, bus: {marked_bus}")
+            return {"success": True, "marked_bus": marked_bus}
+
+        except Exception as e:
+            logger.error(f"marked_bus 업데이트 실패: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
     async def setup_user_profile(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자 프로필 전체 설정 (초기 설정용)
