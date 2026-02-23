@@ -208,7 +208,8 @@ class CrawlingService:
 
             unique_places = []
             for p in places:
-                key = f"{y}{m}{d}_{start}_{re.sub(r'\\s+', '', p)}"
+                clean_p = re.sub(r'\\s+', '', p)
+                key = f"{y}{m}{d}_{start}_{clean_p}"
                 if key not in seen:
                     seen.add(key)
                     unique_places.append(p)
