@@ -154,11 +154,18 @@ class UserService:
         try:
             cursor = db.cursor()
             
-            # bot_user_key 또는 plusfriend_user_key로 사용자 업데이트
+            # 1. plusfriend_user_key로 우선 업데이트 시도
             cursor.execute('''
                 UPDATE users SET is_alarm_on = ?
-                WHERE bot_user_key = ? OR plusfriend_user_key = ?
-            ''', (is_alarm_on, user_id, user_id))
+                WHERE plusfriend_user_key = ?
+            ''', (is_alarm_on, user_id))
+            
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET is_alarm_on = ?
+                    WHERE bot_user_key = ?
+                ''', (is_alarm_on, user_id))
             
             if cursor.rowcount == 0:
                 logger.warning(f"알람 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
