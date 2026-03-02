@@ -271,6 +271,7 @@ class EventService:
                 SELECT plusfriend_user_key, departure_name, arrival_name
                 FROM users
                 WHERE active = 1
+                  AND is_alarm_on = 1
                   AND plusfriend_user_key IS NOT NULL
                   AND departure_x IS NOT NULL
                   AND departure_y IS NOT NULL
