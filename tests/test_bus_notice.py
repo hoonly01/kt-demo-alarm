@@ -62,7 +62,11 @@ async def test_bus_notice_service_refresh(monkeypatch):
 async def test_bus_notice_service_refresh_without_crawler(monkeypatch):
     """크롤러가 초기화되지 않은 상태에서 refresh()를 호출하면 새로 생성하고 동작하는지 검증"""
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
+    # Reset class-level state for deterministic testing
     monkeypatch.setattr(BusNoticeService, "crawler", None)
+    monkeypatch.setattr(BusNoticeService, "cached_notices", {})
+    monkeypatch.setattr(BusNoticeService, "last_update", None)
+    monkeypatch.setattr(BusNoticeService, "_image_task", None)
     
     with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
         mock_instance = MockCrawler.return_value
