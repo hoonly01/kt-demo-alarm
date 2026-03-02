@@ -111,19 +111,32 @@ jobs:
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
-          # Remote deploy
+          # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
             ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
             set -euo pipefail
             cd /opt/kt-demo-alarm
 
+            echo "=== Disk usage (before) ==="
+            df -h
+            docker system df || true
+
             # Make directory with sudo and change owner to $USER
             sudo mkdir -p data logs topis_attachments topis_cache
             sudo chown -R $USER:$USER data logs topis_attachments topis_cache
-            chmod -R 777 data logs topis_attachments topis_cache
+            chmod -R 755 data logs topis_attachments topis_cache || true
 
             # Stop old stack (ignore if not running)
             docker compose down || true
+
+            # IMPORTANT: free disk BEFORE docker load / up
+            docker system prune -af || true
+            # Only if you are OK with deleting unused volumes (may delete caches)
+            # docker volume prune -f || true
+
+            echo "=== Disk usage (after prune) ==="
+            df -h
+            docker system df || true
 
             # Load new image (uploaded as gzip)
             gunzip -c /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz | docker load
@@ -135,8 +148,9 @@ jobs:
             # Start without building (important!)
             docker compose up -d --no-build
 
-            # Ensure appuser owns data and attachments inside container
-            docker compose exec -u root kt-demo-alarm chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache
+            # Ensure appuser owns data and attachments inside container (don't fail deploy if container isn't ready yet)
+            docker compose exec -u root kt-demo-alarm \
+              chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache || true
 
             echo "Waiting for service health..."
             for i in {1..24}; do
@@ -152,10 +166,11 @@ jobs:
             docker compose ps
 
             echo "Recent logs:"
-            docker compose logs --tail=50
+            docker compose logs --tail=100
 
-            echo "Cleanup old images (keep last 24h):"
-            docker image prune -af --filter "until=24h" || true
+            echo "=== Disk usage (end) ==="
+            df -h
+            docker system df || true
           ENDSSH
 
           # Cleanup runner files
