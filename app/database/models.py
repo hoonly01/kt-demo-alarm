@@ -10,6 +10,7 @@ USERS_TABLE_SCHEMA = '''
         message_count INTEGER DEFAULT 1,
         location TEXT,
         active BOOLEAN DEFAULT TRUE,
+        is_alarm_on BOOLEAN DEFAULT TRUE,
         -- 경로 정보
         departure_name TEXT, 
         departure_address TEXT, 
@@ -76,6 +77,7 @@ ROUTE_COLUMNS = [
     ('route_updated_at', 'DATETIME'),
     ('marked_bus', 'TEXT'),
     ('language', 'TEXT'),
+    ('is_alarm_on', 'BOOLEAN'),
     ('open_id', 'TEXT'),  # 웹훅에서만 제공
     ('plusfriend_user_key', 'TEXT')  # Skill Block에서 제공 (실질적 primary key)
 ]

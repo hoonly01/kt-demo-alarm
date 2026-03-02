@@ -100,7 +100,7 @@ async def send_alarm_to_all(
     """전체 활성 사용자에게 알림 전송"""
     try:
         cursor = db.cursor()
-        cursor.execute("SELECT bot_user_key FROM users WHERE active = 1")
+        cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1")
         
         user_ids = [row[0] for row in cursor.fetchall()]
         
@@ -136,7 +136,7 @@ async def send_filtered_alarm(
         cursor = db.cursor()
         
         # 기본 쿼리
-        query = "SELECT bot_user_key FROM users WHERE active = 1"
+        query = "SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1"
         params = []
         
         # 필터 조건 추가

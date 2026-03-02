@@ -60,10 +60,22 @@ async def test_bus_notice_service_refresh(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bus_notice_service_refresh_without_crawler(monkeypatch):
-    """크롤러가 초기화되지 않은 상태에서 refresh()를 호출해도 예외가 발생하지 않는지 검증"""
+    """크롤러가 초기화되지 않은 상태에서 refresh()를 호출하면 새로 생성하고 동작하는지 검증"""
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
     monkeypatch.setattr(BusNoticeService, "crawler", None)
-    # 예외 없이 조기 반환되어야 함
-    await BusNoticeService.refresh()
+    
+    with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
+        mock_instance = MockCrawler.return_value
+        mock_instance.crawl_notices.return_value = (
+            {"3": {"seq": "3", "title": "새로 생성된 공지"}}, True
+        )
+        
+        with patch.object(BusNoticeService, "generate_all_route_images", new_callable=AsyncMock):
+            await BusNoticeService.refresh()
+            
+        assert BusNoticeService.crawler is not None
+        assert "3" in BusNoticeService.cached_notices
+        mock_instance.crawl_notices.assert_called_once()
 
 
 def test_get_notices_endpoint():
