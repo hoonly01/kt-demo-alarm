@@ -263,6 +263,92 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
         }
 
 
+@router.post("/alarm-setting")
+async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db)):
+    """
+    사용자 알람 설정 (Skill Block 전용)
+    - 알람 on/off 기능
+    """
+    try:
+        logger.info(f"🔍 /users/alarm-setting 요청 body: {request}")
+
+        # Skill Block 형식 파싱
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        action = request.get('action', {})
+        params = action.get('params', {})
+
+        # ID 추출
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                }
+            }
+
+        # 파라미터 추출
+        alarm_status_str = params.get('alarm_status', '').lower()
+        
+        if alarm_status_str == 'on':
+            is_alarm_on = True
+            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+        elif alarm_status_str == 'off':
+            is_alarm_on = False
+            msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 알림 설정 값입니다 ('{alarm_status_str}'). 'on' 또는 'off'여야 합니다."}}]
+                }
+            }
+
+        logger.info(f"📝 알림 설정 변경: user_id={user_id}, status={alarm_status_str}")
+
+        # 통합된 사용자 동기화 로직 사용 (사용자가 없을 경우 대비)
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # 설정 업데이트
+        result = UserService.update_alarm_setting(user_id, is_alarm_on, db)
+
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": msg
+                            }
+                        }
+                    ]
+                }
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "알람 설정 업데이트에 실패했습니다.")}}]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("알람 설정 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            }
+        }
+
+
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
     """백그라운드 작업: 경로 정보만 업데이트"""
     from app.database.connection import DATABASE_PATH
