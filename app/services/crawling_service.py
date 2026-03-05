@@ -104,7 +104,7 @@ class CrawlingService:
         smpa_events = await CrawlingService._crawl_smpa_events()
         logger.info(f"SMPA 크롤링 결과: {len(smpa_events)}건")
 
-        # 2. SPATIC 크롤링 (신규, Selenium 기반 — 실패 시 빈 리스트)
+        # 2. SPATIC 크롤링 (신규, Playwright 기반 — 실패 시 빈 리스트)
         spatic_events = await CrawlingService._crawl_spatic_events()
         logger.info(f"SPATIC 크롤링 결과: {len(spatic_events)}건")
 
@@ -178,7 +178,7 @@ class CrawlingService:
     @staticmethod
     async def _crawl_spatic_events() -> List[Dict[str, Any]]:
         """
-        SPATIC(경찰청 집회 시스템) 크롤링 — Selenium 필요, 실패 시 빈 리스트
+        SPATIC(경찰청 집회 시스템) 크롤링 — Playwright 필요, 실패 시 빈 리스트
         """
         try:
             # 동기 함수를 비동기로 실행
