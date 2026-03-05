@@ -14,16 +14,12 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 
 logger = logging.getLogger(__name__)
 
-# Selenium 선택적 임포트
+# Playwright 임포트
 try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    SELENIUM_AVAILABLE = True
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
 except ImportError:
-    SELENIUM_AVAILABLE = False
+    PLAYWRIGHT_AVAILABLE = False
 
 # SPATIC 상수
 SPATIC_BASE_URL = "https://www.spatic.go.kr"
@@ -260,73 +256,61 @@ def _parse_detail_to_groups(html: str) -> Dict[Tuple[str, str], List[str]]:
     return groups
 
 
-# ========================== Selenium 목록 수집 ==========================
+# ========================== Playwright 목록 수집 ==========================
 
-def _fetch_list_selenium() -> List[Dict]:
-    """Selenium으로 SPATIC 동적 페이지에서 목록 수집"""
+def _fetch_list_playwright() -> List[Dict]:
+    """Playwright로 SPATIC 동적 페이지에서 목록 수집"""
     posts: List[Dict] = []
 
-    if not SELENIUM_AVAILABLE:
-        logger.warning("Selenium이 설치되지 않아 SPATIC 크롤링을 건너뜁니다.")
+    if not PLAYWRIGHT_AVAILABLE:
+        logger.warning("Playwright가 설치되지 않아 SPATIC 크롤링을 건너뜁니다.")
         return posts
 
-    driver = None
     try:
-        opts = Options()
-        opts.add_argument("--headless=new")
-        opts.add_argument("--no-sandbox")
-        opts.add_argument("--disable-dev-shm-usage")
-        opts.add_argument("--disable-gpu")
-        opts.add_argument("user-agent=Mozilla/5.0")
-        driver = webdriver.Chrome(options=opts)
-        driver.get(SPATIC_LIST_URL)
+        with sync_playwright() as p:
+            with p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"], headless=True) as browser:
+                page = browser.new_page(user_agent=HEADERS["User-Agent"])
+                page.goto(SPATIC_LIST_URL, wait_until="networkidle", timeout=30000)
 
-        try:
-            WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, ".assem_content tr"))
-            )
-        except Exception:
-            logger.warning("SPATIC 테이블 로딩 시간 초과")
+                try:
+                    page.wait_for_selector(".assem_content tr", timeout=15000)
+                except Exception as wait_err:
+                    logger.exception(f"SPATIC 테이블 로딩 시간 초과: {wait_err}")
 
-        rows = driver.find_elements(By.CSS_SELECTOR, ".assem_content tr")
-        logger.info(f"SPATIC 발견된 행: {len(rows)}")
+                rows = page.query_selector_all(".assem_content tr")
+                logger.info(f"SPATIC 발견된 행: {len(rows)}")
 
-        for row in rows:
-            try:
-                mgr = row.get_attribute("key")
-                if not mgr:
-                    full_html = row.get_attribute("outerHTML")
-                    m = re.search(r"mgrSeq=(\d+)", full_html)
-                    if m:
-                        mgr = m.group(1)
-                if not mgr:
-                    onclick = row.get_attribute("onclick") or ""
-                    m = re.search(r"['\"]?(\d{4,})['\"]?", onclick)
-                    if m:
-                        mgr = m.group(1)
+                for row in rows:
+                    try:
+                        mgr = row.get_attribute("key")
+                        if not mgr:
+                            onclick = row.get_attribute("onclick") or ""
+                            m = re.search(r"['\"]?(\d{4,})['\"]?", onclick)
+                            if m:
+                                mgr = m.group(1)
 
-                tds = row.find_elements(By.CSS_SELECTOR, "td")
-                if len(tds) < 3:
-                    continue
-                title = tds[1].text.strip()
-                date_txt = tds[2].text.strip()
-                if not mgr:
-                    continue
+                        tds = row.query_selector_all("td")
+                        if len(tds) < 3:
+                            continue
+                        
+                        title = tds[1].inner_text().strip()
+                        date_txt = tds[2].inner_text().strip()
+                        
+                        if not mgr:
+                            continue
 
-                parsed_date = _parse_date_any(date_txt)
-                final_date = (
-                    f"{parsed_date[0]}-{parsed_date[1]}-{parsed_date[2]}"
-                    if parsed_date else ""
-                )
-                posts.append({"number": mgr, "title": title, "date": final_date})
-            except Exception:
-                continue
+                        parsed_date = _parse_date_any(date_txt)
+                        final_date = (
+                            f"{parsed_date[0]}-{parsed_date[1]}-{parsed_date[2]}"
+                            if parsed_date else ""
+                        )
+                        posts.append({"number": mgr, "title": title, "date": final_date})
+                    except Exception as row_err:
+                        logger.exception(f"SPATIC 행 파싱 오류: {row_err}")
+                        continue
 
     except Exception as e:
-        logger.error(f"SPATIC Selenium 크롤링 오류: {e}")
-    finally:
-        if driver:
-            driver.quit()
+        logger.exception(f"SPATIC Playwright 크롤링 오류: {e}")
 
     # 중복 제거
     uniq = {}
@@ -371,12 +355,12 @@ def scrape_spatic() -> List[Dict]:
         List[Dict]: 파싱된 집회 행 목록.
         각 행은 { 년, 월, 일, start_time, end_time, 장소_원본, 인원, 비고 } 형태.
     """
-    if not SELENIUM_AVAILABLE:
-        logger.info("Selenium 미설치로 SPATIC 크롤링 건너뜀")
+    if not PLAYWRIGHT_AVAILABLE:
+        logger.info("Playwright 미설치로 SPATIC 크롤링 건너뜀")
         return []
 
     logger.info("SPATIC 목록 수집 시작...")
-    posts = _fetch_list_selenium()
+    posts = _fetch_list_playwright()
     selected = _select_latest_event(posts)
     if not selected:
         logger.info("SPATIC에서 집회 게시글을 찾을 수 없음")
