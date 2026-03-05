@@ -256,7 +256,7 @@ def _parse_detail_to_groups(html: str) -> Dict[Tuple[str, str], List[str]]:
     return groups
 
 
-# ========================== Selenium 목록 수집 ==========================
+# ========================== Playwright 목록 수집 ==========================
 
 def _fetch_list_playwright() -> List[Dict]:
     """Playwright로 SPATIC 동적 페이지에서 목록 수집"""
@@ -268,50 +268,49 @@ def _fetch_list_playwright() -> List[Dict]:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"], headless=True)
-            page = browser.new_page(user_agent=HEADERS["User-Agent"])
-            page.goto(SPATIC_LIST_URL, wait_until="networkidle", timeout=30000)
+            with p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"], headless=True) as browser:
+                page = browser.new_page(user_agent=HEADERS["User-Agent"])
+                page.goto(SPATIC_LIST_URL, wait_until="networkidle", timeout=30000)
 
-            try:
-                page.wait_for_selector(".assem_content tr", timeout=15000)
-            except Exception:
-                logger.warning("SPATIC 테이블 로딩 시간 초과")
-
-            rows = page.query_selector_all(".assem_content tr")
-            logger.info(f"SPATIC 발견된 행: {len(rows)}")
-
-            for row in rows:
                 try:
-                    mgr = row.get_attribute("key")
-                    if not mgr:
-                        onclick = row.get_attribute("onclick") or ""
-                        m = re.search(r"['\"]?(\d{4,})['\"]?", onclick)
-                        if m:
-                            mgr = m.group(1)
+                    page.wait_for_selector(".assem_content tr", timeout=15000)
+                except Exception as wait_err:
+                    logger.exception(f"SPATIC 테이블 로딩 시간 초과: {wait_err}")
 
-                    tds = row.query_selector_all("td")
-                    if len(tds) < 3:
+                rows = page.query_selector_all(".assem_content tr")
+                logger.info(f"SPATIC 발견된 행: {len(rows)}")
+
+                for row in rows:
+                    try:
+                        mgr = row.get_attribute("key")
+                        if not mgr:
+                            onclick = row.get_attribute("onclick") or ""
+                            m = re.search(r"['\"]?(\d{4,})['\"]?", onclick)
+                            if m:
+                                mgr = m.group(1)
+
+                        tds = row.query_selector_all("td")
+                        if len(tds) < 3:
+                            continue
+                        
+                        title = tds[1].inner_text().strip()
+                        date_txt = tds[2].inner_text().strip()
+                        
+                        if not mgr:
+                            continue
+
+                        parsed_date = _parse_date_any(date_txt)
+                        final_date = (
+                            f"{parsed_date[0]}-{parsed_date[1]}-{parsed_date[2]}"
+                            if parsed_date else ""
+                        )
+                        posts.append({"number": mgr, "title": title, "date": final_date})
+                    except Exception as row_err:
+                        logger.exception(f"SPATIC 행 파싱 오류: {row_err}")
                         continue
-                    
-                    title = tds[1].inner_text().strip()
-                    date_txt = tds[2].inner_text().strip()
-                    
-                    if not mgr:
-                        continue
-
-                    parsed_date = _parse_date_any(date_txt)
-                    final_date = (
-                        f"{parsed_date[0]}-{parsed_date[1]}-{parsed_date[2]}"
-                        if parsed_date else ""
-                    )
-                    posts.append({"number": mgr, "title": title, "date": final_date})
-                except Exception:
-                    continue
-
-            browser.close()
 
     except Exception as e:
-        logger.error(f"SPATIC Playwright 크롤링 오류: {e}")
+        logger.exception(f"SPATIC Playwright 크롤링 오류: {e}")
 
     # 중복 제거
     uniq = {}
