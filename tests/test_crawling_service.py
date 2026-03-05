@@ -111,3 +111,49 @@ class TestCrawlSpaticEvents:
         with patch("app.services.crawling_service.scrape_spatic", return_value=mock_data):
             result = await CrawlingService._crawl_spatic_events()
             assert len(result) == 1
+
+
+# ========================== _fetch_list_playwright (mock) ==========================
+
+class TestFetchListPlaywright:
+    """SPATIC Playwright 파싱 로직 테스트"""
+
+    def test_fetch_list_playwright_success(self):
+        from app.services.spatic_crawler import _fetch_list_playwright
+        
+        # mock playwright context
+        with patch("app.services.spatic_crawler.sync_playwright") as mock_sync:
+            # Setup mock chain
+            mock_p = MagicMock()
+            mock_sync.return_value.__enter__.return_value = mock_p
+            mock_browser = MagicMock()
+            mock_p.chromium.launch.return_value.__enter__.return_value = mock_browser
+            mock_page = MagicMock()
+            mock_browser.new_page.return_value = mock_page
+            
+            # Setup mock row
+            mock_row = MagicMock()
+            mock_row.get_attribute.return_value = "12345"
+            mock_td1 = MagicMock()
+            mock_td1.inner_text.return_value = "TITLE"
+            mock_td2 = MagicMock()
+            mock_td2.inner_text.return_value = "집회"
+            mock_td3 = MagicMock()
+            mock_td3.inner_text.return_value = "2026-03-05"
+            mock_row.query_selector_all.return_value = [mock_td1, mock_td2, mock_td3]
+            
+            mock_page.query_selector_all.return_value = [mock_row]
+
+            result = _fetch_list_playwright()
+            
+            assert len(result) == 1
+            assert result[0]["number"] == "12345"
+            assert result[0]["title"] == "집회"
+            assert result[0]["date"] == "2026-03-05"
+
+    def test_fetch_list_playwright_empty_on_error(self):
+        from app.services.spatic_crawler import _fetch_list_playwright
+        
+        with patch("app.services.spatic_crawler.sync_playwright", side_effect=Exception("mocked error")):
+            result = _fetch_list_playwright()
+            assert result == []
