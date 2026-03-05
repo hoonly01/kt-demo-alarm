@@ -5,6 +5,7 @@ import logging
 
 from app.database.connection import get_db
 from app.services.event_service import EventService
+from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["kakao-skills"])
@@ -279,3 +280,159 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
             ]
         }
     }
+
+
+# ─── 관심장소 알림 설정 ─────────────────────────────────────
+
+# 구역 정보 상수
+ZONE_INFO = {
+    1: {
+        "title": "1구역",
+        "description": "광화문광장 중심 반경 2KM\n(삼청동, 청운효자동, 가회동, 사직동, 종로1·4가동)",
+    },
+    2: {
+        "title": "2구역",
+        "description": "세검정 중심 반경 1.3KM\n(평창동, 부암동)",
+    },
+    3: {
+        "title": "3구역",
+        "description": "한국방송통신대학교 중심 반경 1.3KM\n(혜화동, 이화동, 종로5·6가동, 창신제1~3동, 숭인제1~2동)",
+    },
+}
+
+# zone 파라미터 값 → zone 번호 매핑
+ZONE_PARAM_MAP = {
+    "1구역": 1,
+    "2구역": 2,
+    "3구역": 3,
+    "미설정": None,
+}
+
+
+@router.post("/favorite-zone")
+async def get_favorite_zone_selection(request: dict):
+    """
+    관심장소 구역 선택 UI 반환 (카카오톡 Skill Block)
+    - ListCard 형식으로 4개 구역 옵션 표시
+    """
+    logger.info(f"🔍 /favorite-zone 요청: {request}")
+
+    items = []
+    for zone_num, info in ZONE_INFO.items():
+        items.append({
+            "title": info["title"],
+            "description": info["description"],
+            "action": "message",
+            "messageText": info["title"],
+        })
+
+    # 미설정 옵션 추가
+    items.append({
+        "title": "미설정",
+        "description": "기존 관심장소 정보를 삭제합니다",
+        "action": "message",
+        "messageText": "미설정",
+    })
+
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "listCard": {
+                        "header": {
+                            "title": "📍 관심장소를 선택해 주세요"
+                        },
+                        "items": items
+                    }
+                }
+            ]
+        }
+    }
+
+
+@router.post("/favorite-zone/save")
+async def save_favorite_zone(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db)
+):
+    """
+    관심장소 구역 선택 저장 (카카오톡 Skill Block)
+    - 사용자가 선택한 구역을 DB에 저장
+    - params.zone: "1구역", "2구역", "3구역", "미설정"
+    """
+    try:
+        logger.info(f"🔍 /favorite-zone/save 요청: {request}")
+
+        # Skill Block에서 사용자 ID 추출
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                }
+            }
+
+        # 파라미터 추출
+        params = request.get('action', {}).get('params', {})
+        zone_param = params.get('zone', '').strip()
+
+        if zone_param not in ZONE_PARAM_MAP:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 구역 값입니다 ('{zone_param}'). 1구역, 2구역, 3구역, 미설정 중 선택해주세요."}}]
+                }
+            }
+
+        zone_value = ZONE_PARAM_MAP[zone_param]
+
+        logger.info(f"📝 관심장소 설정 변경: user_id={user_id}, zone={zone_param}")
+
+        # 사용자 동기화
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # 구역 설정 업데이트
+        result = UserService.update_favorite_zone(user_id, zone_value, db)
+
+        if result["success"]:
+            if zone_value is not None:
+                zone_info = ZONE_INFO[zone_value]
+                msg = (
+                    f"✅ 관심장소가 [{zone_info['title']}]으로 설정되었습니다.\n\n"
+                    f"📍 {zone_info['description']}\n\n"
+                    "해당 구역 내 집회 정보가 있을 때 알림을 보내드립니다."
+                )
+            else:
+                msg = "🔕 관심장소 설정이 해제되었습니다.\n기존 관심장소 정보가 삭제되었습니다."
+
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": msg}}]
+                }
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "관심장소 설정에 실패했습니다.")}}]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("관심장소 설정 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            }
+        }

@@ -23,7 +23,8 @@ USERS_TABLE_SCHEMA = '''
         route_updated_at DATETIME,
         -- 개인화 설정
         marked_bus TEXT,
-        language TEXT
+        language TEXT,
+        favorite_zone INTEGER
     )
 '''
 
@@ -79,5 +80,6 @@ ROUTE_COLUMNS = [
     ('language', 'TEXT'),
     ('is_alarm_on', 'BOOLEAN'),
     ('open_id', 'TEXT'),  # 웹훅에서만 제공
-    ('plusfriend_user_key', 'TEXT')  # Skill Block에서 제공 (실질적 primary key)
+    ('plusfriend_user_key', 'TEXT'),  # Skill Block에서 제공 (실질적 primary key)
+    ('favorite_zone', 'INTEGER')  # 관심장소 구역 (1, 2, 3 또는 NULL)
 ]
