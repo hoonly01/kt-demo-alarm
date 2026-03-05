@@ -99,7 +99,7 @@ class TestCrawlSpaticEvents:
 
     @pytest.mark.asyncio
     async def test_spatic_failure_returns_empty(self):
-        with patch("app.services.crawling_service.scrape_spatic", side_effect=Exception("no selenium")):
+        with patch("app.services.crawling_service.scrape_spatic", side_effect=Exception("no playwright")):
             result = await CrawlingService._crawl_spatic_events()
             assert result == []
 
