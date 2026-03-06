@@ -181,6 +181,49 @@ class UserService:
             return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
     @staticmethod
+    def update_favorite_zone(user_id: str, zone: Optional[int], db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 관심장소 구역 설정 업데이트
+
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key 또는 bot_user_key)
+            zone: 구역 번호 (1, 2, 3) 또는 None (미설정/삭제)
+            db: 데이터베이스 연결
+
+        Returns:
+            Dict: 처리 결과
+        """
+        try:
+            cursor = db.cursor()
+
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute('''
+                UPDATE users SET favorite_zone = ?
+                WHERE plusfriend_user_key = ?
+            ''', (zone, user_id))
+
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET favorite_zone = ?
+                    WHERE bot_user_key = ?
+                ''', (zone, user_id))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"관심장소 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            zone_label = f"{zone}구역" if zone else "미설정"
+            logger.info(f"사용자 관심장소 설정 업데이트 완료: {user_id} -> {zone_label}")
+
+            return {"success": True}
+
+        except Exception as e:
+            logger.error(f"사용자 관심장소 설정 업데이트 실패: {str(e)}")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
+
+    @staticmethod
     async def update_user_route(user_id: str, departure: str, arrival: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자 경로 정보만 업데이트 (출발지/도착지)
