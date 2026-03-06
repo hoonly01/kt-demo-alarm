@@ -60,6 +60,13 @@ def init_db():
         if "duplicate column name" not in str(e).lower():
             logger.warning(f"is_alarm_on 컬럼 갱신 실패 (무시됨): {str(e)}")
 
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN favorite_zone INTEGER")
+        logger.info("✅ favorite_zone 컬럼 추가 완료")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            logger.warning(f"favorite_zone 컬럼 갱신 실패 (무시됨): {str(e)}")
+
     conn.commit()
     conn.close()
     print("✅ 데이터베이스 초기화 완료")
