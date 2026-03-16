@@ -286,12 +286,13 @@ class UserService:
     async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자의 marked_bus(자주 타는 버스)만 업데이트
-        - route 정보는 건드리지 않음
-        - plusfriend_user_key 기준 업데이트
+        - plusfriend_user_key 우선
+        - 없으면 bot_user_key로 fallback
         """
         try:
             cursor = db.cursor()
 
+            # 1. plusfriend_user_key 기준 업데이트
             cursor.execute('''
                 UPDATE users SET
                     marked_bus = ?,
@@ -302,6 +303,19 @@ class UserService:
                 datetime.now(),
                 user_id
             ))
+
+            # 2. 업데이트 안 됐으면 bot_user_key로 fallback
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET
+                        marked_bus = ?,
+                        last_message_at = ?
+                    WHERE bot_user_key = ?
+                ''', (
+                    marked_bus,
+                    datetime.now(),
+                    user_id
+                ))
 
             if cursor.rowcount == 0:
                 logger.warning(f"marked_bus 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
@@ -314,6 +328,7 @@ class UserService:
         except Exception as e:
             logger.error(f"marked_bus 업데이트 실패: {str(e)}")
             return {"success": False, "error": str(e)}
+    
 
     @staticmethod
     async def setup_user_profile(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
