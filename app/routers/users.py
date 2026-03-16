@@ -371,16 +371,17 @@ async def save_route_to_db(user_id: str, departure: str, arrival: str):
     except Exception as e:
         logger.error(f"경로 정보 저장 중 오류: {str(e)}")
 
-
 @router.post("/save_marked_bus")
-async def save_marked_bus_users(request: dict, background_tasks: BackgroundTasks):
+async def save_marked_bus_users(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db)
+):
     """
     사용자 marked_bus(자주 타는 버스) 저장 (Skill Block 전용)
     - action.params.marked_bus 사용
     """
     logger.info(f"🔍 /users/save_marked_bus 요청 body: {request}")
 
-    # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
     bot_user_key = None
     plusfriend_key = None
 
@@ -390,14 +391,11 @@ async def save_marked_bus_users(request: dict, background_tasks: BackgroundTasks
         properties = user_info.get('properties', {})
         plusfriend_key = properties.get('plusfriendUserKey')
     else:
-        # 로컬 테스트용
         bot_user_key = request.get('userId', 'test-user')
         plusfriend_key = request.get('plusfriendUserKey')
 
-    # 업데이트 대상은 plusfriend_key 우선 (팀 로직 통일)
     user_id = plusfriend_key if plusfriend_key else bot_user_key
 
-    # params에서 marked_bus 추출
     marked_bus = request.get('action', {}).get('params', {}).get('marked_bus', '')
     marked_bus = (marked_bus or "").strip()
 
@@ -411,46 +409,59 @@ async def save_marked_bus_users(request: dict, background_tasks: BackgroundTasks
             }
         }
 
-    # 사용자 동기화(기존 패턴)
-    if 'userRequest' in request:
-        from app.database.connection import get_db_connection
-        with get_db_connection() as db:
-            UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+    try:
+        # 사용자 동기화
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
 
-    # 백그라운드 저장
-    async def save_marked_bus_task(user_id: str, marked_bus: str):
-        from app.database.connection import DATABASE_PATH
-        try:
-            conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-            result = await UserService.update_marked_bus(
-                user_id=user_id,
-                marked_bus=marked_bus,
-                db=conn
-            )
-            conn.close()
+        # 즉시 저장
+        result = await UserService.update_marked_bus(
+            user_id=user_id,
+            marked_bus=marked_bus,
+            db=db
+        )
 
-            if result["success"]:
-                logger.info(f"✅ marked_bus 저장 완료: {user_id} -> {marked_bus}")
-            else:
-                logger.error(f"❌ marked_bus 저장 실패: {result.get('error')}")
-        except Exception as e:
-            logger.error(f"🚨 marked_bus 저장 중 오류: {str(e)}")
-
-    background_tasks.add_task(save_marked_bus_task, user_id, marked_bus)
-
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": (
-                            f"✅ 자주 타는 버스가 등록되었습니다!\n"
-                            f"🚌 {marked_bus}\n\n"
-                            "🔄 변경하고 싶으면 다시 등록해 주세요."
-                        )
-                    }
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"✅ 자주 타는 버스가 등록되었습니다!\n"
+                                    f"🚌 {marked_bus}\n\n"
+                                    "🔄 변경하고 싶으면 다시 등록해 주세요."
+                                )
+                            }
+                        }
+                    ]
                 }
-            ]
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": f"버스 저장에 실패했습니다: {result.get('error', '알 수 없는 오류')}"
+                            }
+                        }
+                    ]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("save_marked_bus 처리 중 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                        }
+                    }
+                ]
+            }
         }
-    }
