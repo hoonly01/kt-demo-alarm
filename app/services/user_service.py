@@ -328,7 +328,6 @@ class UserService:
         except Exception as e:
             logger.error(f"marked_bus 업데이트 실패: {str(e)}")
             return {"success": False, "error": str(e)}
-    
 
     @staticmethod
     async def setup_user_profile(user_setup: InitialSetupRequest, db: sqlite3.Connection) -> Dict[str, Any]:
