@@ -166,7 +166,7 @@ class CrawlingService:
             return raw_events
 
         except Exception as e:
-            logger.error(f"SMPA 크롤링 실패: {e}")
+            logger.error(f"SMPA 크롤링 실패: {e}", exc_info=True)
             return []
         finally:
             try:
