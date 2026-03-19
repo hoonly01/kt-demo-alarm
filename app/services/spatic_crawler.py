@@ -270,31 +270,33 @@ def _fetch_list_playwright() -> List[Dict]:
         with sync_playwright() as p:
             with p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"], headless=True) as browser:
                 page = browser.new_page(user_agent=HEADERS["User-Agent"])
-                page.goto(SPATIC_LIST_URL, wait_until="networkidle", timeout=30000)
+                page.goto(SPATIC_LIST_URL, wait_until="domcontentloaded", timeout=30000)
 
                 try:
                     page.wait_for_selector(".assem_content tr", timeout=15000)
                 except Exception as wait_err:
                     logger.exception(f"SPATIC 테이블 로딩 시간 초과: {wait_err}")
 
-                rows = page.query_selector_all(".assem_content tr")
+                html_content = page.content()
+                soup = BeautifulSoup(html_content, "html.parser")
+                rows = soup.select(".assem_content tr")
                 logger.info(f"SPATIC 발견된 행: {len(rows)}")
 
                 for row in rows:
                     try:
-                        mgr = row.get_attribute("key")
+                        mgr = row.get("key")
                         if not mgr:
-                            onclick = row.get_attribute("onclick") or ""
+                            onclick = row.get("onclick") or ""
                             m = re.search(r"['\"]?(\d{4,})['\"]?", onclick)
                             if m:
                                 mgr = m.group(1)
 
-                        tds = row.query_selector_all("td")
+                        tds = row.find_all("td")
                         if len(tds) < 3:
                             continue
                         
-                        title = tds[1].inner_text().strip()
-                        date_txt = tds[2].inner_text().strip()
+                        title = tds[1].get_text(strip=True)
+                        date_txt = tds[2].get_text(strip=True)
                         
                         if not mgr:
                             continue
@@ -371,9 +373,13 @@ def scrape_spatic() -> List[Dict]:
 
     with requests.Session() as session:
         url = SPATIC_DETAIL_FMT.format(mgrSeq=mgr_seq)
-        r = session.get(url, headers=HEADERS, timeout=15)
-        r.raise_for_status()
-        groups = _parse_detail_to_groups(r.text)
+        try:
+            r = session.get(url, headers=HEADERS, timeout=(5.0, 10.0))
+            r.raise_for_status()
+            groups = _parse_detail_to_groups(r.text)
+        except Exception as e:
+            logger.error(f"SPATIC 상세 페이지 로드 실패: {e}")
+            return []
 
     rows = []
     for (start, end), places in groups.items():
