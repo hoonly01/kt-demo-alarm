@@ -487,7 +487,7 @@ class CrawlingService:
 
     # PDF 파싱 로직 (원본 by MinhaKim02)
     TIME_RE = re.compile(
-        r'(?P<start>\d{1,2}\s*:\s*\d{2})\s*~\s*(?P<end>\d{1,2}\s*:\s*\d{2})',
+        r'(?P<start>\d{1,2}\s*:\s*\d{2})\s*[~∼\-\uff5e]\s*(?P<end>\d{1,2}\s*:\s*\d{2})',
         re.DOTALL
     )
 
@@ -496,7 +496,7 @@ class CrawlingService:
         """PDF 텍스트의 시간 표기 정규화 (원본 by MinhaKim02)"""
         t = text
         t = re.sub(r'(\d{1,2})\s*\n\s*:\s*(\d{2})', r'\1:\2', t)  # "18\n:00" → "18:00"
-        t = re.sub(r'(\d{1,2}\s*:\s*\d{2})\s*\n\s*~\s*\n\s*(\d{1,2}\s*:\s*\d{2})',
+        t = re.sub(r'(\d{1,2}\s*:\s*\d{2})\s*\n\s*[~∼\-\uff5e]\s*\n\s*(\d{1,2}\s*:\s*\d{2})',
                    r'\1~\2', t)  # "12:00\n~\n13:30" → "12:00~13:30"
         return t
 
