@@ -131,18 +131,17 @@ class TestFetchListPlaywright:
             mock_page = MagicMock()
             mock_browser.new_page.return_value = mock_page
             
-            # Setup mock row
-            mock_row = MagicMock()
-            mock_row.get_attribute.return_value = "12345"
-            mock_td1 = MagicMock()
-            mock_td1.inner_text.return_value = "TITLE"
-            mock_td2 = MagicMock()
-            mock_td2.inner_text.return_value = "집회"
-            mock_td3 = MagicMock()
-            mock_td3.inner_text.return_value = "2026-03-05"
-            mock_row.query_selector_all.return_value = [mock_td1, mock_td2, mock_td3]
-            
-            mock_page.query_selector_all.return_value = [mock_row]
+            # Setup HTML mock
+            mock_html = '''
+            <tbody class="assem_content">
+                <tr key="12345">
+                    <td>1</td>
+                    <td>집회</td>
+                    <td>2026-03-05</td>
+                </tr>
+            </tbody>
+            '''
+            mock_page.content.return_value = mock_html
 
             result = _fetch_list_playwright()
             
