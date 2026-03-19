@@ -401,7 +401,7 @@ async def save_marked_bus_users(
             "version": "2.0",
             "template": {
                 "outputs": [
-                    {"simpleText": {"text": "사용자 식별 정보가 없어 저장할 수 없습니다. 다시 시도해주세요."}}
+                    {"simpleText": {"text": "사용자 식별 정보를 찾을 수 없습니다.\n카카오톡에서 다시 시도해 주세요."}}
                 ]
             }
         }
