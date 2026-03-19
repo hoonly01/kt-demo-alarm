@@ -396,6 +396,17 @@ async def save_marked_bus_users(
 
     user_id = plusfriend_key if plusfriend_key else bot_user_key
 
+    if not user_id:
+        logger.warning("save_marked_bus 요청에서 사용자 식별 정보(bot_user_key/plusfriend_key)가 누락되었습니다.")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {"simpleText": {"text": "사용자 식별 정보를 찾을 수 없습니다.\n카카오톡에서 다시 시도해 주세요."}}
+                ]
+            }
+        }
+
     marked_bus = request.get('action', {}).get('params', {}).get('marked_bus', '')
     marked_bus = (marked_bus or "").strip()
 
@@ -438,13 +449,14 @@ async def save_marked_bus_users(
                 }
             }
         else:
+            logger.warning(f"marked_bus 저장 실패 - user_id: {user_id}, error: {result.get('error')}")
             return {
                 "version": "2.0",
                 "template": {
                     "outputs": [
                         {
                             "simpleText": {
-                                "text": f"버스 저장에 실패했습니다: {result.get('error', '알 수 없는 오류')}"
+                                "text": "버스 저장에 실패했습니다. 잠시 후 다시 시도해주세요."
                             }
                         }
                     ]
