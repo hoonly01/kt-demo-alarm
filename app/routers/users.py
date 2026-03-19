@@ -397,6 +397,7 @@ async def save_marked_bus_users(
     user_id = plusfriend_key if plusfriend_key else bot_user_key
 
     if not user_id:
+        logger.warning("save_marked_bus 요청에서 사용자 식별 정보(bot_user_key/plusfriend_key)가 누락되었습니다.")
         return {
             "version": "2.0",
             "template": {
