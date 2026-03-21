@@ -25,7 +25,7 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     admin_pass = settings.ADMIN_PASS
     
     # Fail fast if admin credentials are not configured
-    if admin_user is None or admin_pass is None:
+    if not admin_user or not admin_user.strip() or not admin_pass or not admin_pass.strip():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Admin credentials are not configured on the server",

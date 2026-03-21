@@ -42,3 +42,20 @@ def test_admin_dashboard_missing_env_vars(monkeypatch):
     response = client.get("/admin/dashboard", auth=("admin", "secret123"))
     assert response.status_code == 500
     assert response.json() == {"detail": "Admin credentials are not configured on the server"}
+
+@pytest.mark.parametrize("admin_user,admin_pass", [
+    ("", ""),
+    ("   ", "   "),
+    ("admin", "   "),
+    ("   ", "password"),
+    ("", "password"),
+    ("admin", ""),
+])
+def test_admin_dashboard_empty_or_whitespace_env_vars(monkeypatch, admin_user, admin_pass):
+    """환경변수가 빈 문자열이거나 공백만 있는 경우 500 에러를 반환해야 함"""
+    monkeypatch.setattr(settings, "ADMIN_USER", admin_user)
+    monkeypatch.setattr(settings, "ADMIN_PASS", admin_pass)
+    
+    response = client.get("/admin/dashboard", auth=("admin", "secret123"))
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Admin credentials are not configured on the server"}
