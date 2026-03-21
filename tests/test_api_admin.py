@@ -1,0 +1,44 @@
+import os
+import pytest
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+
+def test_admin_dashboard_no_credentials():
+    """인증 정보 없이 접근 시 401 에러를 반환해야 함"""
+    # 환경변수 설정 (임시)
+    os.environ["ADMIN_USER"] = "admin"
+    os.environ["ADMIN_PASS"] = "secret123"
+    
+    response = client.get("/admin/dashboard")
+    assert response.status_code == 401
+    assert "WWW-Authenticate" in response.headers
+    assert response.headers["WWW-Authenticate"] == "Basic"
+
+def test_admin_dashboard_invalid_credentials():
+    """잘못된 인증 정보로 접근 시 401 에러를 반환해야 함"""
+    os.environ["ADMIN_USER"] = "admin"
+    os.environ["ADMIN_PASS"] = "secret123"
+    
+    response = client.get("/admin/dashboard", auth=("admin", "wrongpassword"))
+    assert response.status_code == 401
+
+def test_admin_dashboard_valid_credentials():
+    """올바른 인증 정보로 접근 시 200 OK와 HTML을 반환해야 함"""
+    os.environ["ADMIN_USER"] = "admin"
+    os.environ["ADMIN_PASS"] = "secret123"
+    
+    response = client.get("/admin/dashboard", auth=("admin", "secret123"))
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "KT Demo Alarm Back-office" in response.text
+
+def test_admin_dashboard_missing_env_vars(monkeypatch):
+    """환경변수가 설정되지 않은 경우 500 에러를 반환해야 함"""
+    monkeypatch.delenv("ADMIN_USER", raising=False)
+    monkeypatch.delenv("ADMIN_PASS", raising=False)
+    
+    response = client.get("/admin/dashboard", auth=("admin", "secret123"))
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Admin credentials are not configured on the server"}
