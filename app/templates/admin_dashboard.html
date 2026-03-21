@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="60">
+    <title>KT Demo Alarm - Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+<div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="bg-indigo-600 text-white shadow">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-tight">KT Demo Alarm Back-office</h1>
+            <span class="text-xs bg-indigo-500 py-1 px-2 rounded font-mono">Auto-refresh: 60s</span>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        
+        <!-- Scorecards -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-indigo-500 flex flex-col">
+                <span class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Total Events</span>
+                <span class="text-3xl font-bold mt-2 text-gray-900">{{ stats.total_events }}</span>
+            </div>
+            
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-blue-500 flex flex-col">
+                <span class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Total Notification Tasks</span>
+                <span class="text-3xl font-bold mt-2 text-gray-900">{{ stats.total_alarms }}</span>
+            </div>
+            
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-green-500 flex flex-col">
+                <span class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Alarms Sent</span>
+                <span class="text-3xl font-bold mt-2 flex items-baseline">
+                    <span class="text-gray-900">{{ stats.total_alarms_sent }}</span>
+                </span>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-5 border-l-4 border-amber-500 flex flex-col">
+                <span class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Success Rate</span>
+                <span class="text-3xl font-bold mt-2 text-gray-900">{{ stats.success_rate }}%</span>
+                {% if stats.failed_sends > 0 %}
+                <span class="text-xs text-red-500 font-semibold mt-1">{{ stats.failed_sends }} failures</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Crawling Status Table -->
+            <div class="bg-white rounded-lg shadow flex flex-col h-full overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-bold text-gray-800">Recent Crawling Status (Events)</h2>
+                </div>
+                <div class="flex-grow overflow-auto" style="max-height: 500px;">
+                    {% if events %}
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID / Created</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Event Details</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Severity</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            {% for event in events %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div class="font-mono">#{{ event.id }}</div>
+                                    <div class="text-xs mt-1 text-gray-400">{{ event.created_at }}</div>
+                                </td>
+                                <td class="px-6 py-4 text-sm text-gray-900">
+                                    <div class="font-bold truncate max-w-xs">{{ event.title }}</div>
+                                    <div class="text-gray-500 text-xs mt-1">{{ event.location_name }} • {{ event.start_date }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    {% if event.severity_level == 3 %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">High</span>
+                                    {% elif event.severity_level == 2 %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Medium</span>
+                                    {% else %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Low</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="flex flex-col items-center justify-center p-12 text-center h-full">
+                        <svg class="w-12 h-12 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        <h3 class="text-lg font-medium text-gray-900">No recent events found</h3>
+                        <p class="mt-1 text-sm text-gray-500">The crawling service hasn't recorded any data yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Notification Delivery Table -->
+            <div class="bg-white rounded-lg shadow flex flex-col h-full overflow-hidden">
+                <div class="px-5 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-bold text-gray-800">Recent Notification Tasks</h2>
+                </div>
+                <div class="flex-grow overflow-auto" style="max-height: 500px;">
+                    {% if alarms %}
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Task / Time</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            {% for alarm in alarms %}
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <div class="font-mono text-gray-600">{{ alarm.task_id[:12] }}...</div>
+                                    <div class="text-xs text-gray-400 mt-1">{{ alarm.created_at }}</div>
+                                    <span class="inline-block mt-1 px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 rounded">{{ alarm.alarm_type }}</span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    {% if alarm.status == 'completed' %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Completed</span>
+                                    {% elif alarm.status == 'failed' %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Failed</span>
+                                    {% elif alarm.status == 'partial' %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Partial</span>
+                                    {% else %}
+                                        <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800 capitalize">{{ alarm.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-green-600 font-bold" title="Success">{{ alarm.successful_sends }}</span>
+                                        <span class="text-gray-300">/</span>
+                                        <span class="text-red-500 font-bold" title="Fail">{{ alarm.failed_sends }}</span>
+                                        <span class="text-gray-300">of</span>
+                                        <span class="font-bold text-gray-800" title="Total">{{ alarm.total_recipients }}</span>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <div class="flex flex-col items-center justify-center p-12 text-center h-full">
+                        <svg class="w-12 h-12 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                        <h3 class="text-lg font-medium text-gray-900">No recent alarms found</h3>
+                        <p class="mt-1 text-sm text-gray-500">The notification system hasn't sent any tasks yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+</body>
+</html>
