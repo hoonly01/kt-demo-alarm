@@ -84,6 +84,8 @@ jobs:
           API_KEY: ${{ secrets.API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SEOUL_BUS_API_KEY: ${{ secrets.SEOUL_BUS_API_KEY }}
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
         run: |
           set -euo pipefail
 
