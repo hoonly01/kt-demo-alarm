@@ -1,10 +1,5 @@
 import requests
 import urllib3
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
 
 import json
 import time
@@ -86,7 +81,15 @@ class TOPISCrawler:
         
         # Gemini 설정
         if not gemini_api_key:
+            try:
+                from app.config.settings import settings as _settings
+                gemini_api_key = _settings.GEMINI_API_KEY
+            except ImportError:
+                pass
+        
+        if not gemini_api_key:
             gemini_api_key = os.environ.get("GEMINI_API_KEY")
+            
         if not gemini_api_key:
             raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
         
