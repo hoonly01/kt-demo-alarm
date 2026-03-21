@@ -107,6 +107,8 @@ jobs:
           CRAWLING_MINUTE=30
           ROUTE_CHECK_HOUR=7
           ROUTE_CHECK_MINUTE=0
+          ADMIN_USER=${ADMIN_USER}
+          ADMIN_PASS=${ADMIN_PASS}
           EOF
 
           # Upload artifacts/config to EC2
