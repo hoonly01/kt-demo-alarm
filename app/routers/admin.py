@@ -21,8 +21,8 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirna
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     # Using environment variables for admin credentials.
     # These must be configured via environment (.env, deployment config).
-    admin_user = os.getenv("ADMIN_USER")
-    admin_pass = os.getenv("ADMIN_PASS")
+    admin_user = settings.ADMIN_USER
+    admin_pass = settings.ADMIN_PASS
     
     # Fail fast if admin credentials are not configured
     if admin_user is None or admin_pass is None:

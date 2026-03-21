@@ -1,5 +1,6 @@
 """애플리케이션 설정"""
 import logging
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -19,6 +20,10 @@ class Settings(BaseSettings):
     
     # --- Security Configuration ---
     API_KEY: str = ""
+    
+    # 어드민 대시보드 로그인 정보
+    ADMIN_USER: Optional[str] = None
+    ADMIN_PASS: Optional[str] = None
     
     # --- Server Configuration ---
     APP_NAME: str = "KT Demo Alarm API"
