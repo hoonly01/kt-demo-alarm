@@ -50,15 +50,8 @@ class TOPISCrawler:
     def __init__(self, gemini_api_key=None, cache_file="topis_cache.json"):
         """TOPIS 크롤러 초기화"""
         self.base_url = "https://topis.seoul.go.kr"
-        try:
-            from app.config.settings import settings as _settings
-        except ImportError:
-            _settings = None
-
-        if _settings:
-            self.service_key = _settings.SEOUL_BUS_API_KEY or os.environ.get("SEOUL_BUS_API_KEY")
-        else:
-            self.service_key = os.environ.get("SEOUL_BUS_API_KEY")
+        from app.config.settings import settings as _settings
+        self.service_key = _settings.SEOUL_BUS_API_KEY
         
         # 캐시 및 다운로드 폴더 경로 조정 (프로젝트 루트 기준)
         self.cache_file = cache_file
@@ -85,11 +78,7 @@ class TOPISCrawler:
         
         # Gemini 설정
         if not gemini_api_key:
-            if _settings:
-                gemini_api_key = _settings.GEMINI_API_KEY
-        
-        if not gemini_api_key:
-            gemini_api_key = os.environ.get("GEMINI_API_KEY")
+            gemini_api_key = _settings.GEMINI_API_KEY
             
         if not gemini_api_key:
             raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     BOT_ID: str = ""
     KAKAO_BOT_API_URL: str = "https://bot-api.kakao.com/v1/bots/message/send"
 
+    # --- TMAP API Configuration ---
+    TMAP_APP_KEY: str = ""
+
     # Gemini API 설정 (버스 통제 알림용)
     GEMINI_API_KEY: str = ""
 
