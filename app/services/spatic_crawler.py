@@ -270,10 +270,10 @@ def _fetch_list_playwright() -> List[Dict]:
         with sync_playwright() as p:
             with p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"], headless=True) as browser:
                 page = browser.new_page(user_agent=HEADERS["User-Agent"])
-                page.goto(SPATIC_LIST_URL, wait_until="domcontentloaded", timeout=30000)
+                page.goto(SPATIC_LIST_URL, wait_until="domcontentloaded", timeout=45000)
 
                 try:
-                    page.wait_for_selector(".assem_content tr", timeout=15000)
+                    page.wait_for_selector(".assem_content tr", timeout=45000)
                 except Exception as wait_err:
                     logger.exception(f"SPATIC 테이블 로딩 시간 초과: {wait_err}")
 
@@ -374,7 +374,7 @@ def scrape_spatic() -> List[Dict]:
     with requests.Session() as session:
         url = SPATIC_DETAIL_FMT.format(mgrSeq=mgr_seq)
         try:
-            r = session.get(url, headers=HEADERS, timeout=(5.0, 10.0))
+            r = session.get(url, headers=HEADERS, timeout=(15.0, 30.0))
             r.raise_for_status()
             groups = _parse_detail_to_groups(r.text)
         except Exception as e:

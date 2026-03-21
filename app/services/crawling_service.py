@@ -166,7 +166,7 @@ class CrawlingService:
             return raw_events
 
         except Exception as e:
-            logger.error(f"SMPA 크롤링 실패: {e}", exc_info=True)
+            logger.error(f"SMPA 크롤링 실패: {e}")
             return []
         finally:
             try:
@@ -341,7 +341,7 @@ class CrawlingService:
         목록 페이지에서 오늘자 게시글의 뷰 URL과 제목을 반환 (원본 by MinhaKim02)
         """
         current_date, expected_full = CrawlingService._current_title_pattern()
-        r = await client.get(list_url, timeout=20)
+        r = await client.get(list_url, timeout=30)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -368,7 +368,7 @@ class CrawlingService:
         _, _, board_no = parsed
 
         for url in CrawlingService._build_view_urls(board_no):
-            resp = await client.get(url, timeout=20)
+            resp = await client.get(url, timeout=30)
             if resp.status_code == 200 and "html" in (resp.headers.get("Content-Type") or "").lower():
                 return url, (target_title or "")
         raise RuntimeError("View 페이지 요청에 실패했습니다.")
@@ -416,7 +416,7 @@ class CrawlingService:
         """
         os.makedirs(out_dir, exist_ok=True)
         
-        r = await client.get(view_url, timeout=20)
+        r = await client.get(view_url, timeout=30)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
@@ -438,7 +438,7 @@ class CrawlingService:
             path, attach_no = parsed
             download_url = urllib.parse.urljoin(BASE_URL, path)
             try:
-                async with client.stream("GET", download_url, params={"attachNo": attach_no}, timeout=30) as resp:
+                async with client.stream("GET", download_url, params={"attachNo": attach_no}, timeout=45) as resp:
                     resp.raise_for_status()
                     first_chunk = b""
                     async for chunk in resp.aiter_bytes(chunk_size=8192):
