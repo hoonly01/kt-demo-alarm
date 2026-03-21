@@ -130,7 +130,7 @@ class CrawlingService:
         temp_dir = "temp_pdfs"
         try:
             logger.info("SMPA 사이트에서 오늘자 PDF 다운로드 시작")
-            pdf_path, title_text = await CrawlingService._download_today_pdf_with_title(out_dir=temp_dir)
+            pdf_path, title_text = await asyncio.to_thread(CrawlingService._download_today_pdf_with_title_sync, out_dir=temp_dir)
             logger.info(f"PDF 다운로드 성공: {pdf_path}")
 
             ymd = CrawlingService._extract_ymd_from_title(title_text)
@@ -336,59 +336,6 @@ class CrawlingService:
         return current_date, f"오늘의 집회 {current_date} {current_day}"
 
     @staticmethod
-    async def _get_today_post_info(client: httpx.AsyncClient, list_url: str = LIST_URL) -> Tuple[str, str]:
-        """
-        목록 페이지에서 오늘자 게시글의 뷰 URL과 제목을 반환 (원본 by MinhaKim02)
-        """
-        current_date, expected_full = CrawlingService._current_title_pattern()
-        r = await client.get(list_url, timeout=30)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-
-        tbody = soup.select_one("#subContents > div > div.inContent > table > tbody")
-        targets = tbody.select("a[href^='javascript:goBoardView']") if tbody \
-            else soup.select("a[href^='javascript:goBoardView']")
-
-        target_link = None
-        target_title = None
-        for a in targets:
-            title = a.get_text(strip=True) or (a.find_parent('td').get_text(strip=True) if a.find_parent('td') else "")
-            href = a.get("href", "")
-            if expected_full in title or f"오늘의 집회 {current_date}" in title:
-                target_link = href
-                target_title = title
-                break
-
-        if not target_link:
-            raise RuntimeError("오늘 날짜 게시글을 찾지 못했습니다.")
-
-        parsed = CrawlingService._parse_goBoardView(target_link)
-        if not parsed:
-            raise RuntimeError("goBoardView 인자를 파싱하지 못했습니다.")
-        _, _, board_no = parsed
-
-        for url in CrawlingService._build_view_urls(board_no):
-            resp = await client.get(url, timeout=30)
-            if resp.status_code == 200 and "html" in (resp.headers.get("Content-Type") or "").lower():
-                return url, (target_title or "")
-        raise RuntimeError("View 페이지 요청에 실패했습니다.")
-
-    @staticmethod
-    def _parse_attach_onclick(a_tag):
-        """첨부파일 다운로드 onclick 파싱 (원본 by MinhaKim02)"""
-        oc = a_tag.get("onclick", "")
-        m = re.search(r"attachfileDownload\('([^']+)'\s*,\s*'(\d+)'\)", oc)
-        if not m:
-            return None
-        return m.group(1), m.group(2)
-
-    @staticmethod
-    def _is_pdf(resp: httpx.Response, first: bytes) -> bool:
-        """PDF 파일 여부 확인 (원본 by MinhaKim02)"""
-        ct = (resp.headers.get("Content-Type") or "").lower()
-        return first.startswith(b"%PDF-") or "pdf" in ct
-
-    @staticmethod
     def _sanitize_filename(filename: str) -> str:
         """파일명 안전하게 변환"""
         return re.sub(r'[<>:"/\|?*]', '_', filename)
@@ -402,7 +349,6 @@ class CrawlingService:
         if m:
             value = m.group(1).strip('"\'')
             if value.startswith('UTF-8'):
-                # UTF-8''filename 형태 처리
                 parts = value.split("''", 1)
                 if len(parts) == 2:
                     return urllib.parse.unquote(parts[1])
@@ -410,80 +356,106 @@ class CrawlingService:
         return None
 
     @staticmethod
-    async def _download_from_view(client: httpx.AsyncClient, view_url: str, out_dir: str = "temp") -> str:
+    def _download_today_pdf_with_title_sync(out_dir: str = "temp") -> Tuple[str, str]:
         """
-        게시글 뷰 페이지에서 PDF 첨부파일 다운로드 (원본 by MinhaKim02)
+        오늘자 게시글의 PDF를 다운로드하고 제목과 함께 반환 (requests 동기 방식)
         """
-        os.makedirs(out_dir, exist_ok=True)
-        
-        r = await client.get(view_url, timeout=30)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+        import requests
+        import warnings
+        from urllib3.exceptions import InsecureRequestWarning
+        warnings.simplefilter('ignore', InsecureRequestWarning)
 
-        candidates = []
-        for a in soup.find_all("a"):
-            oc = a.get("onclick", "")
-            if "attachfileDownload" in oc:
-                txt = (a.get_text(strip=True) or "").lower()
-                if "pdf" in txt or ".pdf" in txt:
-                    candidates.append(a)
-        if not candidates:
-            candidates = [a for a in soup.find_all("a") if "attachfileDownload" in (a.get("onclick", "") or "")]
-
-        last_error = None
-        for a_tag in candidates:
-            parsed = CrawlingService._parse_attach_onclick(a_tag)
-            if not parsed:
-                continue
-            path, attach_no = parsed
-            download_url = urllib.parse.urljoin(BASE_URL, path)
-            try:
-                async with client.stream("GET", download_url, params={"attachNo": attach_no}, timeout=45) as resp:
-                    resp.raise_for_status()
-                    first_chunk = b""
-                    async for chunk in resp.aiter_bytes(chunk_size=8192):
-                        if not first_chunk:
-                            first_chunk = chunk
-                            if not CrawlingService._is_pdf(resp, first_chunk):
-                                break
-                            cd = resp.headers.get("Content-Disposition", "")
-                            filename = CrawlingService._filename_from_cd(cd) or (a_tag.get_text(strip=True) or f"{attach_no}.pdf")
-                            root, ext = os.path.splitext(filename)
-                            if ext.lower() != ".pdf":
-                                filename = root + ".pdf"
-                            filename = CrawlingService._sanitize_filename(filename)
-                            save_path = os.path.join(out_dir, filename)
-                            f = open(save_path, "wb")
-                        
-                        if chunk:
-                            f.write(chunk)
-                    
-                    if first_chunk:
-                        f.close()
-                        return save_path
-            except Exception as e:
-                last_error = e
-                continue
-        if last_error:
-            raise last_error
-        raise RuntimeError("PDF 첨부 다운로드에 실패했습니다.")
-
-    @staticmethod
-    async def _download_today_pdf_with_title(out_dir: str = "temp") -> Tuple[str, str]:
-        """
-        오늘자 게시글의 PDF를 다운로드하고 제목과 함께 반환 (원본 by MinhaKim02)
-        """
         headers = {
-            'User-Agent': 'Mozilla/5.0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
             'Referer': LIST_URL,
         }
         
-        async with httpx.AsyncClient(headers=headers) as client:
-            view_url, title_text = await CrawlingService._get_today_post_info(client, LIST_URL)
-            pdf_path = await CrawlingService._download_from_view(client, view_url, out_dir=out_dir)
-            return pdf_path, title_text
+        os.makedirs(out_dir, exist_ok=True)
+
+        with requests.Session() as s:
+            s.verify = False
+            s.headers.update(headers)
+            
+            # 1. 목록 페이지에서 URL 획득
+            r = s.get(LIST_URL, timeout=30)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            
+            current_date, expected_full = CrawlingService._current_title_pattern()
+            tbody = soup.select_one("#subContents > div > div.inContent > table > tbody")
+            targets = tbody.select("a[href^='javascript:goBoardView']") if tbody else soup.select("a[href^='javascript:goBoardView']")
+            
+            target_link = None
+            target_title = None
+            for a in targets:
+                title = a.get_text(strip=True) or (a.find_parent('td').get_text(strip=True) if a.find_parent('td') else "")
+                href = a.get("href", "")
+                if expected_full in title or f"오늘의 집회 {current_date}" in title:
+                    target_link = href
+                    target_title = title
+                    break
+                    
+            if not target_link:
+                raise RuntimeError("오늘 날짜 게시글을 찾지 못했습니다.")
+                
+            parsed = CrawlingService._parse_goBoardView(target_link)
+            if not parsed:
+                raise RuntimeError("goBoardView 인자를 파싱하지 못했습니다.")
+            _, _, board_no = parsed
+            
+            view_url = None
+            for u in CrawlingService._build_view_urls(board_no):
+                resp = s.get(u, timeout=30)
+                if resp.status_code == 200 and "html" in (resp.headers.get("Content-Type") or "").lower():
+                    view_url = u
+                    break
+                    
+            if not view_url:
+                raise RuntimeError("View 페이지 요청에 실패했습니다.")
+                
+            # 2. View 페이지에서 PDF 링크 획득
+            r_view = s.get(view_url, timeout=30)
+            soup_view = BeautifulSoup(r_view.text, "html.parser")
+            
+            candidates = []
+            for a in soup_view.find_all("a"):
+                oc = a.get("onclick", "")
+                if "attachfileDownload" in oc:
+                    txt = (a.get_text(strip=True) or "").lower()
+                    if "pdf" in txt or ".pdf" in txt:
+                        candidates.append(a)
+            if not candidates:
+                candidates = [a for a in soup_view.find_all("a") if "attachfileDownload" in (a.get("onclick", "") or "")]
+                
+            if not candidates:
+                raise RuntimeError("PDF 첨부 다운로드에 실패했습니다.")
+                
+            a_tag = candidates[0]
+            oc = a_tag.get("onclick", "")
+            m = re.search(r"attachfileDownload\('([^']+)'\s*,\s*'(\d+)'\)", oc)
+            if not m:
+                raise RuntimeError("attachfileDownload 인자를 파싱하지 못했습니다.")
+                
+            path, attach_no = m.group(1), m.group(2)
+            download_url = urllib.parse.urljoin(BASE_URL, path)
+            
+            r_pdf = s.get(download_url, params={"attachNo": attach_no}, timeout=45)
+            r_pdf.raise_for_status()
+            
+            cd = r_pdf.headers.get("Content-Disposition", "")
+            filename = CrawlingService._filename_from_cd(cd) or (a_tag.get_text(strip=True) or f"{attach_no}.pdf")
+            root, ext = os.path.splitext(filename)
+            if ext.lower() != ".pdf":
+                filename = root + ".pdf"
+            filename = CrawlingService._sanitize_filename(filename)
+            save_path = os.path.join(out_dir, filename)
+            
+            with open(save_path, "wb") as f:
+                f.write(r_pdf.content)
+                
+            return save_path, target_title
 
     # PDF 파싱 로직 (원본 by MinhaKim02)
     TIME_RE = re.compile(
