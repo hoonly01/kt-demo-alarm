@@ -16,7 +16,7 @@ from app.database.connection import init_db
 from app.utils.scheduler_utils import (
     scheduler, setup_scheduler, start_scheduler, shutdown_scheduler
 )
-from app.routers import users, events, alarms, kakao, kakao_skills
+from app.routers import users, events, alarms, kakao, kakao_skills, admin
 from app.routers import scheduler as scheduler_router
 from app.routers.bus_notice import router as bus_router
 from app.config.settings import settings, setup_logging
@@ -97,6 +97,7 @@ app.include_router(kakao.router)
 app.include_router(kakao_skills.router)  # 카카오톡 Skill Block (prefix 없음)
 app.include_router(scheduler_router.router)
 app.include_router(bus_router)
+app.include_router(admin.router)
 
 
 @app.get("/", response_model=HealthCheckResponse, tags=["Health"])
