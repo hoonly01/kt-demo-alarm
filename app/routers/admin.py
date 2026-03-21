@@ -19,10 +19,17 @@ security = HTTPBasic()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    # Using environment variables or hardcoded fallback for MVP
-    # In a real app, these should be carefully managed via .env
+    # Using environment variables for admin credentials.
+    # These must be configured via environment (.env, deployment config).
     admin_user = os.getenv("ADMIN_USER")
     admin_pass = os.getenv("ADMIN_PASS")
+    
+    # Fail fast if admin credentials are not configured
+    if admin_user is None or admin_pass is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Admin credentials are not configured on the server",
+        )
     
     correct_username = secrets.compare_digest(credentials.username, admin_user)
     correct_password = secrets.compare_digest(credentials.password, admin_pass)
