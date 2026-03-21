@@ -21,8 +21,8 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirna
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     # Using environment variables or hardcoded fallback for MVP
     # In a real app, these should be carefully managed via .env
-    admin_user = os.getenv("ADMIN_USER", "admin")
-    admin_pass = os.getenv("ADMIN_PASS", "admin123")
+    admin_user = os.getenv("ADMIN_USER")
+    admin_pass = os.getenv("ADMIN_PASS")
     
     correct_username = secrets.compare_digest(credentials.username, admin_user)
     correct_password = secrets.compare_digest(credentials.password, admin_pass)
