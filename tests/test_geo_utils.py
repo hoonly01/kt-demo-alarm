@@ -8,6 +8,7 @@ from app.utils.geo_utils import (
     get_route_coordinates
 )
 import httpx
+from app.config.settings import settings
 
 @pytest.mark.asyncio
 async def test_haversine_distance():
@@ -58,7 +59,7 @@ async def test_get_location_info_mocked():
     }
     
     # Mock the API Key
-    with patch("app.utils.geo_utils.KAKAO_REST_API_KEY", "test_key"):
+    with patch.object(settings, "KAKAO_REST_API_KEY", "test_key"):
         # Test with injected client
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.return_value = MagicMock(
@@ -97,7 +98,7 @@ async def test_get_route_coordinates_mocked():
     }
     
     # Mock the API Key
-    with patch("app.utils.geo_utils.KAKAO_REST_API_KEY", "test_key"):
+    with patch.object(settings, "KAKAO_REST_API_KEY", "test_key"):
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.return_value = MagicMock(
             status_code=200,

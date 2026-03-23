@@ -6,9 +6,9 @@ from typing import Optional
 
 import httpx
 
+from app.config.settings import settings
+
 logger = logging.getLogger(__name__)
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
-TMAP_APP_KEY = os.getenv("TMAP_APP_KEY")
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -141,12 +141,12 @@ async def get_location_info(query: str, client: Optional[httpx.AsyncClient] = No
     Returns:
         dict: 장소 정보 (name, address, x, y) 또는 None
     """
-    if not KAKAO_REST_API_KEY:
+    if not settings.KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
         return None
         
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}"}
     params = {"query": query}
 
     try:
@@ -201,14 +201,14 @@ async def get_route_coordinates_tmap_transit(
         list[tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
     """
 
-    if not TMAP_APP_KEY:
+    if not settings.TMAP_APP_KEY:
         logger.error("TMAP_APP_KEY가 설정되지 않았습니다.")
         return []
 
     url = "https://apis.openapi.sk.com/transit/routes"
     headers = {
         "accept": "application/json",
-        "appKey": TMAP_APP_KEY,
+        "appKey": settings.TMAP_APP_KEY,
         "content-type": "application/json",
     }
     payload = {
@@ -293,12 +293,12 @@ async def get_route_coordinates_kakao(start_x: float, start_y: float,
     Returns:
         list[tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
     """
-    if not KAKAO_REST_API_KEY:
+    if not settings.KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
         return []
         
     url = "https://apis-navi.kakaomobility.com/v1/directions"
-    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}"}
     params = {
         "origin": f"{start_x},{start_y}",
         "destination": f"{end_x},{end_y}",
