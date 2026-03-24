@@ -363,6 +363,8 @@ class CrawlingService:
         import requests
         import warnings
         from urllib3.exceptions import InsecureRequestWarning
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
         warnings.simplefilter('ignore', InsecureRequestWarning)
 
         headers = {
@@ -375,6 +377,16 @@ class CrawlingService:
         os.makedirs(out_dir, exist_ok=True)
 
         with requests.Session() as s:
+            retry_strategy = Retry(
+                total=4,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS"]
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            s.mount("http://", adapter)
+            s.mount("https://", adapter)
+            
             s.verify = False
             s.headers.update(headers)
             
