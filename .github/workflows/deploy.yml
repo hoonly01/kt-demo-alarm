@@ -86,6 +86,8 @@ jobs:
           SEOUL_BUS_API_KEY: ${{ secrets.SEOUL_BUS_API_KEY }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
+          TMAP_APP_KEY: ${{ secrets.TMAP_APP_KEY }}
+          ALARM_SAVE_BLOCK_ID: ${{ secrets.ALARM_SAVE_BLOCK_ID }}
         run: |
           set -euo pipefail
 
@@ -100,6 +102,8 @@ jobs:
           API_KEY=${API_KEY}
           GEMINI_API_KEY=${GEMINI_API_KEY}
           SEOUL_BUS_API_KEY=${SEOUL_BUS_API_KEY}
+          TMAP_APP_KEY=${TMAP_APP_KEY}
+          ALARM_SAVE_BLOCK_ID=${ALARM_SAVE_BLOCK_ID}
           DEBUG=false
           LOG_LEVEL=INFO
           DATABASE_PATH=/app/data/kt_demo_alarm.db
