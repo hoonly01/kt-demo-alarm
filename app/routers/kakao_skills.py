@@ -513,10 +513,7 @@ async def save_marked_bus(request: dict, background_tasks: BackgroundTasks):
 
 # ─── 알람 On/Off 설정 ─────────────────────────────────────
 
-ALARM_STATUS_MAP = {
-    "알림 켜기": "on",
-    "알림 끄기": "off",
-}
+from app.config.settings import settings
 
 
 @router.post("/alarm-setting")
@@ -524,23 +521,48 @@ async def get_alarm_setting_selection(request: dict):
     """
     알람 On/Off 선택 UI 반환 (카카오톡 Skill Block)
     - ListCard 형식으로 알림 켜기/끄기 옵션 표시
+    - action:block + extra 방식으로 alarm_status 값을 직접 다음 블록에 전달
     """
     logger.info(f"🔍 /alarm-setting 요청: {request}")
 
-    items = [
-        {
-            "title": "🔔 알림 켜기",
-            "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
-            "action": "message",
-            "messageText": "알림 켜기",
-        },
-        {
-            "title": "🔕 알림 끄기",
-            "description": "출퇴근 경로 집회 알림을 받지 않습니다",
-            "action": "message",
-            "messageText": "알림 끄기",
-        },
-    ]
+    # 카카오 챗봇 관리자센터의 '알람 저장' 스킬 블록 ID
+    # settings 또는 환경변수에서 읽어오거나, 없으면 message 방식으로 fallback
+    save_block_id = getattr(settings, "ALARM_SAVE_BLOCK_ID", None)
+
+    if save_block_id:
+        # ✅ 권장: blockId + extra 방식 (NLU 우회, 파라미터 직접 전달)
+        items = [
+            {
+                "title": "🔔 알림 켜기",
+                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "action": "block",
+                "blockId": save_block_id,
+                "extra": {"alarm_status": "on"},
+            },
+            {
+                "title": "🔕 알림 끄기",
+                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "action": "block",
+                "blockId": save_block_id,
+                "extra": {"alarm_status": "off"},
+            },
+        ]
+    else:
+        # fallback: message 방식 (blockId 미설정 시)
+        items = [
+            {
+                "title": "🔔 알림 켜기",
+                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "action": "message",
+                "messageText": "알림 켜기",
+            },
+            {
+                "title": "🔕 알림 끄기",
+                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "action": "message",
+                "messageText": "알림 끄기",
+            },
+        ]
 
     return {
         "version": "2.0",
@@ -567,7 +589,8 @@ async def save_alarm_setting(
     """
     알람 On/Off 선택 저장 (카카오톡 Skill Block)
     - 사용자가 선택한 알림 상태를 DB에 저장
-    - params.alarm_status: "on" / "off"
+    - (우선) action.clientExtra.alarm_status: "on" / "off"  ← block+extra 방식
+    - (fallback) action.params.alarm_status: "on" / "off"   ← message 방식
     """
     try:
         logger.info(f"🔍 /alarm-setting/save 요청: {request}")
@@ -589,9 +612,14 @@ async def save_alarm_setting(
                 }
             }
 
-        # 파라미터 추출
-        params = request.get('action', {}).get('params', {})
-        alarm_status_str = params.get('alarm_status', '').strip().lower()
+        action = request.get('action', {})
+        # block+extra 방식 우선, 없으면 params 방식(message fallback)
+        client_extra = action.get('clientExtra', {})
+        params = action.get('params', {})
+        alarm_status_str = (
+            client_extra.get('alarm_status')
+            or params.get('alarm_status', '')
+        ).strip().lower()
 
         if alarm_status_str not in ("on", "off"):
             return {
