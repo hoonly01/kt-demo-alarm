@@ -25,15 +25,17 @@ COPY pyproject.toml uv.lock ./
 # Install Python dependencies (no dev, use frozen lock file)
 RUN uv sync --frozen --no-dev
 
-# Install Playwright browsers and dependencies
-RUN uv run playwright install chromium --with-deps
+# Install Playwright browsers and dependencies to shared location
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p /ms-playwright && \
+    uv run playwright install chromium --with-deps
 
 # Copy application code
 COPY . .
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app /ms-playwright
 USER appuser
 
 # Expose port
