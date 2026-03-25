@@ -509,3 +509,133 @@ async def save_marked_bus(request: dict, background_tasks: BackgroundTasks):
             }]
         }
     }
+
+
+# ─── 알람 On/Off 설정 ─────────────────────────────────────
+
+ALARM_STATUS_MAP = {
+    "알림 켜기": "on",
+    "알림 끄기": "off",
+}
+
+
+@router.post("/alarm-setting")
+async def get_alarm_setting_selection(request: dict):
+    """
+    알람 On/Off 선택 UI 반환 (카카오톡 Skill Block)
+    - ListCard 형식으로 알림 켜기/끄기 옵션 표시
+    """
+    logger.info(f"🔍 /alarm-setting 요청: {request}")
+
+    items = [
+        {
+            "title": "🔔 알림 켜기",
+            "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+            "action": "message",
+            "messageText": "알림 켜기",
+        },
+        {
+            "title": "🔕 알림 끄기",
+            "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+            "action": "message",
+            "messageText": "알림 끄기",
+        },
+    ]
+
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "listCard": {
+                        "header": {
+                            "title": "🔔 알림 설정"
+                        },
+                        "items": items
+                    }
+                }
+            ]
+        }
+    }
+
+
+@router.post("/alarm-setting/save")
+async def save_alarm_setting(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db)
+):
+    """
+    알람 On/Off 선택 저장 (카카오톡 Skill Block)
+    - 사용자가 선택한 알림 상태를 DB에 저장
+    - params.alarm_status: "on" / "off"
+    """
+    try:
+        logger.info(f"🔍 /alarm-setting/save 요청: {request}")
+
+        # Skill Block에서 사용자 ID 추출
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                }
+            }
+
+        # 파라미터 추출
+        params = request.get('action', {}).get('params', {})
+        alarm_status_str = params.get('alarm_status', '').strip().lower()
+
+        if alarm_status_str not in ("on", "off"):
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 알림 설정 값입니다 ('{alarm_status_str}'). 'on' 또는 'off'여야 합니다."}}]
+                }
+            }
+
+        is_alarm_on = alarm_status_str == "on"
+
+        logger.info(f"📝 알림 설정 변경: user_id={user_id}, status={alarm_status_str}")
+
+        # 사용자 동기화
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # 설정 업데이트
+        result = UserService.update_alarm_setting(user_id, is_alarm_on, db)
+
+        if result["success"]:
+            if is_alarm_on:
+                msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+            else:
+                msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": msg}}]
+                }
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "알람 설정 업데이트에 실패했습니다.")}}]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("알람 설정 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            }
+        }
