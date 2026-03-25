@@ -68,10 +68,15 @@ class TestAlarmSettingSelectionUI:
         items = list_card["items"]
         assert len(items) == 2
 
-        # 각 아이템에 action: message 확인
+        # action은 block+extra(blockId 설정 시) 또는 message(미설정 시) 둘 다 허용
         for item in items:
-            assert item["action"] == "message"
-            assert "messageText" in item
+            assert item["action"] in ("message", "block")
+            if item["action"] == "block":
+                assert "blockId" in item
+                assert "extra" in item
+                assert "alarm_status" in item["extra"]
+            else:
+                assert "messageText" in item
 
         # 옵션 이름 확인
         titles = [item["title"] for item in items]
