@@ -314,25 +314,47 @@ async def get_favorite_zone_selection(request: dict):
     """
     관심장소 구역 선택 UI 반환 (카카오톡 Skill Block)
     - ListCard 형식으로 4개 구역 옵션 표시
+    - action:block + extra 방식으로 zone 값을 직접 다음 블록에 전달
     """
     logger.info(f"🔍 /favorite-zone 요청: {request}")
 
+    # 카카오 챗봇 관리자센터의 '관심장소 저장' 스킬 블록 ID
+    save_block_id = getattr(settings, "FAVORITE_ZONE_SAVE_BLOCK_ID", None)
+
     items = []
     for zone_num, info in ZONE_INFO.items():
-        items.append({
-            "title": info["title"],
-            "description": info["description"],
-            "action": "message",
-            "messageText": info["title"],
-        })
+        if save_block_id:
+            items.append({
+                "title": info["title"],
+                "description": info["description"],
+                "action": "block",
+                "blockId": save_block_id,
+                "extra": {"zone": info["title"]},
+            })
+        else:
+            items.append({
+                "title": info["title"],
+                "description": info["description"],
+                "action": "message",
+                "messageText": info["title"],
+            })
 
     # 미설정 옵션 추가
-    items.append({
-        "title": "미설정",
-        "description": "기존 관심장소 정보를 삭제합니다",
-        "action": "message",
-        "messageText": "미설정",
-    })
+    if save_block_id:
+        items.append({
+            "title": "미설정",
+            "description": "기존 관심장소 정보를 삭제합니다",
+            "action": "block",
+            "blockId": save_block_id,
+            "extra": {"zone": "미설정"},
+        })
+    else:
+        items.append({
+            "title": "미설정",
+            "description": "기존 관심장소 정보를 삭제합니다",
+            "action": "message",
+            "messageText": "미설정",
+        })
 
     return {
         "version": "2.0",
@@ -359,7 +381,8 @@ async def save_favorite_zone(
     """
     관심장소 구역 선택 저장 (카카오톡 Skill Block)
     - 사용자가 선택한 구역을 DB에 저장
-    - params.zone: "1구역", "2구역", "3구역", "미설정"
+    - (우선) action.clientExtra.zone: "1구역", "2구역", "3구역", "미설정"  ← block+extra 방식
+    - (fallback) action.params.zone: "1구역", ...                         ← message 방식
     """
     try:
         logger.info(f"🔍 /favorite-zone/save 요청: {request}")
@@ -381,9 +404,14 @@ async def save_favorite_zone(
                 }
             }
 
-        # 파라미터 추출
-        params = request.get('action', {}).get('params', {})
-        zone_param = params.get('zone', '').strip()
+        action = request.get('action', {})
+        # block+extra 방식 우선, 없으면 params 방식(message fallback)
+        client_extra = action.get('clientExtra', {})
+        params = action.get('params', {})
+        zone_param = (
+            client_extra.get('zone')
+            or params.get('zone', '')
+        ).strip()
 
         if zone_param not in ZONE_PARAM_MAP:
             return {
