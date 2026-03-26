@@ -545,30 +545,50 @@ from app.config.settings import settings
 
 
 @router.post("/alarm-setting")
-async def get_alarm_setting_selection(request: dict):
+async def get_alarm_setting_selection(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db)
+):
     """
     알람 On/Off 선택 UI 반환 (카카오톡 Skill Block)
     - ListCard 형식으로 알림 켜기/끄기 옵션 표시
-    - action:block + extra 방식으로 alarm_status 값을 직접 다음 블록에 전달
+    - 사용자의 현재 설정 상태를 헤더에 표시
     """
     logger.info(f"🔍 /alarm-setting 요청: {request}")
 
+    # 사용자 ID 추출
+    user_request = request.get('userRequest', {})
+    user_info_req = user_request.get('user', {})
+    properties = user_info_req.get('properties', {})
+    plusfriend_key = properties.get('plusfriendUserKey')
+    bot_user_key = user_info_req.get('id')
+    user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+    # 사용자 정보 조회
+    user_info = None
+    if user_id:
+        user_info = UserService.get_user_info(user_id, db)
+
+    # 헤더 정보 구성
+    title = "🔔 알림 설정"
+    if user_info:
+        status_text = "수신 중" if user_info.get("is_alarm_on") else "수신거부 중"
+        title = f"🔔 알림 설정 ({status_text})"
+
     # 카카오 챗봇 관리자센터의 '알람 저장' 스킬 블록 ID
-    # settings 또는 환경변수에서 읽어오거나, 없으면 message 방식으로 fallback
     save_block_id = getattr(settings, "ALARM_SAVE_BLOCK_ID", None)
 
     if save_block_id:
-        # ✅ 권장: blockId + extra 방식 (NLU 우회, 파라미터 직접 전달)
         items = [
             {
-                "title": "🔔 알림 켜기",
+                "title": "🔔 알람 켜기",
                 "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
                 "action": "block",
                 "blockId": save_block_id,
                 "extra": {"alarm_status": "on"},
             },
             {
-                "title": "🔕 알림 끄기",
+                "title": "🔕 알람 끄기",
                 "description": "출퇴근 경로 집회 알림을 받지 않습니다",
                 "action": "block",
                 "blockId": save_block_id,
@@ -576,16 +596,15 @@ async def get_alarm_setting_selection(request: dict):
             },
         ]
     else:
-        # fallback: message 방식 (blockId 미설정 시)
         items = [
             {
-                "title": "🔔 알림 켜기",
+                "title": "🔔 알람 켜기",
                 "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
                 "action": "message",
                 "messageText": "알림 켜기",
             },
             {
-                "title": "🔕 알림 끄기",
+                "title": "🔕 알람 끄기",
                 "description": "출퇴근 경로 집회 알림을 받지 않습니다",
                 "action": "message",
                 "messageText": "알림 끄기",
@@ -599,7 +618,7 @@ async def get_alarm_setting_selection(request: dict):
                 {
                     "listCard": {
                         "header": {
-                            "title": "🔔 알림 설정"
+                            "title": title
                         },
                         "items": items
                     }
