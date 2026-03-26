@@ -156,7 +156,7 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # Remove only dangling/unused images; keep layer cache
+            # Remove dangling images; keep layer cache
             docker image prune -f || true
 
             echo "=== Disk usage (after prune) ==="
