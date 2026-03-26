@@ -502,3 +502,51 @@ class UserService:
         except Exception as e:
             logger.error(f"사용자 경로 정보 조회 실패: {str(e)}")
             return None
+
+    @staticmethod
+    def get_user_info(user_id: str, db: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+        """
+        사용자의 전체 정보 조회 (알람 설정, 관심구역, 경로, 버스 등)
+        
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key 또는 bot_user_key)
+            db: 데이터베이스 연결
+            
+        Returns:
+            Optional[Dict]: 사용자 정보 또는 None
+        """
+        try:
+            cursor = db.cursor()
+            
+            SELECT_FIELDS = '''
+                SELECT 
+                    is_alarm_on, favorite_zone, marked_bus, 
+                    departure_name, arrival_name,
+                    plusfriend_user_key, bot_user_key
+                FROM users 
+            '''
+
+            # 1단계: plusfriend_user_key로 조회 (우선)
+            cursor.execute(SELECT_FIELDS + 'WHERE plusfriend_user_key = ? LIMIT 1', (user_id,))
+            row = cursor.fetchone()
+
+            # 2단계: 없으면 bot_user_key로 조회 (fallback)
+            if not row:
+                cursor.execute(SELECT_FIELDS + 'WHERE bot_user_key = ? LIMIT 1', (user_id,))
+                row = cursor.fetchone()
+            if not row:
+                return None
+                
+            return {
+                "is_alarm_on": bool(row[0]),
+                "favorite_zone": row[1],
+                "marked_bus": row[2],
+                "departure_name": row[3],
+                "arrival_name": row[4],
+                "plusfriend_user_key": row[5],
+                "bot_user_key": row[6]
+            }
+            
+        except Exception as e:
+            logger.error(f"사용자 정보 조회 실패: {str(e)}")
+            return None
