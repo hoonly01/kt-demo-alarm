@@ -172,3 +172,156 @@ class TestAlarmSettingSave:
             data = response.json()
             text = data["template"]["outputs"][0]["simpleText"]["text"]
             assert "시스템 오류" in text
+
+
+class TestAlarmSettingSaveViaClientExtra:
+    """block+extra 방식(clientExtra) 알람 설정 저장 테스트"""
+
+    def _make_client_extra_payload(self, alarm_status: str) -> dict:
+        """clientExtra 기반 payload 생성 (실제 카카오 block+extra 요청 형식)"""
+        return {
+            "userRequest": {
+                "user": {
+                    "id": "bot_user_key_123",
+                    "properties": {
+                        "plusfriendUserKey": "plusfriend_key_123"
+                    }
+                }
+            },
+            "action": {
+                "clientExtra": {"alarm_status": alarm_status},
+                "params": {}
+            }
+        }
+
+    def test_save_alarm_on_via_client_extra(self, clean_test_db):
+        """block+extra 방식: clientExtra.alarm_status='on' 으로 알림 켜기"""
+        payload = self._make_client_extra_payload("on")
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_alarm_setting") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/alarm-setting/save", json=payload)
+
+                assert response.status_code == 200
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "켜졌습니다" in text
+
+                mock_update.assert_called_once()
+                assert mock_update.call_args[0][1] is True  # is_alarm_on=True
+
+    def test_save_alarm_off_via_client_extra(self, clean_test_db):
+        """block+extra 방식: clientExtra.alarm_status='off' 으로 알림 끄기"""
+        payload = self._make_client_extra_payload("off")
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_alarm_setting") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/alarm-setting/save", json=payload)
+
+                assert response.status_code == 200
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "꺼졌습니다" in text
+
+                mock_update.assert_called_once()
+                assert mock_update.call_args[0][1] is False  # is_alarm_on=False
+
+    def test_client_extra_takes_priority_over_params(self, clean_test_db):
+        """clientExtra가 params보다 우선 적용되는지 확인"""
+        payload = {
+            "userRequest": {
+                "user": {
+                    "id": "bot_user_key_123",
+                    "properties": {"plusfriendUserKey": "plusfriend_key_123"}
+                }
+            },
+            "action": {
+                "clientExtra": {"alarm_status": "on"},   # ← 우선
+                "params": {"alarm_status": "off"}         # ← 무시되어야 함
+            }
+        }
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_alarm_setting") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/alarm-setting/save", json=payload)
+
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "켜졌습니다" in text  # clientExtra의 "on"이 적용되어야 함
+                assert mock_update.call_args[0][1] is True
+
+
+class TestFavoriteZoneSaveViaClientExtra:
+    """/favorite-zone/save: block+extra 방식(clientExtra) 관심장소 저장 테스트"""
+
+    def _make_payload(self, zone: str, use_client_extra: bool = True) -> dict:
+        action = (
+            {"clientExtra": {"zone": zone}, "params": {}}
+            if use_client_extra
+            else {"params": {"zone": zone}}
+        )
+        return {
+            "userRequest": {
+                "user": {
+                    "id": "bot_user_key_123",
+                    "properties": {"plusfriendUserKey": "plusfriend_key_123"}
+                }
+            },
+            "action": action
+        }
+
+    def test_save_zone_via_client_extra(self, clean_test_db):
+        """block+extra 방식: clientExtra.zone='1구역' 저장 성공"""
+        payload = self._make_payload("1구역")
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_favorite_zone") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/favorite-zone/save", json=payload)
+
+                assert response.status_code == 200
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "1구역" in text
+
+    def test_save_unset_zone_via_client_extra(self, clean_test_db):
+        """block+extra 방식: clientExtra.zone='미설정' 으로 관심장소 해제"""
+        payload = self._make_payload("미설정")
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_favorite_zone") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/favorite-zone/save", json=payload)
+
+                assert response.status_code == 200
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "해제" in text
+
+    def test_client_extra_takes_priority_over_params_zone(self, clean_test_db):
+        """clientExtra.zone이 params.zone보다 우선 적용"""
+        payload = {
+            "userRequest": {
+                "user": {
+                    "id": "bot_user_key_123",
+                    "properties": {"plusfriendUserKey": "plusfriend_key_123"}
+                }
+            },
+            "action": {
+                "clientExtra": {"zone": "1구역"},   # ← 우선
+                "params": {"zone": "3구역"}          # ← 무시되어야 함
+            }
+        }
+
+        with patch("app.services.user_service.UserService.sync_kakao_user"):
+            with patch("app.services.user_service.UserService.update_favorite_zone") as mock_update:
+                mock_update.return_value = {"success": True}
+
+                response = client.post("/favorite-zone/save", json=payload)
+
+                text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+                assert "1구역" in text
+
