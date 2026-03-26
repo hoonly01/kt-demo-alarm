@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
 
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright Browsers
         run: |
           uv run playwright install-deps
