@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
 
+      - name: Cache Playwright Browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Playwright Browsers
         run: |
           uv run playwright install-deps
@@ -45,14 +51,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build Docker image
-        run: |
-          docker build -t kt-demo-alarm:${{ github.sha }} .
-          docker tag kt-demo-alarm:${{ github.sha }} kt-demo-alarm:latest
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Save Docker image (gzipped tar)
-        run: |
-          docker save kt-demo-alarm:latest | gzip -c > kt-demo-alarm-image.tar.gz
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: kt-demo-alarm:latest,kt-demo-alarm:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=kt-demo-alarm-image.tar
+
+      - name: Compress Docker image
+        run: gzip kt-demo-alarm-image.tar
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -144,10 +156,8 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # IMPORTANT: free disk BEFORE docker load / up
-            docker system prune -af || true
-            # Only if you are OK with deleting unused volumes (may delete caches)
-            # docker volume prune -f || true
+            # Remove dangling images; keep layer cache
+            docker image prune -f || true
 
             echo "=== Disk usage (after prune) ==="
             df -h
