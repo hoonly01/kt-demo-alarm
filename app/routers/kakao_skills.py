@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 import sqlite3
 import logging
 
+from app.config.settings import settings
 from app.database.connection import get_db
 from app.services.event_service import EventService
 from app.services.user_service import UserService
@@ -319,7 +320,7 @@ async def get_favorite_zone_selection(request: dict):
     logger.info(f"🔍 /favorite-zone 요청: {request}")
 
     # 카카오 챗봇 관리자센터의 '관심장소 저장' 스킬 블록 ID
-    save_block_id = getattr(settings, "FAVORITE_ZONE_SAVE_BLOCK_ID", None)
+    save_block_id = settings.FAVORITE_ZONE_SAVE_BLOCK_ID
 
     items = []
     for zone_num, info in ZONE_INFO.items():
@@ -541,8 +542,6 @@ async def save_marked_bus(request: dict, background_tasks: BackgroundTasks):
 
 # ─── 알람 On/Off 설정 ─────────────────────────────────────
 
-from app.config.settings import settings
-
 
 @router.post("/alarm-setting")
 async def get_alarm_setting_selection(
@@ -576,7 +575,8 @@ async def get_alarm_setting_selection(
         title = f"🔔 알림 설정 ({status_text})"
 
     # 카카오 챗봇 관리자센터의 '알람 저장' 스킬 블록 ID
-    save_block_id = getattr(settings, "ALARM_SAVE_BLOCK_ID", None)
+    # settings 또는 환경변수에서 읽어오거나, 없으면 message 방식으로 fallback
+    save_block_id = settings.ALARM_SAVE_BLOCK_ID
 
     if save_block_id:
         items = [
