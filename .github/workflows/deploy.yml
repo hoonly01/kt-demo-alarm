@@ -150,10 +150,8 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # IMPORTANT: free disk BEFORE docker load / up
-            docker system prune -af || true
-            # Only if you are OK with deleting unused volumes (may delete caches)
-            # docker volume prune -f || true
+            # Remove only dangling/unused images; keep layer cache
+            docker image prune -f || true
 
             echo "=== Disk usage (after prune) ==="
             df -h
