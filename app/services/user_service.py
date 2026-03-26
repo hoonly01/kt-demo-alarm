@@ -518,19 +518,22 @@ class UserService:
         try:
             cursor = db.cursor()
             
-            # plusfriend_user_key 우선 조회, 없으면 bot_user_key로 조회
-            cursor.execute('''
+            SELECT_FIELDS = '''
                 SELECT 
                     is_alarm_on, favorite_zone, marked_bus, 
                     departure_name, arrival_name,
                     plusfriend_user_key, bot_user_key
                 FROM users 
-                WHERE plusfriend_user_key = ? OR bot_user_key = ?
-                ORDER BY (CASE WHEN plusfriend_user_key = ? THEN 0 ELSE 1 END) ASC
-                LIMIT 1
-            ''', (user_id, user_id, user_id))
-            
+            '''
+
+            # 1단계: plusfriend_user_key로 조회 (우선)
+            cursor.execute(SELECT_FIELDS + 'WHERE plusfriend_user_key = ? LIMIT 1', (user_id,))
             row = cursor.fetchone()
+
+            # 2단계: 없으면 bot_user_key로 조회 (fallback)
+            if not row:
+                cursor.execute(SELECT_FIELDS + 'WHERE bot_user_key = ? LIMIT 1', (user_id,))
+                row = cursor.fetchone()
             if not row:
                 return None
                 
