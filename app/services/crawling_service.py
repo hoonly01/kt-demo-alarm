@@ -11,23 +11,16 @@ from collections import OrderedDict
 from typing import List, Dict, Tuple, Optional
 
 from app.database.connection import get_db_connection, DATABASE_PATH
+from app.config.settings import settings
 
 import requests
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
 from playwright.sync_api import sync_playwright
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 # 로거 설정
 logger = logging.getLogger(__name__)
-
-# ------------------------------- 환경 변수 설정 (Pydantic) --------------------------------
-class Settings(BaseSettings):
-    KAKAO_REST_API_KEY: Optional[str] = None
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
-settings = Settings()
 
 # ------------------------------- 상수/설정 ------------------------------------
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
