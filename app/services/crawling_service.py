@@ -10,6 +10,8 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Tuple, Optional
 
+from app.database.connection import get_db_connection, DATABASE_PATH
+
 import requests
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
@@ -29,8 +31,7 @@ settings = Settings()
 
 # ------------------------------- 상수/설정 ------------------------------------
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "kt_demo_alarm.db"
+DATA_DIR = pathlib.Path(DATABASE_PATH).parent
 
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 KAKAO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
@@ -365,76 +366,62 @@ class CrawlingService:
 
     @classmethod
     def _sync_to_database(cls, data_list: List[Dict]):
-        # ✅ [수정 4] 중앙 정의된 스키마 모듈을 재사용
-        from app.database.models import EVENTS_TABLE_SCHEMA
-        import sqlite3
+        insert_data = []
+        for r in data_list:
+            year = r.get('년')
+            month = str(r.get('월')).zfill(2)
+            day = str(r.get('일')).zfill(2)
+
+            st_time = r.get('start_time')
+            ed_time = r.get('end_time')
+
+            start_date = f"{year}-{month}-{day} {st_time}:00" if st_time else None
+            end_date = f"{year}-{month}-{day} {ed_time}:00" if ed_time else None
+
+            place_name = r.get('장소', '알 수 없는 장소')
+            attendees = r.get('인원', '')
+
+            title = r.get('title') or f"{place_name} 집회"
+            description = r.get('description')
+
+            lat = r.get('위도')
+            lon = r.get('경도')
+
+            # latitude, longitude가 NULL이면 NOT NULL 제약 위반 → 해당 행 스킵
+            if lat is None or lon is None or start_date is None:
+                logger.warning(
+                    f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, lat: {lat}, lon: {lon}, start_date: {start_date}"
+                )
+                continue
+
+            insert_data.append((
+                title,
+                description,
+                place_name,
+                r.get('지번주소'),
+                lat,
+                lon,
+                start_date,
+                end_date,
+                '집회',
+                3 if attendees and attendees.isdigit() and int(attendees) > 1000 else 2,
+                'active'
+            ))
 
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-
-            # 중앙 스키마로 테이블 생성 (이미 존재하면 무시)
-            cur.executescript(EVENTS_TABLE_SCHEMA)
-
-            insert_data = []
-            for r in data_list:
-                year = r.get('년')
-                month = str(r.get('월')).zfill(2)
-                day = str(r.get('일')).zfill(2)
-
-                st_time = r.get('start_time')
-                ed_time = r.get('end_time')
-
-                start_date = f"{year}-{month}-{day} {st_time}:00" if st_time else None
-                end_date = f"{year}-{month}-{day} {ed_time}:00" if ed_time else None
-
-                place_name = r.get('장소', '알 수 없는 장소')
-                attendees = r.get('인원', '')
-
-                # ✅ [수정 5] title이 None이면 장소 기반 기본값 생성 (NOT NULL 제약 대응)
-                title = r.get('title') or f"{place_name} 집회"
-                description = r.get('description')
-
-                lat = r.get('위도')
-                lon = r.get('경도')
-
-                # latitude, longitude가 NULL이면 NOT NULL 제약 위반 → 해당 행 스킵
-                if lat is None or lon is None or start_date is None:
-                    logger.warning(
-                        f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, lat: {lat}, lon: {lon}, start_date: {start_date}"
-                    )
-                    continue
-
-                insert_data.append((
-                    title,
-                    description,
-                    place_name,
-                    r.get('지번주소'),
-                    lat,
-                    lon,
-                    start_date,
-                    end_date,
-                    '집회',
-                    3 if attendees and attendees.isdigit() and int(attendees) > 1000 else 2,
-                    'active'
-                ))
-
-            cur.executemany("""
-                INSERT INTO events (
-                    title, description, location_name, location_address,
-                    latitude, longitude, start_date, end_date,
-                    category, severity_level, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, insert_data)
-
-            conn.commit()
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                cur.executemany("""
+                    INSERT INTO events (
+                        title, description, location_name, location_address,
+                        latitude, longitude, start_date, end_date,
+                        category, severity_level, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, insert_data)
+                conn.commit()
             logger.info(f"데이터베이스에 {len(insert_data)}건의 이벤트 데이터가 성공적으로 저장되었습니다.")
-
         except Exception as e:
             logger.error(f"SQLite3 저장 중 에러: {e}", exc_info=True)
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
 
 if __name__ == "__main__":
