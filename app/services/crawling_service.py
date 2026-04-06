@@ -411,8 +411,16 @@ class CrawlingService:
         try:
             with get_db_connection() as conn:
                 cur = conn.cursor()
+                # 중복 방지: location_name + start_date 기준 UNIQUE 인덱스
+                try:
+                    cur.execute("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_location_date
+                        ON events(location_name, start_date)
+                    """)
+                except Exception:
+                    pass  # 이미 존재하거나 기존 데이터 충돌 시 무시
                 cur.executemany("""
-                    INSERT INTO events (
+                    INSERT OR IGNORE INTO events (
                         title, description, location_name, location_address,
                         latitude, longitude, start_date, end_date,
                         category, severity_level, status
