@@ -137,27 +137,26 @@ class NotificationService:
 
             # 하나의 세션을 생성하여 모든 요청에 재사용
             async with httpx.AsyncClient() as client:
+                # 내부 헬퍼 함수 - 세션과 파라미터 캡처
+                async def send_to_user(user_id: str) -> Dict[str, Any]:
+                    try:
+                        alarm_request = AlarmRequest(
+                            user_id=user_id,
+                            event_name=event_name,
+                            data=data
+                        )
+                        return await NotificationService.send_individual_alarm(
+                            alarm_request, 
+                            id_type=id_type,
+                            client=client
+                        )
+                    except Exception as e:
+                        logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
+                        return {"success": False, "error": str(e)}
+
                 # 배치 단위로 처리
                 for i in range(0, len(user_ids), actual_batch_size):
                     batch_users = user_ids[i:i + actual_batch_size]
-
-                    # 배치 내 모든 사용자에게 병렬로 알림 전송
-                    async def send_to_user(user_id: str) -> Dict[str, Any]:
-                        try:
-                            alarm_request = AlarmRequest(
-                                user_id=user_id,
-                                event_name=event_name,
-                                data=data
-                            )
-                            # 생성한 클라이언트를 주입
-                            return await NotificationService.send_individual_alarm(
-                                alarm_request, 
-                                id_type=id_type,
-                                client=client
-                            )
-                        except Exception as e:
-                            logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
-                            return {"success": False, "error": str(e)}
                     
                     # 배치 내 모든 작업을 동시에 실행
                     batch_tasks = [send_to_user(user_id) for user_id in batch_users]
