@@ -172,7 +172,7 @@ class EventService:
             # 활성 집회 목록 조회
             cursor.execute('''
                 SELECT * FROM events 
-                WHERE status = 'active' AND start_date > datetime('now')
+                WHERE status = 'active' AND start_date > datetime('now', '+9 hours')
                 ORDER BY start_date
             ''')
             
@@ -241,9 +241,10 @@ class EventService:
             )
             
         except Exception as e:
-            logger.error(f"경로 집회 확인 실패 - {user_id}: {str(e)}")
+            safe_user_id = user_id or "unknown"
+            logger.error(f"경로 집회 확인 실패 - {safe_user_id}: {str(e)}")
             return RouteEventCheck(
-                user_id=user_id,
+                user_id=safe_user_id,
                 events_found=[],
                 route_info={},
                 total_events=0
@@ -284,7 +285,7 @@ class EventService:
 
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
 
-            # 조건별로 그룹화 (예: 출발지가 같은 사용자끼리)
+            # 조건별로 그룹화 (출발지와 도착지가 같은 사용자끼리)
             grouped_users = {}
             for user_row in users:
                 plusfriend_key, departure, arrival = user_row
@@ -293,10 +294,10 @@ class EventService:
                 result = await EventService.check_route_events(plusfriend_key, auto_notify=False, db=db)
 
                 if result.events_found:
-                    # 조건별로 그룹화 (출발지 기준)
-                    if departure not in grouped_users:
-                        grouped_users[departure] = []
-                    grouped_users[departure].append({
+                    route_key = (departure or "알수없음", arrival or "알수없음")
+                    if route_key not in grouped_users:
+                        grouped_users[route_key] = []
+                    grouped_users[route_key].append({
                         "plusfriend_key": plusfriend_key,
                         "events": [
                             {
@@ -314,11 +315,11 @@ class EventService:
                     })
 
             # Event API로 일괄 전송
-            for departure, user_group in grouped_users.items():
+            for (dep, arr), user_group in grouped_users.items():
                 user_ids = [u["plusfriend_key"] for u in user_group]
                 events_data = user_group[0]["events"]  # 공통 이벤트
 
-                logger.info(f"📢 출발지 '{departure}' 사용자 {len(user_ids)}명에게 알림 전송")
+                logger.info(f"📢 경로 '{dep}->{arr}' 사용자 {len(user_ids)}명에게 알림 전송")
 
                 # Event API 호출 (type=plusfriendUserKey)
                 await NotificationService.send_bulk_alert(
