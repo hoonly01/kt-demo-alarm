@@ -312,7 +312,8 @@ class CrawlingService:
             if not target_view:
                 return []
 
-            r = session.get(target_view)
+            r = session.get(target_view, timeout=10)
+            r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
             pdf_url = None
             for a in soup.find_all("a"):
