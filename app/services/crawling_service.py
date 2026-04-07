@@ -16,6 +16,9 @@ from pdfminer.high_level import extract_text
 from playwright.sync_api import sync_playwright
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 4번 리뷰 반영: 중앙 스키마 임포트 (경로는 프로젝트 구조에 맞게 설정되어야 함)
+from app.database.models import EVENTS_TABLE_SCHEMA
+
 # 로거 설정
 logger = logging.getLogger(__name__)
 
@@ -23,18 +26,22 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     KAKAO_REST_API_KEY: Optional[str] = None
 
+    # .env 파일에서 로드하며, 정의되지 않은 추가 환경변수는 무시(ignore)합니다.
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
 
 # ------------------------------- 상수/설정 ------------------------------------
+# 프로젝트 루트 기준 data 폴더 설정
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "kt_demo_alarm.db"
 
+# Kakao API Key 설정 (Pydantic Settings에서 가져옴)
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 KAKAO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 
+# URLs
 SPATIC_BASE_URL = "https://www.spatic.go.kr"
 SPATIC_LIST_URL = f"{SPATIC_BASE_URL}/spatic/main/assem.do"
 SPATIC_DETAIL_FMT = f"{SPATIC_BASE_URL}/spatic/assem/getInfoView.do?mgrSeq={{mgrSeq}}"
@@ -59,22 +66,20 @@ def clean_text(t: str) -> str:
 def parse_date_any(s: str) -> Optional[Tuple[str, str, str]]:
     s = clean_text(s)
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", s)
-    if m:
-        return m.group(1), m.group(2).zfill(2), m.group(3).zfill(2)
+    if m: return m.group(1), m.group(2).zfill(2), m.group(3).zfill(2)
     return None
 
 
 def time_range_to_tuple(s: str) -> Optional[Tuple[str, str]]:
-    if not s:
-        return None
+    if not s: return None
     s = clean_text(s).replace("∼", "~").replace("〜", "~").replace("–", "-")
     m = re.search(r"(\d{1,2}\s*:\s*\d{2})\s*[~\-]\s*(\d{1,2}\s*:\s*\d{2})", s)
-    if m:
-        return re.sub(r"\s*", "", m.group(1)), re.sub(r"\s*", "", m.group(2))
+    if m: return re.sub(r"\s*", "", m.group(1)), re.sub(r"\s*", "", m.group(2))
     return None
 
 
 def split_places(s: str) -> List[str]:
+    """장소 텍스트를 개별 장소로 분리"""
     s = clean_text(s).replace("\n", " / ")
     s = re.sub(r'[①-⑨]', ' / ', s)
     parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內)\s*", s)
@@ -82,11 +87,9 @@ def split_places(s: str) -> List[str]:
     filtered = []
     for p in parts:
         p = p.strip()
-        if len(p) <= 1:
-            continue
+        if len(p) <= 1: continue
         p = re.sub(r'^[內内]$', '', p)
-        if p:
-            filtered.append(p)
+        if p: filtered.append(p)
     return list(OrderedDict.fromkeys(filtered))
 
 
@@ -97,7 +100,6 @@ PLACE_NAME_REPLACE_MAP = {
     "전쟁기념관": "용산 전쟁기념관"
 }
 
-
 def normalize_place_name_for_kakao(place: str) -> str:
     t = place.strip()
     t = t.replace("구)", "").replace("(구)", "")
@@ -106,14 +108,12 @@ def normalize_place_name_for_kakao(place: str) -> str:
     t = re.sub(r'\(.*$', '', t)
 
     for old, new in PLACE_NAME_REPLACE_MAP.items():
-        if old in t and new not in t:
-            t = t.replace(old, new)
+        if old in t and new not in t: t = t.replace(old, new)
 
     noise_regex = r'(동측|서측|남측|북측|동쪽|서쪽|남쪽|북쪽|건너편|맞은편|옆|방향|방면|부근|일대|진입로|사거리|교차로|출구|입구|인근|앞|뒤|안|밖)'
     t = re.sub(noise_regex, ' ', t)
     t = re.sub(r'[^\w\s\d]', ' ', t)
     return re.sub(r"\s+", " ", t).strip()
-
 
 def _kakao_api_call(session, url, query, api_key):
     headers = {"Authorization": f"KakaoAK {api_key}"}
@@ -123,7 +123,7 @@ def _kakao_api_call(session, url, query, api_key):
             docs = r.json().get("documents", [])
             if docs:
                 addr = docs[0].get('address_name', '')
-                if "서울" in addr[:5]:
+                if "서울" in addr[:5]:  # 서울 지역 필터링
                     return float(docs[0]['y']), float(docs[0]['x']), addr
     except Exception as e:
         logger.warning(f"[Kakao API] Geocoding failed for {query}: {e}")
@@ -132,16 +132,13 @@ def _kakao_api_call(session, url, query, api_key):
 
 def geocode_kakao(session, place, api_key):
     clean_name = normalize_place_name_for_kakao(place)
-    if not clean_name or len(clean_name) < 2:
-        return None, None, None
+    if not clean_name or len(clean_name) < 2: return None, None, None
 
     for query in [f"서울 {clean_name}", clean_name]:
         lat, lon, addr = _kakao_api_call(session, KAKAO_KEYWORD_URL, query, api_key)
-        if lat:
-            return lat, lon, addr
+        if lat: return lat, lon, addr
         lat, lon, addr = _kakao_api_call(session, KAKAO_ADDRESS_URL, query, api_key)
-        if lat:
-            return lat, lon, addr
+        if lat: return lat, lon, addr
     return None, None, None
 
 
@@ -153,36 +150,30 @@ class CrawlingService:
 
     @classmethod
     async def crawl_and_sync_events(cls):
-        """스케줄러 진입점: 전체 크롤링 및 DB 동기화 파이프라인 (async wrapper)"""
-        # ✅ [수정 2] async def로 복원 - blocking I/O는 asyncio.to_thread로 분리
-        return await asyncio.to_thread(cls._crawl_and_sync_events_sync)
-
-    @classmethod
-    def _crawl_and_sync_events_sync(cls):
-        """실제 동기 크롤링 로직"""
+        """스케줄러 진입점: 라우터와의 호환성을 위해 비동기로 작동하며, 내부의 블로킹 I/O는 별도 스레드에서 실행"""
         logger.info("🔄 [스케줄러] 집회 정보 크롤링을 시작합니다.")
         ensure_dir(DATA_DIR)
+        return await asyncio.to_thread(cls._run_sync_pipeline)
 
+    @classmethod
+    def _run_sync_pipeline(cls):
+        """실제 크롤링이 진행되는 동기 파이프라인 메서드"""
         with requests.Session() as session:
             session.headers.update(HEADERS)
 
             try:
+                # 1. 사이트별 데이터 수집
                 spatic_data = cls._scrape_spatic(session)
                 smpa_data = cls._scrape_smpa(session)
                 data = spatic_data + smpa_data
 
                 if not data:
                     logger.info("ℹ️ [알림] 오늘 수집된 집회 데이터가 없습니다.")
-                    return {
-                        "success": True,
-                        "status": "success",
-                        "message": "오늘 수집된 집회 데이터가 없습니다.",
-                        "total_crawled": 0,
-                        "inserted_count": 0
-                    }
+                    return
 
                 logger.info(f"📍 [정제] 총 {len(data)}건의 데이터 지오코딩 진행 중...")
 
+                # 2. 데이터 정제 및 좌표 변환
                 final_list = []
                 for row in data:
                     for p in row["장소_원본"]:
@@ -190,11 +181,14 @@ class CrawlingService:
                         new_row = {k: v for k, v in row.items() if k != "장소_원본"}
                         new_row.update({"장소": p, "위도": lat, "경도": lon, "지번주소": addr})
                         final_list.append(new_row)
+                        # API Rate Limit 방지용 딜레이
                         time.sleep(0.1)
 
+                # 3. 데이터베이스 저장
                 cls._sync_to_database(final_list)
                 logger.info("✅ [완료] 크롤링 및 DB 저장이 성공적으로 완료되었습니다.")
 
+                # 기존 시스템과의 호환성을 위해 결과 딕셔너리 반환
                 return {
                     "success": True,
                     "status": "success",
@@ -235,12 +229,10 @@ class CrawlingService:
                     if not mgr:
                         onclick = row.get_attribute("onclick") or ""
                         m = re.search(r"(\d{4,})", onclick)
-                        if m:
-                            mgr = m.group(1)
+                        if m: mgr = m.group(1)
 
                     tds = row.query_selector_all("td")
-                    if len(tds) < 3:
-                        continue
+                    if len(tds) < 3: continue
                     title = tds[1].inner_text().strip()
                     date_txt = tds[2].inner_text().strip()
 
@@ -248,16 +240,14 @@ class CrawlingService:
                         parsed = parse_date_any(date_txt)
                         if parsed:
                             posts.append(
-                                {"number": mgr, "title": title, "date": f"{parsed[0]}-{parsed[1]}-{parsed[2]}"}
-                            )
+                                {"number": mgr, "title": title, "date": f"{parsed[0]}-{parsed[1]}-{parsed[2]}"})
             except Exception as e:
                 logger.error(f"[SPATIC] Playwright 수집 에러: {e}")
             finally:
                 browser.close()
 
         unique_posts = list({p["number"]: p for p in posts}.values())
-        if not unique_posts:
-            return []
+        if not unique_posts: return []
 
         unique_posts.sort(key=lambda x: int(x['number']), reverse=True)
         target = unique_posts[0]
@@ -266,18 +256,15 @@ class CrawlingService:
             r = session.get(SPATIC_DETAIL_FMT.format(mgrSeq=target['number']), timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
             tb = soup.find("table")
-            if not tb:
-                return []
+            if not tb: return []
 
             rows = []
             Y, M, D = target['date'].split('-')
             for tr in tb.find_all("tr")[1:]:
                 tds = tr.find_all("td")
-                if len(tds) < 3:
-                    continue
+                if len(tds) < 3: continue
                 t_range = time_range_to_tuple(tds[1].get_text())
-                if not t_range:
-                    continue
+                if not t_range: continue
 
                 rows.append({
                     "년": Y, "월": M, "일": D,
@@ -297,7 +284,6 @@ class CrawlingService:
     def _scrape_smpa(cls, session: requests.Session) -> List[Dict]:
         logger.info("[SMPA] PDF 수집 시작...")
         today_str = datetime.now().strftime("%y%m%d")
-        pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
         try:
             r = session.get(SMPA_LIST_URL, timeout=10)
             soup = BeautifulSoup(r.text, "html.parser")
@@ -308,8 +294,7 @@ class CrawlingService:
                     if m:
                         target_view = f"{SMPA_BASE_URL}/user/nd54882.do?View&boardNo={m.group(1 if 'boardNo' in a['href'] else 1)}"
                         break
-            if not target_view:
-                return []
+            if not target_view: return []
 
             r = session.get(target_view)
             soup = BeautifulSoup(r.text, "html.parser")
@@ -317,24 +302,17 @@ class CrawlingService:
             for a in soup.find_all("a"):
                 if ".pdf" in a.get_text().lower():
                     m = re.search(r"attachfileDownload\('([^']+)'\s*,\s*'(\d+)'\)", a.get("onclick", ""))
-                    if m:
-                        pdf_url = f"{SMPA_BASE_URL}{m.group(1)}?attachNo={m.group(2)}"
+                    if m: pdf_url = f"{SMPA_BASE_URL}{m.group(1)}?attachNo={m.group(2)}"
 
-            if not pdf_url:
-                return []
-
+            if not pdf_url: return []
+            pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
             with session.get(pdf_url) as r:
-                with open(pdf_path, "wb") as f:
-                    f.write(r.content)
+                with open(pdf_path, "wb") as f: f.write(r.content)
 
             text = extract_text(pdf_path)
-
-            # ✅ [수정 3] PDF 텍스트 추출 후 파일 즉시 삭제
-            try:
-                pdf_path.unlink()
-                logger.info(f"[SMPA] 임시 PDF 파일 삭제 완료: {pdf_path}")
-            except Exception as e:
-                logger.warning(f"[SMPA] 임시 PDF 파일 삭제 실패: {pdf_path} - {e}")
+            
+            # 3번 리뷰 반영: PDF 내용 추출 후 즉시 파일 삭제
+            pdf_path.unlink(missing_ok=True) 
 
             pattern = re.compile(r'(?P<start>\d{1,2}:\d{2})\s*~\s*(?P<end>\d{1,2}:\d{2})')
             matches = list(pattern.finditer(text))
@@ -355,55 +333,53 @@ class CrawlingService:
             return rows
         except Exception as e:
             logger.error(f"[SMPA] PDF 크롤링 및 파싱 에러: {e}")
-            # ✅ [수정 3] 예외 발생 시에도 파일이 남아있다면 정리
-            if pdf_path.exists():
-                try:
-                    pdf_path.unlink()
-                except Exception:
-                    pass
             return []
 
     @classmethod
     def _sync_to_database(cls, data_list: List[Dict]):
-        # ✅ [수정 4] 중앙 정의된 스키마 모듈을 재사용
-        from app.database.models import EVENTS_TABLE_SCHEMA
         import sqlite3
-
         try:
             conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
 
-            # 중앙 스키마로 테이블 생성 (이미 존재하면 무시)
-            cur.executescript(EVENTS_TABLE_SCHEMA)
+            # 4번 리뷰 대응: 중앙 스키마를 사용하여 만약 테이블이 없다면 일관된 구조로 생성
+            cur.execute(EVENTS_TABLE_SCHEMA)
 
             insert_data = []
             for r in data_list:
+                lat = r.get('위도')
+                lon = r.get('경도')
+
+                # 스키마의 NOT NULL 제약조건 방어: 좌표값이 없으면 저장 건너뜀
+                if lat is None or lon is None:
+                    continue
+
                 year = r.get('년')
                 month = str(r.get('월')).zfill(2)
                 day = str(r.get('일')).zfill(2)
 
-                st_time = r.get('start_time')
+                # 스키마의 NOT NULL 제약조건 방어: 시간 정보가 없으면 "00:00"을 기본으로 설정
+                st_time = r.get('start_time') or "00:00"
                 ed_time = r.get('end_time')
 
-                start_date = f"{year}-{month}-{day} {st_time}:00" if st_time else None
+                start_date = f"{year}-{month}-{day} {st_time}:00"
                 end_date = f"{year}-{month}-{day} {ed_time}:00" if ed_time else None
 
                 place_name = r.get('장소', '알 수 없는 장소')
                 attendees = r.get('인원', '')
 
-                # ✅ [수정 5] title이 None이면 장소 기반 기본값 생성 (NOT NULL 제약 대응)
-                title = r.get('title') or f"{place_name} 집회"
+                # 5번 리뷰 반영: title과 description 생성
+                title = r.get('title')
+                if not title:
+                    title = f"{place_name} 집회"
+                    if attendees and attendees.isdigit():
+                        title += f" (참가자 {attendees}명)"
+
                 description = r.get('description')
-
-                lat = r.get('위도')
-                lon = r.get('경도')
-
-                # latitude, longitude가 NULL이면 NOT NULL 제약 위반 → 해당 행 스킵
-                if lat is None or lon is None or start_date is None:
-                    logger.warning(
-                        f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, lat: {lat}, lon: {lon}, start_date: {start_date}"
-                    )
-                    continue
+                if not description:
+                    description = f"출처: {r.get('비고', '알 수 없음')}"
+                    if attendees:
+                        description += f" / 예상 인원: {attendees}명"
 
                 insert_data.append((
                     title,
@@ -419,13 +395,14 @@ class CrawlingService:
                     'active'
                 ))
 
-            cur.executemany("""
-                INSERT INTO events (
-                    title, description, location_name, location_address,
-                    latitude, longitude, start_date, end_date,
-                    category, severity_level, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, insert_data)
+            if insert_data:
+                cur.executemany("""
+                    INSERT INTO events (
+                        title, description, location_name, location_address,
+                        latitude, longitude, start_date, end_date,
+                        category, severity_level, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, insert_data)
 
             conn.commit()
             logger.info(f"데이터베이스에 {len(insert_data)}건의 이벤트 데이터가 성공적으로 저장되었습니다.")
@@ -438,6 +415,5 @@ class CrawlingService:
 
 
 if __name__ == "__main__":
-    import asyncio
     logging.basicConfig(level=logging.INFO)
     asyncio.run(CrawlingService.crawl_and_sync_events())
