@@ -15,34 +15,13 @@ async def kakao_chat_fallback(request: KakaoRequest):
     """
     카카오톡 챗봇 폴백 블록 엔드포인트
     Skill Block에서 botUserKey + plusfriendUserKey 제공
-    Event API 콜백 시에는 utterance가 비어있고 params에 메시지가 담겨 있음
     """
     user_message = request.userRequest.utterance
     bot_user_key = request.userRequest.user.id
     properties = request.userRequest.user.properties
     plusfriend_key = properties.get('plusfriendUserKey') if properties else None
 
-    logger.info(f"📨 사용자 메시지: '{user_message}' (botUserKey: {bot_user_key}, plusfriend: {plusfriend_key})")
-
-    # Event API 콜백 감지: utterance가 비어있으면 아침 알림 이벤트 콜백
-    if not user_message:
-        params = getattr(request.userRequest, 'params', None) or {}
-        alarm_message = params.get('message') if isinstance(params, dict) else None
-        if alarm_message:
-            logger.info(f"📢 Event 콜백 알림 전송: {bot_user_key}")
-            return {
-                "version": "2.0",
-                "template": {
-                    "outputs": [{"simpleText": {"text": alarm_message}}]
-                }
-            }
-        logger.warning(f"⚠️ Event 콜백이지만 params.message 없음: {bot_user_key}")
-        return {
-            "version": "2.0",
-            "template": {
-                "outputs": [{"simpleText": {"text": "📢 오늘의 경로 알림입니다.\n자세한 내용은 [경로 확인하기]를 눌러주세요."}}]
-            }
-        }
+    logger.info(f"📨 사용자 메시지: {user_message} (botUserKey: {bot_user_key}, plusfriend: {plusfriend_key})")
 
     from app.database.connection import get_db_connection
 
