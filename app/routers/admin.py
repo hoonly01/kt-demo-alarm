@@ -187,9 +187,20 @@ async def trigger_bus_notice(_username: str = Depends(verify_admin)):
     task.add_done_callback(_task_exception_handler)
     return {"message": "Success"}
 
-@router.post("/trigger-test-alarm")
-async def trigger_test_alarm(_username: str = Depends(verify_admin)):
-    """수동으로 경로 점검 및 알림 발송 로직을 트리거합니다. (개별 사용자 대상)"""
-    task = asyncio.create_task(EventService.scheduled_route_check())
+@router.post("/trigger-test-alarm-for-user")
+async def trigger_test_alarm_for_user(user_id: str = Query(..., description="Target user ID to test"), _username: str = Depends(verify_admin)):
+    """수동으로 특정 사용자의 경로 점검 및 알림 발송 로직을 테스트합니다."""
+    
+    # helper for background task that requires DB connection
+    async def _run_route_check_for_user(uid: str):
+        import sqlite3
+        from app.database.connection import DATABASE_PATH
+        db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+        try:
+            await EventService.check_route_events(user_id=uid, auto_notify=True, db=db)
+        finally:
+            db.close()
+            
+    task = asyncio.create_task(_run_route_check_for_user(user_id))
     task.add_done_callback(_task_exception_handler)
-    return {"message": "Success"}
+    return {"message": f"Successfully triggered test for user: {user_id}"}
