@@ -69,9 +69,20 @@ def test_admin_dashboard_pagination(test_client, monkeypatch):
     response = test_client.get("/admin/dashboard?page=1&page_size=10", auth=("admin", "secret123"))
     assert response.status_code == 200
     
-    # Check invalid page should default fallback or fail gracefully depending on FastAPI validation
+    # Boundary cases: ge=1, le=200
+    # Negative/zero page should fail validation
+    for p in [0, -1]:
+        response = test_client.get(f"/admin/dashboard?page={p}", auth=("admin", "secret123"))
+        assert response.status_code == 422
+        
+    # Zero page_size or too large should fail validation
+    for ps in [0, 201]:
+        response = test_client.get(f"/admin/dashboard?page_size={ps}", auth=("admin", "secret123"))
+        assert response.status_code == 422
+
+    # Invalid type should fail
     response = test_client.get("/admin/dashboard?page=invalid", auth=("admin", "secret123"))
-    assert response.status_code == 422  # Validation error from FastAPI
+    assert response.status_code == 422
 
 def test_trigger_crawling_unauthorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
@@ -79,38 +90,55 @@ def test_trigger_crawling_unauthorized(test_client, monkeypatch):
     response = test_client.post("/admin/trigger-crawling")
     assert response.status_code == 401
 
+def test_trigger_crawling_csrf_failure(test_client, monkeypatch):
+    """Origin/Referer 헤더 누락 시 403 Forbidden 반환 검증"""
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    
+    # POST without Origin/Referer
+    response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"))
+    assert response.status_code == 403
+    assert "Forbidden" in response.json()["detail"]
+
 def test_trigger_crawling_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
     monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
     
+    # Mock to avoid real crawling and ensure task key cleanup
     mock_crawl = AsyncMock()
+    headers = {"Origin": "http://testserver"}
+    
     with monkeypatch.context() as m:
         m.setattr("app.services.crawling_service.CrawlingService.crawl_and_sync_events", mock_crawl)
-        response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"))
+        response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"), headers=headers)
         
     assert response.status_code == 200
-    assert response.json() == {"message": "Success"}
+    assert response.json() == {"message": "Scheduled"}
 
 def test_trigger_bus_notice_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
     monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
     
     mock_refresh = AsyncMock()
+    headers = {"Origin": "http://testserver"}
+    
     with monkeypatch.context() as m:
         m.setattr("app.services.bus_notice_service.BusNoticeService.refresh", mock_refresh)
-        response = test_client.post("/admin/trigger-bus-notice", auth=("admin", "secret123"))
+        response = test_client.post("/admin/trigger-bus-notice", auth=("admin", "secret123"), headers=headers)
         
     assert response.status_code == 200
-    assert response.json() == {"message": "Success"}
+    assert response.json() == {"message": "Scheduled"}
 
 def test_trigger_test_alarm_for_user_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
     monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
     
     mock_route_check = AsyncMock()
+    headers = {"Origin": "http://testserver"}
+    
     with monkeypatch.context() as m:
         m.setattr("app.services.event_service.EventService.check_route_events", mock_route_check)
-        response = test_client.post("/admin/trigger-test-alarm-for-user?user_id=12345", auth=("admin", "secret123"))
+        response = test_client.post("/admin/trigger-test-alarm-for-user?user_id=12345", auth=("admin", "secret123"), headers=headers)
         
     assert response.status_code == 200
-    assert "Successfully triggered" in response.json()["message"]
+    assert response.json() == {"message": "Scheduled"}
