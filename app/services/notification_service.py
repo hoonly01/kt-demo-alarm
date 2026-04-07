@@ -68,7 +68,8 @@ class NotificationService:
                 user=[EventUser(
                     type=id_type,
                     id=alarm_request.user_id
-                )]
+                )],
+                params=alarm_request.data  # 스킬 서버의 userRequest.params로 전달
             )
 
             url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
