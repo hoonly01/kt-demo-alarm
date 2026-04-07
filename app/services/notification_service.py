@@ -69,7 +69,7 @@ class NotificationService:
                     type=id_type,
                     id=alarm_request.user_id
                 )],
-                params=alarm_request.data  # 스킬 서버의 userRequest.params로 전달
+                params=None
             )
 
             url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
@@ -207,9 +207,7 @@ class NotificationService:
             user_id=user_id,
             event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events),
-                "events": events
+                "message": message_text
             }
         )
 
@@ -232,9 +230,7 @@ class NotificationService:
             user_ids=user_ids,
             event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events_data),
-                "events": events_data
+                "message": message_text
             },
             id_type=id_type
         )
