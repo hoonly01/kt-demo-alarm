@@ -9,6 +9,11 @@ from fastapi.templating import Jinja2Templates
 
 from app.database.connection import get_db_connection
 from app.config.settings import settings
+import math
+
+from app.utils.scheduler_utils import get_scheduler_status
+from app.services.event_service import EventService
+from app.services.bus_notice_service import BusNoticeService
 
 router = APIRouter(
     prefix="/admin",
@@ -75,15 +80,46 @@ def dict_factory(cursor, row):
         d[col[0]] = row[idx]
     return d
 
+def get_total_users() -> int:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        result = cursor.fetchone()
+        return result[0] if result else 0
+
+def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        conn.row_factory = dict_factory
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, bot_user_key, active, is_alarm_on, 
+                   departure_name, arrival_name, marked_bus, 
+                   COALESCE(favorite_zone, 0) as favorite_zone,
+                   created_at, message_count 
+            FROM users 
+            ORDER BY id DESC 
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
+        return cursor.fetchall()
+
 @router.get("/dashboard")
-async def dashboard(request: Request, _username: str = Depends(verify_admin)):
+async def dashboard(request: Request, page: int = 1, page_size: int = 50, _username: str = Depends(verify_admin)):
     """Render the back-office dashboard"""
     
+    offset = (page - 1) * page_size
+    
     # Run database queries in parallel
-    events, alarms = await asyncio.gather(
+    events, alarms, users, total_users = await asyncio.gather(
         asyncio.to_thread(fetch_recent_events),
-        asyncio.to_thread(fetch_recent_alarms)
+        asyncio.to_thread(fetch_recent_alarms),
+        asyncio.to_thread(fetch_paginated_users, page_size, offset),
+        asyncio.to_thread(get_total_users)
     )
+    
+    total_pages = math.ceil(total_users / page_size) if total_users > 0 else 1
+    
+    # Get Scheduler Status
+    scheduler_status = get_scheduler_status()
     
     # Calculate some summary statistics
     total_events = len(events)
@@ -102,6 +138,18 @@ async def dashboard(request: Request, _username: str = Depends(verify_admin)):
             "request": request,
             "events": events,
             "alarms": alarms,
+            "users": users,
+            "scheduler_status": scheduler_status,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_users": total_users,
+                "total_pages": total_pages,
+                "has_previous": page > 1,
+                "has_next": page < total_pages,
+                "previous_page": page - 1,
+                "next_page": page + 1
+            },
             "stats": {
                 "total_events": total_events,
                 "total_alarms": total_alarms,
@@ -111,3 +159,31 @@ async def dashboard(request: Request, _username: str = Depends(verify_admin)):
             }
         }
     )
+
+@router.post("/trigger-crawling")
+async def trigger_crawling(_username: str = Depends(verify_admin)):
+    """Manually trigger SMPA Rally Crawler"""
+    try:
+        # Run in background to not block the UI waiting for it
+        asyncio.create_task(EventService.collect_smpa_events())
+        return {"message": "Success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trigger-bus-notice")
+async def trigger_bus_notice(_username: str = Depends(verify_admin)):
+    """Manually trigger TOPIS Bus Notice Crawler"""
+    try:
+        asyncio.create_task(BusNoticeService.refresh())
+        return {"message": "Success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trigger-test-alarm")
+async def trigger_test_alarm(_username: str = Depends(verify_admin)):
+    """Manually trigger scheduled route check tasks"""
+    try:
+        asyncio.create_task(EventService.scheduled_route_check())
+        return {"message": "Success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
