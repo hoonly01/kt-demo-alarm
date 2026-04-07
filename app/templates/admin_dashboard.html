@@ -12,6 +12,18 @@
             font-family: 'Inter', sans-serif;
             background-color: #f3f4f6;
         }
+        
+        /* Toast notification animation */
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; transform: translateY(-10px); }
+        }
+        .toast-enter { animation: slideInRight 0.3s ease-out forwards; }
+        .toast-exit { animation: fadeOut 0.3s ease-in forwards; }
     </style>
 </head>
 <body class="text-gray-800">
@@ -56,7 +68,66 @@
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- System Operations & Interactive Tools -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+            <!-- System Operations & Health -->
+            <div class="bg-white rounded-lg shadow px-5 py-4 flex flex-col items-start h-full">
+                <div class="flex items-center space-x-2 mb-4 w-full border-b border-gray-200 pb-2">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path></svg>
+                    <h2 class="text-lg font-bold text-gray-800">System Operations & Health</h2>
+                </div>
+                
+                <div class="w-full">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-sm font-medium text-gray-600">Scheduler Status:</span>
+                        {% if scheduler_status and scheduler_status.status == 'running' %}
+                            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Running</span>
+                        {% else %}
+                            <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Stopped</span>
+                        {% endif %}
+                    </div>
+                    
+                    {% if scheduler_status and scheduler_status.jobs %}
+                        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Scheduled Jobs</h3>
+                        <ul class="divide-y divide-gray-200 bg-gray-50 rounded-md p-2">
+                            {% for job in scheduler_status.jobs %}
+                                <li class="py-2 flex justify-between items-center">
+                                    <div class="text-sm font-medium text-gray-800">{{ job.name }}</div>
+                                    <div class="text-xs text-indigo-600 font-mono">{{ job.next_run[:16] if job.next_run else 'N/A' }}</div>
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Interactive Tools -->
+            <div class="bg-white rounded-lg shadow px-5 py-4 flex flex-col items-start h-full">
+                <div class="flex items-center space-x-2 mb-4 w-full border-b border-gray-200 pb-2">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    <h2 class="text-lg font-bold text-gray-800">Interactive Tools</h2>
+                </div>
+                
+                <div class="w-full space-y-3">
+                    <button onclick="triggerAction('/admin/trigger-crawling', this)" class="w-full flex justify-between items-center px-4 py-2 border border-blue-300 shadow-sm text-sm font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors">
+                        <span>Sync SMPA Rally Data</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                    
+                    <button onclick="triggerAction('/admin/trigger-bus-notice', this)" class="w-full flex justify-between items-center px-4 py-2 border border-green-300 shadow-sm text-sm font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors">
+                        <span>Sync TOPIS Bus Notices</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                    
+                    <button onclick="triggerAction('/admin/trigger-test-alarm', this)" class="w-full flex justify-between items-center px-4 py-2 border border-amber-300 shadow-sm text-sm font-medium rounded-md text-amber-700 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-colors">
+                        <span>Test Route Alarm Task</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
             <!-- Crawling Status Table -->
             <div class="bg-white rounded-lg shadow flex flex-col h-full overflow-hidden">
                 <div class="px-5 py-4 border-b border-gray-200">
@@ -163,8 +234,185 @@
                 </div>
             </div>
         </div>
+
+        <!-- User Management Table -->
+        <div class="bg-white rounded-lg shadow flex flex-col overflow-hidden w-full">
+            <div class="px-5 py-4 border-b border-gray-200 flex justify-between items-center">
+                <h2 class="text-lg font-bold text-gray-800">User Management <span class="text-sm font-normal text-gray-500 ml-2">({{ pagination.total_users }} total)</span></h2>
+            </div>
+            <div class="overflow-x-auto">
+                {% if users %}
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User Key / ID</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Route Info</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Preferences</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Activity</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for user in users %}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm font-medium text-gray-900 font-mono">{{ user.bot_user_key[:12] }}...</div>
+                                <div class="text-xs text-gray-500">ID: {{ user.id }}</div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {% if user.active %}
+                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>
+                                {% else %}
+                                    <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">Inactive</span>
+                                {% endif %}
+                                {% if user.is_alarm_on %}
+                                    <span class="ml-1 px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">Subscribed</span>
+                                {% else %}
+                                    <span class="ml-1 px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Unsubscribed</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 text-sm text-gray-500">
+                                {% if user.departure_name and user.arrival_name %}
+                                    <div><span class="font-semibold text-gray-700">From:</span> {{ user.departure_name }}</div>
+                                    <div class="mt-1"><span class="font-semibold text-gray-700">To:</span> {{ user.arrival_name }}</div>
+                                {% else %}
+                                    <span class="text-gray-400 italic">Route not set</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {% if user.marked_bus %}
+                                    <div>Bus: <span class="font-semibold">{{ user.marked_bus }}</span></div>
+                                {% endif %}
+                                {% if user.favorite_zone %}
+                                    <div>Zone: <span class="font-semibold">{{ user.favorite_zone }}</span></div>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                <div><span class="font-semibold text-gray-700">Msgs:</span> {{ user.message_count }}</div>
+                                <div class="text-[10px] mt-1 text-gray-400">{{ user.created_at[:10] if user.created_at else '' }}</div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="flex flex-col items-center justify-center p-12 text-center h-48 border-b border-gray-200">
+                    <p class="text-sm text-gray-500">No users found.</p>
+                </div>
+                {% endif %}
+                
+                <!-- Pagination Controls -->
+                {% if pagination.total_pages > 1 %}
+                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                        <div>
+                            <p class="text-sm text-gray-700">
+                                Showing page <span class="font-medium">{{ pagination.page }}</span> of <span class="font-medium">{{ pagination.total_pages }}</span>
+                            </p>
+                        </div>
+                        <div>
+                            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                                {% if pagination.has_previous %}
+                                <a href="?page={{ pagination.previous_page }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">Previous</span>
+                                    <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                    </svg>
+                                </a>
+                                {% endif %}
+                                
+                                {% if pagination.has_next %}
+                                <a href="?page={{ pagination.next_page }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">Next</span>
+                                    <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                                    </svg>
+                                </a>
+                                {% endif %}
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
     </main>
 </div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+<script>
+    async function triggerAction(endpoint, buttonElement) {
+        // Simple loading state
+        const originalText = buttonElement.innerHTML;
+        buttonElement.disabled = true;
+        buttonElement.classList.add('opacity-50', 'cursor-not-allowed');
+        
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (response.ok) {
+                showToast('Success!', 'Task triggered successfully.', 'success');
+            } else {
+                const data = await response.json();
+                showToast('Error', data.detail || 'Failed to trigger task.', 'error');
+            }
+        } catch (error) {
+            showToast('Error', 'Network error occurred.', 'error');
+        } finally {
+            buttonElement.disabled = false;
+            buttonElement.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    }
+
+    function showToast(title, message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        
+        const bgColor = type === 'success' ? 'bg-green-50' : 'bg-red-50';
+        const borderColor = type === 'success' ? 'border-green-400' : 'border-red-400';
+        const textColor = type === 'success' ? 'text-green-800' : 'text-red-800';
+        const iconColor = type === 'success' ? 'text-green-400' : 'text-red-400';
+        
+        const icon = type === 'success' 
+            ? `<svg class="h-6 w-6 ${iconColor}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`
+            : `<svg class="h-6 w-6 ${iconColor}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
+
+        toast.className = `toast-enter max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${bgColor} border-l-4 ${borderColor}`;
+        toast.innerHTML = `
+            <div class="p-4">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0">${icon}</div>
+                    <div class="ml-3 w-0 flex-1 pt-0.5">
+                        <p class="text-sm font-medium ${textColor}">${title}</p>
+                        <p class="mt-1 text-sm text-gray-500">${message}</p>
+                    </div>
+                    <div class="ml-4 flex-shrink-0 flex">
+                        <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove()" class="bg-transparent rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none">
+                            <span class="sr-only">Close</span>
+                            <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(toast);
+        
+        // Auto remove after 3 seconds
+        setTimeout(() => {
+            toast.classList.replace('toast-enter', 'toast-exit');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+</script>
 
 </body>
 </html>
