@@ -102,11 +102,11 @@ async def send_alarm_to_all(
         cursor = db.cursor()
         # plusfriend_user_key 우선 조회
         cursor.execute("SELECT plusfriend_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NOT NULL")
-        plusfriend_users = [row[0] for row in cursor.fetchall()]
+        plusfriend_users = list(dict.fromkeys([row[0] for row in cursor.fetchall()]))
         
         # bot_user_key만 있는 사용자
         cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NULL AND bot_user_key IS NOT NULL")
-        bot_users = [row[0] for row in cursor.fetchall()]
+        bot_users = list(dict.fromkeys([row[0] for row in cursor.fetchall()]))
         
         if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="활성 사용자가 없습니다")
@@ -152,6 +152,8 @@ async def send_alarm_to_all(
             "failed": result["total_failed"]
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"전체 알림 전송 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -194,8 +196,10 @@ async def send_filtered_alarm(
         cursor.execute(query, params)
         rows = cursor.fetchall()
         
-        plusfriend_users = [r[0] for r in rows if r[0] is not None]
-        bot_users = [r[1] for r in rows if r[0] is None and r[1] is not None]
+        plusfriend_users_raw = [r[0] for r in rows if r[0] is not None]
+        bot_users_raw = [r[1] for r in rows if r[0] is None and r[1] is not None]
+        plusfriend_users = list(dict.fromkeys(plusfriend_users_raw))
+        bot_users = list(dict.fromkeys(bot_users_raw))
         
         if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="조건에 맞는 사용자가 없습니다")
@@ -246,6 +250,8 @@ async def send_filtered_alarm(
             "failed": result["total_failed"]
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"필터링된 알림 전송 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -285,7 +285,7 @@ class EventService:
 
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
 
-            # 조건별로 그룹화 (출발지와 도착지가 같은 사용자끼리)
+            # 이벤트 결과가 정확히 일치하는 사용자끼리 그룹화
             grouped_users = {}
             for user_row in users:
                 plusfriend_key, departure, arrival = user_row
@@ -294,32 +294,35 @@ class EventService:
                 result = await EventService.check_route_events(plusfriend_key, auto_notify=False, db=db)
 
                 if result.events_found:
-                    route_key = (departure or "알수없음", arrival or "알수없음")
-                    if route_key not in grouped_users:
-                        grouped_users[route_key] = []
-                    grouped_users[route_key].append({
-                        "plusfriend_key": plusfriend_key,
-                        "events": [
-                            {
-                                "id": event.id,
-                                "title": event.title,
-                                "location": event.location_name,
-                                "latitude": event.latitude,
-                                "longitude": event.longitude,
-                                "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
-                                "category": event.category,
-                                "severity_level": event.severity_level
-                            }
-                            for event in result.events_found
-                        ]
-                    })
+                    # 해당 사용자에게 전달될 정확한 이벤트 집합을 키로 사용
+                    event_key = tuple(sorted(event.id for event in result.events_found))
+                    
+                    if event_key not in grouped_users:
+                        grouped_users[event_key] = {
+                            "user_ids": [],
+                            "events_data": [
+                                {
+                                    "id": event.id,
+                                    "title": event.title,
+                                    "location": event.location_name,
+                                    "latitude": event.latitude,
+                                    "longitude": event.longitude,
+                                    "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
+                                    "category": event.category,
+                                    "severity_level": event.severity_level
+                                }
+                                for event in result.events_found
+                            ]
+                        }
+                    
+                    grouped_users[event_key]["user_ids"].append(plusfriend_key)
 
             # Event API로 일괄 전송
-            for (dep, arr), user_group in grouped_users.items():
-                user_ids = [u["plusfriend_key"] for u in user_group]
-                events_data = user_group[0]["events"]  # 공통 이벤트
+            for event_key, group_data in grouped_users.items():
+                user_ids = group_data["user_ids"]
+                events_data = group_data["events_data"]
 
-                logger.info(f"📢 경로 '{dep}->{arr}' 사용자 {len(user_ids)}명에게 알림 전송")
+                logger.info(f"📢 수신 대상 {len(user_ids)}명에게 공통 이벤트({len(events_data)}건) 알림 전송")
 
                 # Event API 호출 (type=plusfriendUserKey)
                 await NotificationService.send_bulk_alert(
