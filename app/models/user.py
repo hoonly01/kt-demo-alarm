@@ -13,7 +13,7 @@ class User(BaseModel):
 class UserRequest(BaseModel):
     """카카오톡 사용자 요청 모델"""
     user: User
-    utterance: str  # 사용자가 입력한 실제 메시지
+    utterance: str = ""  # 사용자가 입력한 실제 메시지 (Event 콜백 시 빈 값)
 
 
 class UserPreferences(BaseModel):
