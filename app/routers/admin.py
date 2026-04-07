@@ -17,6 +17,8 @@ from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
 from app.services.crawling_service import CrawlingService
 
+from urllib.parse import urlparse
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
@@ -27,8 +29,9 @@ router = APIRouter(
 security = HTTPBasic()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
 
-# Task registry to keep tasks alive and prevent duplicate runs
+# Task registry and lock to prevent duplicate runs and race conditions
 _background_tasks: Dict[str, asyncio.Task] = {}
+_task_lock = asyncio.Lock()
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     # Using environment variables for admin credentials.
@@ -56,26 +59,34 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
 def verify_csrf_origin(request: Request):
     """
-    Basic CSRF/Origin protection for administrative POST actions.
-    Ensures the request comes from the same origin or a trusted referrer.
+    Strict CSRF/Origin protection for administrative POST actions.
+    Ensures the request comes from the exact same origin or host.
     """
-    # In production, you might want a more robust CSRF token or strictly allowed list
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
-    host = request.headers.get("host")
+    host_header = request.headers.get("host")
     
     if not origin and not referer:
         raise HTTPException(status_code=403, detail="Forbidden: Missing Origin/Referer headers")
         
-    # Allow if origin matches host or referer contains host
+    def get_hostname(url_str):
+        try:
+            parsed = urlparse(url_str)
+            return parsed.netloc
+        except Exception:
+            return None
+
+    # Strict comparison against Host header
     is_valid = False
-    if origin and host in origin:
-        is_valid = True
-    elif referer and host in referer:
-        is_valid = True
-        
+    if origin:
+        if get_hostname(origin) == host_header:
+            is_valid = True
+    elif referer:
+        if get_hostname(referer) == host_header:
+            is_valid = True
+            
     if not is_valid:
-        logger.warning(f"CSRF/Origin validation failed. Origin: {origin}, Referer: {referer}, Host: {host}")
+        logger.warning(f"CSRF/Origin validation failed. Origin: {origin}, Referer: {referer}, Host: {host_header}")
         raise HTTPException(status_code=403, detail="Forbidden: CSRF/Origin mismatch")
 
 def fetch_recent_events() -> List[Dict[str, Any]]:
@@ -215,12 +226,13 @@ async def trigger_crawling(
 ):
     """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
     task_key = "trigger-crawling"
-    if task_key in _background_tasks and not _background_tasks[task_key].done():
-        return {"message": "Task already in progress"}
-        
-    task = asyncio.create_task(CrawlingService.crawl_and_sync_events())
-    _background_tasks[task_key] = task
-    task.add_done_callback(_task_done_callback(task_key))
+    async with _task_lock:
+        if task_key in _background_tasks and not _background_tasks[task_key].done():
+            return {"message": "Task already in progress"}
+            
+        task = asyncio.create_task(CrawlingService.crawl_and_sync_events())
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
     return {"message": "Scheduled"}
 
 @router.post("/trigger-bus-notice")
@@ -230,12 +242,13 @@ async def trigger_bus_notice(
 ):
     """수동으로 TOPIS 버스 우회 공지 크롤링을 트리거합니다."""
     task_key = "trigger-bus-notice"
-    if task_key in _background_tasks and not _background_tasks[task_key].done():
-        return {"message": "Task already in progress"}
-        
-    task = asyncio.create_task(BusNoticeService.refresh())
-    _background_tasks[task_key] = task
-    task.add_done_callback(_task_done_callback(task_key))
+    async with _task_lock:
+        if task_key in _background_tasks and not _background_tasks[task_key].done():
+            return {"message": "Task already in progress"}
+            
+        task = asyncio.create_task(BusNoticeService.refresh())
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
     return {"message": "Scheduled"}
 
 @router.post("/trigger-test-alarm-for-user")
@@ -246,21 +259,22 @@ async def trigger_test_alarm_for_user(
 ):
     """수동으로 특정 사용자의 경로 점검 및 알림 발송 로직을 테스트합니다."""
     task_key = f"test-alarm-{user_id}"
-    if task_key in _background_tasks and not _background_tasks[task_key].done():
-        return {"message": "Task already in progress for this user"}
-    
-    # helper for background task that requires DB connection
-    async def _run_route_check_for_user(uid: str):
-        import sqlite3
-        from app.database.connection import DATABASE_PATH
-        db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        try:
-            await EventService.check_route_events(user_id=uid, auto_notify=True, db=db)
-        finally:
-            db.close()
-            
-    task = asyncio.create_task(_run_route_check_for_user(user_id))
-    _background_tasks[task_key] = task
-    task.add_done_callback(_task_done_callback(task_key))
+    async with _task_lock:
+        if task_key in _background_tasks and not _background_tasks[task_key].done():
+            return {"message": "Task already in progress for this user"}
+        
+        # helper for background task that requires DB connection
+        async def _run_route_check_for_user(uid: str):
+            import sqlite3
+            from app.database.connection import DATABASE_PATH
+            db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+            try:
+                await EventService.check_route_events(user_id=uid, auto_notify=True, db=db)
+            finally:
+                db.close()
+                
+        task = asyncio.create_task(_run_route_check_for_user(user_id))
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
     return {"message": "Scheduled"}
 
