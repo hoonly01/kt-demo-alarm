@@ -254,9 +254,16 @@
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                         {% for user in users %}
+                        {% set user_identifier = user.bot_user_key if user.bot_user_key else '' %}
                         <tr class="hover:bg-gray-50">
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm font-medium text-gray-900 font-mono">{{ user.bot_user_key[:12] }}...</div>
+                                <div class="text-sm font-medium text-gray-900 font-mono">
+                                    {% if user_identifier %}
+                                        {{ user_identifier[:12] }}{% if user_identifier|length > 12 %}...{% endif %}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </div>
                                 <div class="text-xs text-gray-500">ID: {{ user.id }}</div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
@@ -346,7 +353,6 @@
 <script>
     async function triggerAction(endpoint, buttonElement) {
         // Simple loading state
-        const originalText = buttonElement.innerHTML;
         buttonElement.disabled = true;
         buttonElement.classList.add('opacity-50', 'cursor-not-allowed');
         

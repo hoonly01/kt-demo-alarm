@@ -59,3 +59,43 @@ def test_admin_dashboard_empty_or_whitespace_env_vars(monkeypatch, admin_user, a
     response = client.get("/admin/dashboard", auth=("admin", "secret123"))
     assert response.status_code == 500
     assert response.json() == {"detail": "Admin credentials are not configured on the server"}
+
+def test_admin_dashboard_pagination(monkeypatch):
+    """Pagination 파라미터가 유효하게 작동하는지 검증"""
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    
+    # Check page=1, page_size=10
+    response = client.get("/admin/dashboard?page=1&page_size=10", auth=("admin", "secret123"))
+    assert response.status_code == 200
+    
+    # Check invalid page should default fallback or fail gracefully depending on FastAPI validation
+    response = client.get("/admin/dashboard?page=invalid", auth=("admin", "secret123"))
+    assert response.status_code == 422  # Validation error from FastAPI
+
+def test_trigger_crawling_unauthorized(monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    response = client.post("/admin/trigger-crawling")
+    assert response.status_code == 401
+
+def test_trigger_crawling_authorized(monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    response = client.post("/admin/trigger-crawling", auth=("admin", "secret123"))
+    assert response.status_code == 200
+    assert response.json() == {"message": "Success"}
+
+def test_trigger_bus_notice_authorized(monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    response = client.post("/admin/trigger-bus-notice", auth=("admin", "secret123"))
+    assert response.status_code == 200
+    assert response.json() == {"message": "Success"}
+
+def test_trigger_test_alarm_authorized(monkeypatch):
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    response = client.post("/admin/trigger-test-alarm", auth=("admin", "secret123"))
+    assert response.status_code == 200
+    assert response.json() == {"message": "Success"}
