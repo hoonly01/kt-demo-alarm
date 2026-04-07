@@ -61,32 +61,37 @@ class NotificationService:
 
         try:
             event_api_request = EventAPIRequest(
-                botId=settings.BOT_ID,
                 event=Event(
                     name=alarm_request.event_name,
                     data=alarm_request.data
                 ),
-                user=EventUser(
-                    type=id_type,  # ← plusfriendUserKey 사용 (기본값)
+                user=[EventUser(
+                    type=id_type,
                     id=alarm_request.user_id
-                )
+                )]
             )
-            
+
+            url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
+            }
+
             # 클라이언트 컨텍스트 관리
             if client:
                 response = await client.post(
-                    settings.KAKAO_BOT_API_URL,
+                    url,
                     json=event_api_request.model_dump(),
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     timeout=settings.NOTIFICATION_TIMEOUT
                 )
                 return NotificationService._process_response(response, alarm_request.user_id)
             else:
                 async with httpx.AsyncClient() as new_client:
                     response = await new_client.post(
-                        settings.KAKAO_BOT_API_URL,
+                        url,
                         json=event_api_request.model_dump(),
-                        headers={"Content-Type": "application/json"},
+                        headers=headers,
                         timeout=settings.NOTIFICATION_TIMEOUT
                     )
                     return NotificationService._process_response(response, alarm_request.user_id)
