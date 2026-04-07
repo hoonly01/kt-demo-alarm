@@ -1,9 +1,10 @@
 import os
 import secrets
 import asyncio
+import logging
 from typing import Dict, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -104,7 +105,12 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
         return cursor.fetchall()
 
 @router.get("/dashboard")
-async def dashboard(request: Request, page: int = 1, page_size: int = 50, _username: str = Depends(verify_admin)):
+async def dashboard(
+    request: Request, 
+    page: int = Query(1, ge=1, description="Page number"), 
+    page_size: int = Query(50, ge=1, le=200, description="Items per page"), 
+    _username: str = Depends(verify_admin)
+):
     """Render the back-office dashboard"""
     
     offset = (page - 1) * page_size
@@ -161,30 +167,29 @@ async def dashboard(request: Request, page: int = 1, page_size: int = 50, _usern
         }
     )
 
+def _task_exception_handler(task: asyncio.Task):
+    try:
+        task.result()
+    except Exception as e:
+        logger.error(f"Background task failed: {e}", exc_info=True)
+
 @router.post("/trigger-crawling")
 async def trigger_crawling(_username: str = Depends(verify_admin)):
-    """Manually trigger SMPA Rally Crawler"""
-    try:
-        # Run in background to not block the UI waiting for it
-        asyncio.create_task(CrawlingService.crawl_and_sync_events())
-        return {"message": "Success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
+    task = asyncio.create_task(CrawlingService.crawl_and_sync_events())
+    task.add_done_callback(_task_exception_handler)
+    return {"message": "Success"}
 
 @router.post("/trigger-bus-notice")
 async def trigger_bus_notice(_username: str = Depends(verify_admin)):
-    """Manually trigger TOPIS Bus Notice Crawler"""
-    try:
-        asyncio.create_task(BusNoticeService.refresh())
-        return {"message": "Success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """수동으로 TOPIS 버스 우회 공지 크롤링을 트리거합니다."""
+    task = asyncio.create_task(BusNoticeService.refresh())
+    task.add_done_callback(_task_exception_handler)
+    return {"message": "Success"}
 
 @router.post("/trigger-test-alarm")
 async def trigger_test_alarm(_username: str = Depends(verify_admin)):
-    """Manually trigger scheduled route check tasks"""
-    try:
-        asyncio.create_task(EventService.scheduled_route_check())
-        return {"message": "Success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """수동으로 경로 점검 및 알림 발송 로직을 트리거합니다. (개별 사용자 대상)"""
+    task = asyncio.create_task(EventService.scheduled_route_check())
+    task.add_done_callback(_task_exception_handler)
+    return {"message": "Success"}
