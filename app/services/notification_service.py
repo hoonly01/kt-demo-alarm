@@ -204,7 +204,7 @@ class NotificationService:
         # 알림 전송
         alarm_request = AlarmRequest(
             user_id=user_id,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
                 "message": message_text,
                 "events_count": len(events),
@@ -229,7 +229,7 @@ class NotificationService:
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(
             user_ids=user_ids,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
                 "message": message_text,
                 "events_count": len(events_data),
@@ -248,7 +248,7 @@ class NotificationService:
             return {"valid": False, "error": "데이터는 딕셔너리 형태여야 합니다"}
         
         # 필수 필드 확인 (이벤트 이름별로 다를 수 있음)
-        if event_name == "route_rally_alert":
+        if event_name == "morning_demo_alarm":
             if "message" not in data:
                 return {"valid": False, "error": "message 필드가 필요합니다"}
         
