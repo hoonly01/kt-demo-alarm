@@ -254,7 +254,7 @@
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                         {% for user in users %}
-                        {% set user_identifier = user.bot_user_key if user.bot_user_key else '' %}
+                        {% set user_identifier = user.plusfriend_user_key or user.bot_user_key or user.open_id %}
                         <tr class="hover:bg-gray-50">
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm font-medium text-gray-900 font-mono">

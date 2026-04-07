@@ -93,7 +93,7 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
         conn.row_factory = dict_factory
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, bot_user_key, active, is_alarm_on, 
+            SELECT id, bot_user_key, plusfriend_user_key, open_id, active, is_alarm_on, 
                    departure_name, arrival_name, marked_bus, 
                    COALESCE(favorite_zone, 0) as favorite_zone,
                    first_message_at as created_at, message_count 
