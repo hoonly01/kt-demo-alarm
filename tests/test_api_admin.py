@@ -103,14 +103,14 @@ def test_trigger_bus_notice_authorized(test_client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"message": "Success"}
 
-def test_trigger_test_alarm_authorized(test_client, monkeypatch):
+def test_trigger_test_alarm_for_user_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
     monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
     
     mock_route_check = AsyncMock()
     with monkeypatch.context() as m:
-        m.setattr("app.services.event_service.EventService.scheduled_route_check", mock_route_check)
-        response = test_client.post("/admin/trigger-test-alarm", auth=("admin", "secret123"))
+        m.setattr("app.services.event_service.EventService.check_route_events", mock_route_check)
+        response = test_client.post("/admin/trigger-test-alarm-for-user?user_id=12345", auth=("admin", "secret123"))
         
     assert response.status_code == 200
-    assert response.json() == {"message": "Success"}
+    assert "Successfully triggered" in response.json()["message"]
