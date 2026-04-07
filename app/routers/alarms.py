@@ -120,9 +120,14 @@ async def send_alarm_to_all(
                 data=data,
                 id_type="plusfriendUserKey"
             )
-            result["total_users"] += pf_result["total_users"]
-            result["total_sent"] += pf_result["total_sent"]
-            result["total_failed"] += pf_result["total_failed"]
+            if pf_result.get("success", True):  # Assume True if missing, or maybe success is explicitly returned
+                result["total_users"] += pf_result.get("total_users", 0)
+                result["total_sent"] += pf_result.get("total_sent", 0)
+                result["total_failed"] += pf_result.get("total_failed", 0)
+            else:
+                logger.error(f"plusfriend_user_key 알림 전송 실패: {pf_result.get('error')}")
+                result["total_users"] += len(plusfriend_users)
+                result["total_failed"] += len(plusfriend_users)
             
         if bot_users:
             bot_result = await NotificationService.send_bulk_alarm(
@@ -131,9 +136,14 @@ async def send_alarm_to_all(
                 data=data,
                 id_type="botUserKey"
             )
-            result["total_users"] += bot_result["total_users"]
-            result["total_sent"] += bot_result["total_sent"]
-            result["total_failed"] += bot_result["total_failed"]
+            if bot_result.get("success", True):
+                result["total_users"] += bot_result.get("total_users", 0)
+                result["total_sent"] += bot_result.get("total_sent", 0)
+                result["total_failed"] += bot_result.get("total_failed", 0)
+            else:
+                logger.error(f"bot_user_key 알림 전송 실패: {bot_result.get('error')}")
+                result["total_users"] += len(bot_users)
+                result["total_failed"] += len(bot_users)
         
         return {
             "message": f"전체 알림 전송 완료",
@@ -188,7 +198,7 @@ async def send_filtered_alarm(
         bot_users = [r[1] for r in rows if r[0] is None and r[1] is not None]
         
         if not plusfriend_users and not bot_users:
-            return {"message": "조건에 맞는 사용자가 없습니다", "sent": 0}
+            raise HTTPException(status_code=404, detail="조건에 맞는 사용자가 없습니다")
         
         result = {"total_users": 0, "total_sent": 0, "total_failed": 0}
         
@@ -199,9 +209,14 @@ async def send_filtered_alarm(
                 data=request.data,
                 id_type="plusfriendUserKey"
             )
-            result["total_users"] += pf_result["total_users"]
-            result["total_sent"] += pf_result["total_sent"]
-            result["total_failed"] += pf_result["total_failed"]
+            if pf_result.get("success", True):
+                result["total_users"] += pf_result.get("total_users", 0)
+                result["total_sent"] += pf_result.get("total_sent", 0)
+                result["total_failed"] += pf_result.get("total_failed", 0)
+            else:
+                logger.error(f"plusfriend_user_key 알림 전송 실패: {pf_result.get('error')}")
+                result["total_users"] += len(plusfriend_users)
+                result["total_failed"] += len(plusfriend_users)
             
         if bot_users:
             bot_result = await NotificationService.send_bulk_alarm(
@@ -210,9 +225,14 @@ async def send_filtered_alarm(
                 data=request.data,
                 id_type="botUserKey"
             )
-            result["total_users"] += bot_result["total_users"]
-            result["total_sent"] += bot_result["total_sent"]
-            result["total_failed"] += bot_result["total_failed"]
+            if bot_result.get("success", True):
+                result["total_users"] += bot_result.get("total_users", 0)
+                result["total_sent"] += bot_result.get("total_sent", 0)
+                result["total_failed"] += bot_result.get("total_failed", 0)
+            else:
+                logger.error(f"bot_user_key 알림 전송 실패: {bot_result.get('error')}")
+                result["total_users"] += len(bot_users)
+                result["total_failed"] += len(bot_users)
         
         return {
             "message": f"필터링된 알림 전송 완료",
