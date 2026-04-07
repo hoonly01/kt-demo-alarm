@@ -10,11 +10,14 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Tuple, Optional
 
+from app.database.connection import get_db_connection, DATABASE_PATH
+from app.config.settings import settings
+
 import requests
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
 from playwright.sync_api import sync_playwright
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 # 4번 리뷰 반영: 중앙 스키마 임포트 (경로는 프로젝트 구조에 맞게 설정되어야 함)
 from app.database.models import EVENTS_TABLE_SCHEMA
@@ -22,20 +25,10 @@ from app.database.models import EVENTS_TABLE_SCHEMA
 # 로거 설정
 logger = logging.getLogger(__name__)
 
-# ------------------------------- 환경 변수 설정 (Pydantic) --------------------------------
-class Settings(BaseSettings):
-    KAKAO_REST_API_KEY: Optional[str] = None
-
-    # .env 파일에서 로드하며, 정의되지 않은 추가 환경변수는 무시(ignore)합니다.
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-
-settings = Settings()
-
 # ------------------------------- 상수/설정 ------------------------------------
 # 프로젝트 루트 기준 data 폴더 설정
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
-DB_PATH = DATA_DIR / "kt_demo_alarm.db"
+DATA_DIR = pathlib.Path(DATABASE_PATH).parent
 
 # Kakao API Key 설정 (Pydantic Settings에서 가져옴)
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -296,7 +289,8 @@ class CrawlingService:
                         break
             if not target_view: return []
 
-            r = session.get(target_view)
+            r = session.get(target_view, timeout=10)
+            r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
             pdf_url = None
             for a in soup.find_all("a"):
@@ -337,81 +331,70 @@ class CrawlingService:
 
     @classmethod
     def _sync_to_database(cls, data_list: List[Dict]):
-        import sqlite3
+        insert_data = []
+        for r in data_list:
+            year = r.get('년')
+            month = str(r.get('월')).zfill(2)
+            day = str(r.get('일')).zfill(2)
+
+            st_time = r.get('start_time')
+            ed_time = r.get('end_time')
+
+            start_date = f"{year}-{month}-{day} {st_time}:00" if st_time else None
+            end_date = f"{year}-{month}-{day} {ed_time}:00" if ed_time else None
+
+            place_name = r.get('장소', '알 수 없는 장소')
+            attendees = r.get('인원', '')
+
+            title = r.get('title') or f"{place_name} 집회"
+            description = r.get('description')
+
+            lat = r.get('위도')
+            lon = r.get('경도')
+
+            # latitude, longitude가 NULL이면 NOT NULL 제약 위반 → 해당 행 스킵
+            if lat is None or lon is None or start_date is None:
+                logger.warning(
+                    f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, lat: {lat}, lon: {lon}, start_date: {start_date}"
+                )
+                continue
+
+            insert_data.append((
+                title,
+                description,
+                place_name,
+                r.get('지번주소'),
+                lat,
+                lon,
+                start_date,
+                end_date,
+                '집회',
+                3 if attendees and attendees.isdigit() and int(attendees) > 1000 else 2,
+                'active'
+            ))
+
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-
-            # 4번 리뷰 대응: 중앙 스키마를 사용하여 만약 테이블이 없다면 일관된 구조로 생성
-            cur.execute(EVENTS_TABLE_SCHEMA)
-
-            insert_data = []
-            for r in data_list:
-                lat = r.get('위도')
-                lon = r.get('경도')
-
-                # 스키마의 NOT NULL 제약조건 방어: 좌표값이 없으면 저장 건너뜀
-                if lat is None or lon is None:
-                    continue
-
-                year = r.get('년')
-                month = str(r.get('월')).zfill(2)
-                day = str(r.get('일')).zfill(2)
-
-                # 스키마의 NOT NULL 제약조건 방어: 시간 정보가 없으면 "00:00"을 기본으로 설정
-                st_time = r.get('start_time') or "00:00"
-                ed_time = r.get('end_time')
-
-                start_date = f"{year}-{month}-{day} {st_time}:00"
-                end_date = f"{year}-{month}-{day} {ed_time}:00" if ed_time else None
-
-                place_name = r.get('장소', '알 수 없는 장소')
-                attendees = r.get('인원', '')
-
-                # 5번 리뷰 반영: title과 description 생성
-                title = r.get('title')
-                if not title:
-                    title = f"{place_name} 집회"
-                    if attendees and attendees.isdigit():
-                        title += f" (참가자 {attendees}명)"
-
-                description = r.get('description')
-                if not description:
-                    description = f"출처: {r.get('비고', '알 수 없음')}"
-                    if attendees:
-                        description += f" / 예상 인원: {attendees}명"
-
-                insert_data.append((
-                    title,
-                    description,
-                    place_name,
-                    r.get('지번주소'),
-                    lat,
-                    lon,
-                    start_date,
-                    end_date,
-                    '집회',
-                    3 if attendees and attendees.isdigit() and int(attendees) > 1000 else 2,
-                    'active'
-                ))
-
-            if insert_data:
+            with get_db_connection() as conn:
+                cur = conn.cursor()
+                # 중복 방지: location_name + start_date 기준 UNIQUE 인덱스
+                try:
+                    cur.execute("""
+                        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_location_date
+                        ON events(location_name, start_date)
+                    """)
+                except Exception:
+                    pass  # 이미 존재하거나 기존 데이터 충돌 시 무시
                 cur.executemany("""
-                    INSERT INTO events (
+                    INSERT OR IGNORE INTO events (
                         title, description, location_name, location_address,
                         latitude, longitude, start_date, end_date,
                         category, severity_level, status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, insert_data)
-
-            conn.commit()
+                conn.commit()
             logger.info(f"데이터베이스에 {len(insert_data)}건의 이벤트 데이터가 성공적으로 저장되었습니다.")
-
         except Exception as e:
             logger.error(f"SQLite3 저장 중 에러: {e}", exc_info=True)
-        finally:
-            if 'conn' in locals():
-                conn.close()
 
 
 if __name__ == "__main__":
