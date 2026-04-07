@@ -5,6 +5,8 @@ USERS_TABLE_SCHEMA = '''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bot_user_key TEXT UNIQUE NOT NULL,
+        open_id TEXT,
+        plusfriend_user_key TEXT,
         first_message_at DATETIME,
         last_message_at DATETIME,
         message_count INTEGER DEFAULT 1,
