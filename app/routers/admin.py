@@ -14,6 +14,7 @@ import math
 from app.utils.scheduler_utils import get_scheduler_status
 from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
+from app.services.crawling_service import CrawlingService
 
 router = APIRouter(
     prefix="/admin",
@@ -95,7 +96,7 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
             SELECT id, bot_user_key, active, is_alarm_on, 
                    departure_name, arrival_name, marked_bus, 
                    COALESCE(favorite_zone, 0) as favorite_zone,
-                   created_at, message_count 
+                   first_message_at as created_at, message_count 
             FROM users 
             ORDER BY id DESC 
             LIMIT ? OFFSET ?
@@ -165,7 +166,7 @@ async def trigger_crawling(_username: str = Depends(verify_admin)):
     """Manually trigger SMPA Rally Crawler"""
     try:
         # Run in background to not block the UI waiting for it
-        asyncio.create_task(EventService.collect_smpa_events())
+        asyncio.create_task(CrawlingService.crawl_and_sync_events())
         return {"message": "Success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
