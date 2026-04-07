@@ -352,8 +352,11 @@
 
 <script>
     async function triggerAction(endpoint, buttonElement) {
-        // Simple loading state
+        // Implement client-side debounce/cooldown
+        if (buttonElement.disabled || buttonElement.dataset.cooldown === 'true') return;
+        
         buttonElement.disabled = true;
+        buttonElement.dataset.cooldown = 'true';
         buttonElement.classList.add('opacity-50', 'cursor-not-allowed');
         
         try {
@@ -364,17 +367,22 @@
                 }
             });
             
+            const data = await response.json();
             if (response.ok) {
-                showToast('Success!', 'Task triggered successfully.', 'success');
+                const msg = data.message === 'Scheduled' ? 'Task scheduled successfully.' : (data.message || 'Task triggered.');
+                showToast('Success!', msg, 'success');
             } else {
-                const data = await response.json();
                 showToast('Error', data.detail || 'Failed to trigger task.', 'error');
             }
         } catch (error) {
             showToast('Error', 'Network error occurred.', 'error');
         } finally {
-            buttonElement.disabled = false;
-            buttonElement.classList.remove('opacity-50', 'cursor-not-allowed');
+            // Keep the button disabled for a short cooldown (e.g., 1000ms) to prevent double-clicks
+            setTimeout(() => {
+                buttonElement.disabled = false;
+                buttonElement.dataset.cooldown = 'false';
+                buttonElement.classList.remove('opacity-50', 'cursor-not-allowed');
+            }, 1000);
         }
     }
 
@@ -387,13 +395,14 @@
         const textColor = type === 'success' ? 'text-green-800' : 'text-red-800';
         const iconColor = type === 'success' ? 'text-green-400' : 'text-red-400';
         
-        const icon = type === 'success' 
+        // Use a safe way to handle SVGs - either by templates or strictly controlled innerHTML of a new element
+        const iconSvg = type === 'success' 
             ? `<svg class="h-6 w-6 ${iconColor}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`
             : `<svg class="h-6 w-6 ${iconColor}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
 
         toast.className = `toast-enter max-w-sm w-full shadow-lg rounded-lg pointer-events-auto ring-1 ring-black ring-opacity-5 overflow-hidden ${bgColor} border-l-4 ${borderColor}`;
         
-        // Use textContent to prevent XSS vulnerabilities from API response payload (detail)
+        // Use textContent for user-provided strings to prevent XSS
         const toastInner = document.createElement('div');
         toastInner.className = 'p-4';
         
@@ -402,7 +411,7 @@
         
         const iconDiv = document.createElement('div');
         iconDiv.className = 'flex-shrink-0';
-        iconDiv.innerHTML = icon;
+        iconDiv.innerHTML = iconSvg; // SVG is statically defined above
         
         const textDiv = document.createElement('div');
         textDiv.className = 'ml-3 w-0 flex-1 pt-0.5';
@@ -424,7 +433,7 @@
         const closeBtn = document.createElement('button');
         closeBtn.className = 'bg-transparent rounded-md inline-flex text-gray-400 hover:text-gray-500 focus:outline-none';
         closeBtn.innerHTML = `<span class="sr-only">Close</span><svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>`;
-        closeBtn.onclick = () => toast.remove(); // Fix the incorrect parent element removal
+        closeBtn.onclick = () => toast.remove();
         
         closeDiv.appendChild(closeBtn);
         
@@ -438,8 +447,10 @@
         
         // Auto remove after 3 seconds
         setTimeout(() => {
-            toast.classList.replace('toast-enter', 'toast-exit');
-            setTimeout(() => toast.remove(), 300);
+            if (toast.parentElement) {
+                toast.classList.replace('toast-enter', 'toast-exit');
+                setTimeout(() => toast.remove(), 300);
+            }
         }, 3000);
     }
 </script>

@@ -2,7 +2,7 @@ import os
 import secrets
 import asyncio
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Set
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -17,6 +17,8 @@ from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
 from app.services.crawling_service import CrawlingService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/admin",
     tags=["admin"]
@@ -24,6 +26,9 @@ router = APIRouter(
 
 security = HTTPBasic()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
+
+# Task registry to keep tasks alive and prevent duplicate runs
+_background_tasks: Dict[str, asyncio.Task] = {}
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     # Using environment variables for admin credentials.
@@ -48,6 +53,30 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+
+def verify_csrf_origin(request: Request):
+    """
+    Basic CSRF/Origin protection for administrative POST actions.
+    Ensures the request comes from the same origin or a trusted referrer.
+    """
+    # In production, you might want a more robust CSRF token or strictly allowed list
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    host = request.headers.get("host")
+    
+    if not origin and not referer:
+        raise HTTPException(status_code=403, detail="Forbidden: Missing Origin/Referer headers")
+        
+    # Allow if origin matches host or referer contains host
+    is_valid = False
+    if origin and host in origin:
+        is_valid = True
+    elif referer and host in referer:
+        is_valid = True
+        
+    if not is_valid:
+        logger.warning(f"CSRF/Origin validation failed. Origin: {origin}, Referer: {referer}, Host: {host}")
+        raise HTTPException(status_code=403, detail="Forbidden: CSRF/Origin mismatch")
 
 def fetch_recent_events() -> List[Dict[str, Any]]:
     # Synchronous DB query
@@ -167,29 +196,58 @@ async def dashboard(
         }
     )
 
-def _task_exception_handler(task: asyncio.Task):
-    try:
-        task.result()
-    except Exception as e:
-        logger.error(f"Background task failed: {e}", exc_info=True)
+def _task_done_callback(task_key: str):
+    def callback(task: asyncio.Task):
+        try:
+            _background_tasks.pop(task_key, None)
+            task.result()
+            logger.info(f"Background task {task_key} completed successfully.")
+        except asyncio.CancelledError:
+            logger.warning(f"Background task {task_key} was cancelled.")
+        except Exception as e:
+            logger.error(f"Background task {task_key} failed: {e}", exc_info=True)
+    return callback
 
 @router.post("/trigger-crawling")
-async def trigger_crawling(_username: str = Depends(verify_admin)):
+async def trigger_crawling(
+    _username: str = Depends(verify_admin),
+    _csrf: None = Depends(verify_csrf_origin)
+):
     """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
+    task_key = "trigger-crawling"
+    if task_key in _background_tasks and not _background_tasks[task_key].done():
+        return {"message": "Task already in progress"}
+        
     task = asyncio.create_task(CrawlingService.crawl_and_sync_events())
-    task.add_done_callback(_task_exception_handler)
-    return {"message": "Success"}
+    _background_tasks[task_key] = task
+    task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
 
 @router.post("/trigger-bus-notice")
-async def trigger_bus_notice(_username: str = Depends(verify_admin)):
+async def trigger_bus_notice(
+    _username: str = Depends(verify_admin),
+    _csrf: None = Depends(verify_csrf_origin)
+):
     """수동으로 TOPIS 버스 우회 공지 크롤링을 트리거합니다."""
+    task_key = "trigger-bus-notice"
+    if task_key in _background_tasks and not _background_tasks[task_key].done():
+        return {"message": "Task already in progress"}
+        
     task = asyncio.create_task(BusNoticeService.refresh())
-    task.add_done_callback(_task_exception_handler)
-    return {"message": "Success"}
+    _background_tasks[task_key] = task
+    task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
 
 @router.post("/trigger-test-alarm-for-user")
-async def trigger_test_alarm_for_user(user_id: str = Query(..., description="Target user ID to test"), _username: str = Depends(verify_admin)):
+async def trigger_test_alarm_for_user(
+    user_id: str = Query(..., description="Target user ID to test"), 
+    _username: str = Depends(verify_admin),
+    _csrf: None = Depends(verify_csrf_origin)
+):
     """수동으로 특정 사용자의 경로 점검 및 알림 발송 로직을 테스트합니다."""
+    task_key = f"test-alarm-{user_id}"
+    if task_key in _background_tasks and not _background_tasks[task_key].done():
+        return {"message": "Task already in progress for this user"}
     
     # helper for background task that requires DB connection
     async def _run_route_check_for_user(uid: str):
@@ -202,5 +260,7 @@ async def trigger_test_alarm_for_user(user_id: str = Query(..., description="Tar
             db.close()
             
     task = asyncio.create_task(_run_route_check_for_user(user_id))
-    task.add_done_callback(_task_exception_handler)
-    return {"message": f"Successfully triggered test for user: {user_id}"}
+    _background_tasks[task_key] = task
+    task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
+
