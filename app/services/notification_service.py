@@ -61,32 +61,38 @@ class NotificationService:
 
         try:
             event_api_request = EventAPIRequest(
-                botId=settings.BOT_ID,
                 event=Event(
                     name=alarm_request.event_name,
                     data=alarm_request.data
                 ),
-                user=EventUser(
-                    type=id_type,  # ← plusfriendUserKey 사용 (기본값)
+                user=[EventUser(
+                    type=id_type,
                     id=alarm_request.user_id
-                )
+                )],
+                params=None
             )
-            
+
+            url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
+            }
+
             # 클라이언트 컨텍스트 관리
             if client:
                 response = await client.post(
-                    settings.KAKAO_BOT_API_URL,
+                    url,
                     json=event_api_request.model_dump(),
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     timeout=settings.NOTIFICATION_TIMEOUT
                 )
                 return NotificationService._process_response(response, alarm_request.user_id)
             else:
                 async with httpx.AsyncClient() as new_client:
                     response = await new_client.post(
-                        settings.KAKAO_BOT_API_URL,
+                        url,
                         json=event_api_request.model_dump(),
-                        headers={"Content-Type": "application/json"},
+                        headers=headers,
                         timeout=settings.NOTIFICATION_TIMEOUT
                     )
                     return NotificationService._process_response(response, alarm_request.user_id)
@@ -199,11 +205,9 @@ class NotificationService:
         # 알림 전송
         alarm_request = AlarmRequest(
             user_id=user_id,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events),
-                "events": events
+                "message": message_text
             }
         )
 
@@ -224,11 +228,9 @@ class NotificationService:
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(
             user_ids=user_ids,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events_data),
-                "events": events_data
+                "message": message_text
             },
             id_type=id_type
         )
@@ -243,7 +245,7 @@ class NotificationService:
             return {"valid": False, "error": "데이터는 딕셔너리 형태여야 합니다"}
         
         # 필수 필드 확인 (이벤트 이름별로 다를 수 있음)
-        if event_name == "route_rally_alert":
+        if event_name == "morning_demo_alarm":
             if "message" not in data:
                 return {"valid": False, "error": "message 필드가 필요합니다"}
         
