@@ -306,7 +306,7 @@ ZONE_PARAM_MAP = {
     "1구역": 1,
     "2구역": 2,
     "3구역": 3,
-    "미설정": None,
+    "삭제": None,
 }
 
 
@@ -340,21 +340,21 @@ async def get_favorite_zone_selection(request: dict):
                 "messageText": info["title"],
             })
 
-    # 미설정 옵션 추가
+    # 삭제 옵션 추가
     if save_block_id:
         items.append({
-            "title": "미설정",
+            "title": "삭제",
             "description": "기존 관심장소 정보를 삭제합니다",
             "action": "block",
             "blockId": save_block_id,
-            "extra": {"zone": "미설정"},
+            "extra": {"zone": "삭제"},
         })
     else:
         items.append({
-            "title": "미설정",
+            "title": "삭제",
             "description": "기존 관심장소 정보를 삭제합니다",
             "action": "message",
-            "messageText": "미설정",
+            "messageText": "삭제",
         })
 
     return {
@@ -382,7 +382,7 @@ async def save_favorite_zone(
     """
     관심장소 구역 선택 저장 (카카오톡 Skill Block)
     - 사용자가 선택한 구역을 DB에 저장
-    - (우선) action.clientExtra.zone: "1구역", "2구역", "3구역", "미설정"  ← block+extra 방식
+    - (우선) action.clientExtra.zone: "1구역", "2구역", "3구역", "삭제"  ← block+extra 방식
     - (fallback) action.params.zone: "1구역", ...                         ← message 방식
     """
     try:
@@ -418,7 +418,7 @@ async def save_favorite_zone(
             return {
                 "version": "2.0",
                 "template": {
-                    "outputs": [{"simpleText": {"text": f"올바르지 않은 구역 값입니다 ('{zone_param}'). 1구역, 2구역, 3구역, 미설정 중 선택해주세요."}}]
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 구역 값입니다 ('{zone_param}'). 1구역, 2구역, 3구역, 삭제 중 선택해주세요."}}]
                 }
             }
 
