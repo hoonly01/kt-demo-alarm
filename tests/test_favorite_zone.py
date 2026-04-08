@@ -64,21 +64,26 @@ class TestFavoriteZoneSelectionUI:
         # 헤더 확인
         assert "관심장소" in list_card["header"]["title"]
 
-        # 아이템 4개 확인 (3 구역 + 미설정)
+        # 아이템 4개 확인 (3 구역 + 삭제)
         items = list_card["items"]
         assert len(items) == 4
 
-        # 각 아이템에 action: message 확인
+        # 각 아이템에 action: block+extra 또는 message 확인
         for item in items:
-            assert item["action"] == "message"
-            assert "messageText" in item
+            assert item["action"] in ("message", "block")
+            if item["action"] == "block":
+                assert "blockId" in item
+                assert "extra" in item
+                assert "zone" in item["extra"]
+            else:
+                assert "messageText" in item
 
         # 구역 이름 확인
         titles = [item["title"] for item in items]
         assert "1구역" in titles
         assert "2구역" in titles
         assert "3구역" in titles
-        assert "미설정" in titles
+        assert "삭제" in titles
 
 
 class TestFavoriteZoneSave:
@@ -107,7 +112,7 @@ class TestFavoriteZoneSave:
 
     def test_save_zone_unset(self, clean_test_db, zone_save_payload):
         """미설정 선택 시 삭제 확인 메시지 반환"""
-        zone_save_payload["action"]["params"]["zone"] = "미설정"
+        zone_save_payload["action"]["params"]["zone"] = "삭제"
 
         with patch("app.services.user_service.UserService.sync_kakao_user"):
             with patch("app.services.user_service.UserService.update_favorite_zone") as mock_update:

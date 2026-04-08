@@ -288,8 +288,8 @@ class TestFavoriteZoneSaveViaClientExtra:
                 assert "1구역" in text
 
     def test_save_unset_zone_via_client_extra(self, clean_test_db):
-        """block+extra 방식: clientExtra.zone='미설정' 으로 관심장소 해제"""
-        payload = self._make_payload("미설정")
+        """block+extra 방식: clientExtra.zone='삭제' 으로 관심장소 해제"""
+        payload = self._make_payload("삭제")
 
         with patch("app.services.user_service.UserService.sync_kakao_user"):
             with patch("app.services.user_service.UserService.update_favorite_zone") as mock_update:
