@@ -197,13 +197,12 @@ async def check_user_route_events(
         }
     }
 
-
 @router.post("/save_user_info")
-async def save_user_info(request: dict, background_tasks: BackgroundTasks):
+async def save_user_info(request: dict):
     """
     카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
-    - 출발지와 도착지만 저장 (간단 버전)
-    - 백그라운드 처리로 빠른 응답
+    - 출발지와 도착지만 저장
+    - 사용자가 입력한 장소명을 기준으로 검색된 실제 장소 정보를 응답에 표시
 
     Parameters in action.params:
     - departure: 출발지 (예: "영통역")
@@ -225,62 +224,86 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
 
     # 출발지와 도착지 정보 추출
     params = request.get('action', {}).get('params', {})
-    departure = params.get('departure', '')
-    arrival = params.get('arrival', '')
+    departure = params.get('departure', '').strip()
+    arrival = params.get('arrival', '').strip()
 
-    logger.info(f"📍 경로: {departure} → {arrival}")
+    logger.info(f"📍 입력 경로: {departure} → {arrival}")
 
-    # 사용자 생성/업데이트 (동기화)
     from app.services.user_service import UserService
     from app.database.connection import get_db_connection
 
-    with get_db_connection() as db:
-        # [REFACTOR] 통합된 사용자 동기화 로직 사용
-        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+    try:
+        with get_db_connection() as db:
+            # 사용자 생성/동기화
+            UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
 
-    # 백그라운드에서 경로 정보 저장 (Route Only Update)
-    async def save_route_to_db_task(user_id: str, departure: str, arrival: str):
-        """백그라운드 작업: 경로 정보만 업데이트"""
-        from app.database.connection import get_db_connection
-        try:
-            with get_db_connection() as conn:
-                # [REFACTOR] 경로 정보만 업데이트하는 메서드 호출
-                result = await UserService.update_user_route(
-                    user_id=user_id,
-                    departure=departure,
-                    arrival=arrival,
-                    db=conn
-                )
+            # 경로 정보 저장 + 실제 검색 결과 받기
+            result = await UserService.update_user_route(
+                user_id=user_id,
+                departure=departure,
+                arrival=arrival,
+                db=db
+            )
 
-                if result["success"]:
-                    logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
-                else:
-                    logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
-
-        except Exception as e:
-            logger.error(f"경로 정보 저장 중 오류: {str(e)}")
-
-    background_tasks.add_task(save_route_to_db_task, user_id, departure, arrival)
-
-    # 즉시 응답 (사용자 대기 시간 단축)
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": (
-                            f"📍 출발지: {departure}\n"
-                            f"📍 도착지: {arrival}\n\n"
-                            "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
-                            "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
-                        )
-                    }
+        # 저장 실패 시
+        if not result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"경로 등록에 실패했습니다.\n"
+                                    f"사유: {result.get('error', '알 수 없는 오류')}\n\n"
+                                    "역명, 건물명처럼 더 정확한 장소명으로 다시 입력해 주세요."
+                                )
+                            }
+                        }
+                    ]
                 }
-            ]
+            }
+
+        departure_info = result["departure"]
+        arrival_info = result["arrival"]
+
+        # 저장 성공 시: 실제 검색된 장소명 + 주소를 보여줌
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": (
+                                f"📍 출발지: {departure_info['name']} ({departure_info['address']})\n"
+                                f"📍 도착지: {arrival_info['name']} ({arrival_info['address']})\n\n"
+                                "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
+                                "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
+                                "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                            )
+                        }
+                    }
+                ]
+            }
         }
-    }
+
+    except Exception as e:
+        logger.error(f"/save_user_info 처리 중 오류: {str(e)}")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": (
+                                "경로 등록 중 오류가 발생했습니다.\n"
+                                "잠시 후 다시 시도해 주세요."
+                            )
+                        }
+                    }
+                ]
+            }
+        }
 
 
 # ─── 관심장소 알림 설정 ─────────────────────────────────────
