@@ -22,26 +22,26 @@ def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None):
     # 설정된 시간에 SMPA 집회 데이터 크롤링 및 동기화
     scheduler.add_job(
         crawling_func,
-        CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE),
+        CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE, timezone='Asia/Seoul'),
         id="daily_crawling_sync",
         name="Daily SMPA Crawling & Sync",
         replace_existing=True
     )
-    
+
     # 설정된 시간에 정기 집회 확인 스케줄 추가
     scheduler.add_job(
         route_check_func,
-        CronTrigger(hour=settings.ROUTE_CHECK_HOUR, minute=settings.ROUTE_CHECK_MINUTE),
+        CronTrigger(hour=settings.ROUTE_CHECK_HOUR, minute=settings.ROUTE_CHECK_MINUTE, timezone='Asia/Seoul'),
         id="daily_route_check",
         name="Daily Route Rally Check",
         replace_existing=True
     )
-    
+
     # 버스 통제 공지 재크롤링 (매일 CRAWLING_HOUR:CRAWLING_MINUTE)
     if bus_crawling_func:
         scheduler.add_job(
             bus_crawling_func,
-            CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE),
+            CronTrigger(hour=settings.CRAWLING_HOUR, minute=settings.CRAWLING_MINUTE, timezone='Asia/Seoul'),
             id="daily_bus_crawling",
             name="Daily Bus Control Crawling",
             replace_existing=True
