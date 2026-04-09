@@ -292,9 +292,6 @@ class EventService:
 
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
 
-            # 실제 수신 대상 수 기록
-            AlarmStatusService.update_alarm_task_status(task_id, "processing", total_recipients=len(users))
-
             # 이벤트 결과가 정확히 일치하는 사용자끼리 그룹화
             grouped_users = {}
             for user_row in users:
@@ -327,6 +324,10 @@ class EventService:
 
                     grouped_users[event_key]["user_ids"].append(plusfriend_key)
 
+            # 실제 발송 대상 수(집회가 경로에 걸린 사용자) 기록
+            actual_recipients = sum(len(g["user_ids"]) for g in grouped_users.values())
+            AlarmStatusService.update_alarm_task_status(task_id, "processing", total_recipients=actual_recipients)
+
             # Event API로 일괄 전송
             total_success = 0
             total_fail = 0
@@ -343,9 +344,11 @@ class EventService:
                     id_type="plusfriendUserKey"  # ← 타입 명시!
                 )
 
-                total_notifications += len(user_ids)
-                total_success += send_result.get("total_sent", 0)
-                total_fail += send_result.get("total_failed", 0)
+                if not send_result.get("success", True):
+                    total_fail += len(user_ids)
+                else:
+                    total_success += send_result.get("total_sent", 0)
+                    total_fail += send_result.get("total_failed", 0)
 
             final_status = "completed" if total_fail == 0 else "partial"
             AlarmStatusService.update_alarm_task_status(
@@ -354,13 +357,15 @@ class EventService:
                 failed_sends=total_fail,
             )
 
-            logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
+            logger.info(
+                f"=== 정기 집회 확인 완료: 대상 {actual_recipients}명, 성공 {total_success}명, 실패 {total_fail}명 ==="
+            )
 
             return {
                 "success": True,
                 "task_id": task_id,
                 "total_users": len(users),
-                "notifications_sent": total_notifications
+                "notifications_sent": total_success
             }
 
         except Exception as e:
