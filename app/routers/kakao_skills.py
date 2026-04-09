@@ -198,6 +198,120 @@ async def check_user_route_events(
     }
 
 
+@router.post("/route-setting")
+async def get_route_setting_selection(request: dict):
+    """
+    이동경로 관리 선택 UI 반환 (카카오톡 Skill Block)
+    - ListCard 형식으로 "설정" / "삭제" 2개 항목 표시
+    - action:block + extra 방식으로 각 블록에 직접 전달
+    """
+    logger.info(f"🔍 /route-setting 요청: {request}")
+
+    setup_block_id = settings.ROUTE_SETUP_BLOCK_ID
+    delete_block_id = settings.ROUTE_DELETE_BLOCK_ID
+
+    if setup_block_id:
+        setup_item = {
+            "title": "✏️ 설정",
+            "description": "출발지/도착지를 새로 등록합니다",
+            "action": "block",
+            "blockId": setup_block_id,
+        }
+    else:
+        setup_item = {
+            "title": "✏️ 설정",
+            "description": "출발지/도착지를 새로 등록합니다",
+            "action": "message",
+            "messageText": "경로 설정",
+        }
+
+    if delete_block_id:
+        delete_item = {
+            "title": "🗑️ 삭제",
+            "description": "등록된 출퇴근 경로를 삭제합니다",
+            "action": "block",
+            "blockId": delete_block_id,
+        }
+    else:
+        delete_item = {
+            "title": "🗑️ 삭제",
+            "description": "등록된 출퇴근 경로를 삭제합니다",
+            "action": "message",
+            "messageText": "경로 삭제",
+        }
+
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "listCard": {
+                        "header": {"title": "🚍 출퇴근 경로 관리"},
+                        "items": [setup_item, delete_item],
+                    }
+                }
+            ]
+        },
+    }
+
+
+@router.post("/route-setting/delete")
+async def delete_route_setting(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db),
+):
+    """
+    이동경로 삭제 처리 (카카오톡 Skill Block)
+    - 사용자의 departure_*, arrival_* 필드를 NULL로 초기화
+    """
+    try:
+        logger.info(f"🔍 /route-setting/delete 요청: {request}")
+
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                },
+            }
+
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        result = UserService.delete_user_route(user_id, db)
+
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "🗑️ 출퇴근 경로가 삭제되었습니다.\n다시 등록하려면 [🚗 출퇴근 경로 등록하기]를 눌러주세요."}}]
+                },
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "경로 삭제에 실패했습니다.")}}]
+                },
+            }
+
+    except Exception:
+        logger.exception("이동경로 삭제 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            },
+        }
+
+
 @router.post("/save_user_info")
 async def save_user_info(request: dict, background_tasks: BackgroundTasks):
     """
