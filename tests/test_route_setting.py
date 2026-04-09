@@ -57,7 +57,7 @@ class TestRouteSettingSelectionUI:
         assert "listCard" in output
 
         list_card = output["listCard"]
-        assert "출퇴근 경로" in list_card["header"]["title"]
+        assert "이동 경로" in list_card["header"]["title"]
 
         items = list_card["items"]
         assert len(items) == 2

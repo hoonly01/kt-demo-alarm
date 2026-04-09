@@ -86,7 +86,7 @@ async def check_user_route_events(
                             "text": (
                                 "✅ 좋은 소식입니다!\n\n"
                                 "등록하신 경로에 예정된 집회가 없습니다.\n"
-                                "안전한 출퇴근 되세요! 😊"
+                                "안전한 이동 되세요! 😊"
                             )
                         }
                     }
@@ -108,7 +108,7 @@ async def check_user_route_events(
     message_text = (
         f"⚠️ 경로상에 {len(result.events_found)}개의 집회가 감지되었습니다:\n\n"
         + "\n\n".join(event_messages)
-        + "\n\n출퇴근 시 우회 경로를 고려해주세요."
+        + "\n\n우회 경로를 고려해주세요."
     )
 
     return {
