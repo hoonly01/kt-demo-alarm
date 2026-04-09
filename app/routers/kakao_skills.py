@@ -160,7 +160,7 @@ async def check_user_route_events(
                             "text": (
                                 "✅ 좋은 소식입니다!\n\n"
                                 "등록하신 경로에 예정된 집회가 없습니다.\n"
-                                "안전한 출퇴근 되세요! 😊"
+                                "안전한 이동 되세요! 😊"
                             )
                         }
                     }
@@ -182,7 +182,7 @@ async def check_user_route_events(
     message_text = (
         f"⚠️ 경로상에 {len(result.events_found)}개의 집회가 감지되었습니다:\n\n"
         + "\n\n".join(event_messages)
-        + "\n\n출퇴근 시 우회 경로를 고려해주세요."
+        + "\n\n우회 경로를 고려해주세요."
     )
 
     return {
@@ -228,14 +228,14 @@ async def get_route_setting_selection(request: dict):
     if delete_block_id:
         delete_item = {
             "title": "🗑️ 삭제",
-            "description": "등록된 출퇴근 경로를 삭제합니다",
+            "description": "등록된 이동 경로를 삭제합니다",
             "action": "block",
             "blockId": delete_block_id,
         }
     else:
         delete_item = {
             "title": "🗑️ 삭제",
-            "description": "등록된 출퇴근 경로를 삭제합니다",
+            "description": "등록된 이동 경로를 삭제합니다",
             "action": "message",
             "messageText": "경로 삭제",
         }
@@ -246,7 +246,7 @@ async def get_route_setting_selection(request: dict):
             "outputs": [
                 {
                     "listCard": {
-                        "header": {"title": "🚍 출퇴근 경로 관리"},
+                        "header": {"title": "🚍 이동 경로 관리"},
                         "items": [setup_item, delete_item],
                     }
                 }
@@ -290,7 +290,7 @@ async def delete_route_setting(
             return {
                 "version": "2.0",
                 "template": {
-                    "outputs": [{"simpleText": {"text": "🗑️ 출퇴근 경로가 삭제되었습니다.\n다시 등록하려면 [🚗 출퇴근 경로 등록하기]를 눌러주세요."}}]
+                    "outputs": [{"simpleText": {"text": "🗑️ 이동 경로가 삭제되었습니다.\n다시 등록하려면 [🚗 이동 경로 등록하기]를 눌러주세요."}}]
                 },
             }
         else:
@@ -392,7 +392,7 @@ async def save_user_info(request: dict):
                                 f"📍 도착지: {arrival_info['name']} ({arrival_info['address']})\n\n"
                                 "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
                                 "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                                "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                                "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
                             )
                         }
                     }
@@ -718,14 +718,14 @@ async def get_alarm_setting_selection(
         items = [
             {
                 "title": "🔔 알람 켜기",
-                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "description": "매일 아침 이동 경로 집회 알림을 받습니다",
                 "action": "block",
                 "blockId": save_block_id,
                 "extra": {"alarm_status": "on"},
             },
             {
                 "title": "🔕 알람 끄기",
-                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "description": "이동 경로 집회 알림을 받지 않습니다",
                 "action": "block",
                 "blockId": save_block_id,
                 "extra": {"alarm_status": "off"},
@@ -735,13 +735,13 @@ async def get_alarm_setting_selection(
         items = [
             {
                 "title": "🔔 알람 켜기",
-                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "description": "매일 아침 이동 경로 집회 알림을 받습니다",
                 "action": "message",
                 "messageText": "알림 켜기",
             },
             {
                 "title": "🔕 알람 끄기",
-                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "description": "이동 경로 집회 알림을 받지 않습니다",
                 "action": "message",
                 "messageText": "알림 끄기",
             },
@@ -824,9 +824,9 @@ async def save_alarm_setting(
 
         if result["success"]:
             if is_alarm_on:
-                msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+                msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
             else:
-                msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+                msg = "🔕 매일 아침 알림이 꺼졌습니다.\n이동 경로 집회 알림이 더 이상 발송되지 않습니다."
 
             return {
                 "version": "2.0",

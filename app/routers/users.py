@@ -144,7 +144,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
                             f"📍 도착지: {arrival}\n\n"
                             "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
                             "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
                         )
                     }
                 }
@@ -298,10 +298,10 @@ async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db))
         
         if alarm_status_str == 'on':
             is_alarm_on = True
-            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
         elif alarm_status_str == 'off':
             is_alarm_on = False
-            msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+            msg = "🔕 매일 아침 알림이 꺼졌습니다.\이동 경로 집회 알림이 더 이상 발송되지 않습니다."
         else:
             return {
                 "version": "2.0",
