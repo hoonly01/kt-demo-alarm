@@ -260,9 +260,16 @@ class EventService:
         Returns:
             Dict: 처리 결과
         """
+        from app.services.alarm_status_service import AlarmStatusService
+
         logger.info("=== 정기 집회 확인 시작 ===")
 
+        task_id = None
+        db = None
         try:
+            task_id = AlarmStatusService.create_alarm_task(alarm_type="scheduled", total_recipients=0)
+            AlarmStatusService.update_alarm_task_status(task_id, "processing")
+
             # 데이터베이스 연결
             db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
 
@@ -296,7 +303,7 @@ class EventService:
                 if result.events_found:
                     # 해당 사용자에게 전달될 정확한 이벤트 집합을 키로 사용
                     event_key = tuple(sorted(event.id for event in result.events_found))
-                    
+
                     if event_key not in grouped_users:
                         grouped_users[event_key] = {
                             "user_ids": [],
@@ -314,10 +321,16 @@ class EventService:
                                 for event in result.events_found
                             ]
                         }
-                    
+
                     grouped_users[event_key]["user_ids"].append(plusfriend_key)
 
+            # 실제 발송 대상 수(집회가 경로에 걸린 사용자) 기록
+            actual_recipients = sum(len(g["user_ids"]) for g in grouped_users.values())
+            AlarmStatusService.update_alarm_task_status(task_id, "processing", total_recipients=actual_recipients)
+
             # Event API로 일괄 전송
+            total_success = 0
+            total_fail = 0
             for event_key, group_data in grouped_users.items():
                 user_ids = group_data["user_ids"]
                 events_data = group_data["events_data"]
@@ -325,30 +338,49 @@ class EventService:
                 logger.info(f"📢 수신 대상 {len(user_ids)}명에게 공통 이벤트({len(events_data)}건) 알림 전송")
 
                 # Event API 호출 (type=plusfriendUserKey)
-                await NotificationService.send_bulk_alert(
+                send_result = await NotificationService.send_bulk_alert(
                     user_ids=user_ids,
                     events_data=events_data,
                     id_type="plusfriendUserKey"  # ← 타입 명시!
                 )
 
-                total_notifications += len(user_ids)
+                if not send_result.get("success", True):
+                    total_fail += len(user_ids)
+                else:
+                    total_success += send_result.get("total_sent", 0)
+                    total_fail += send_result.get("total_failed", 0)
 
-            db.close()
+            final_status = "completed" if total_fail == 0 else "partial"
+            AlarmStatusService.update_alarm_task_status(
+                task_id, final_status,
+                successful_sends=total_success,
+                failed_sends=total_fail,
+            )
 
-            logger.info(f"=== 정기 집회 확인 완료: {total_notifications}명에게 알림 전송 ===")
+            logger.info(
+                f"=== 정기 집회 확인 완료: 대상 {actual_recipients}명, 성공 {total_success}명, 실패 {total_fail}명 ==="
+            )
 
             return {
                 "success": True,
+                "task_id": task_id,
                 "total_users": len(users),
-                "notifications_sent": total_notifications
+                "notifications_sent": total_success
             }
 
         except Exception as e:
             logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
+            if task_id:
+                AlarmStatusService.update_alarm_task_status(task_id, "failed", error_messages=[str(e)])
             return {
                 "success": False,
+                "task_id": task_id,
                 "error": str(e)
             }
+
+        finally:
+            if db is not None:
+                db.close()
 
     @staticmethod
     def get_upcoming_events(
