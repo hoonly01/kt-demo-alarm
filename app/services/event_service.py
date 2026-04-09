@@ -264,10 +264,12 @@ class EventService:
 
         logger.info("=== 정기 집회 확인 시작 ===")
 
-        task_id = AlarmStatusService.create_alarm_task(alarm_type="scheduled", total_recipients=0)
-        AlarmStatusService.update_alarm_task_status(task_id, "processing")
-
+        task_id = None
+        db = None
         try:
+            task_id = AlarmStatusService.create_alarm_task(alarm_type="scheduled", total_recipients=0)
+            AlarmStatusService.update_alarm_task_status(task_id, "processing")
+
             # 데이터베이스 연결
             db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
 
@@ -289,6 +291,9 @@ class EventService:
             total_notifications = 0
 
             logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
+
+            # 실제 수신 대상 수 기록
+            AlarmStatusService.update_alarm_task_status(task_id, "processing", total_recipients=len(users))
 
             # 이벤트 결과가 정확히 일치하는 사용자끼리 그룹화
             grouped_users = {}
@@ -342,8 +347,6 @@ class EventService:
                 total_success += send_result.get("total_sent", 0)
                 total_fail += send_result.get("total_failed", 0)
 
-            db.close()
-
             final_status = "completed" if total_fail == 0 else "partial"
             AlarmStatusService.update_alarm_task_status(
                 task_id, final_status,
@@ -362,12 +365,17 @@ class EventService:
 
         except Exception as e:
             logger.error(f"정기 집회 확인 중 오류 발생: {str(e)}")
-            AlarmStatusService.update_alarm_task_status(task_id, "failed", error_messages=[str(e)])
+            if task_id:
+                AlarmStatusService.update_alarm_task_status(task_id, "failed", error_messages=[str(e)])
             return {
                 "success": False,
                 "task_id": task_id,
                 "error": str(e)
             }
+
+        finally:
+            if db is not None:
+                db.close()
 
     @staticmethod
     def get_upcoming_events(
