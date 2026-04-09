@@ -293,28 +293,21 @@ class UserService:
         """
         try:
             cursor = db.cursor()
-            # 1. plusfriend_user_key로 우선 업데이트 시도
-            cursor.execute('''
+            clear_sql = '''
                 UPDATE users SET
                     departure_name = NULL, departure_address = NULL,
                     departure_x = NULL, departure_y = NULL,
                     arrival_name = NULL, arrival_address = NULL,
                     arrival_x = NULL, arrival_y = NULL,
                     route_updated_at = ?
-                WHERE plusfriend_user_key = ?
-            ''', (datetime.now(), user_id))
+                WHERE {} = ?
+            '''
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute(clear_sql.format("plusfriend_user_key"), (datetime.now(), user_id))
 
             # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
             if cursor.rowcount == 0:
-                cursor.execute('''
-                    UPDATE users SET
-                        departure_name = NULL, departure_address = NULL,
-                        departure_x = NULL, departure_y = NULL,
-                        arrival_name = NULL, arrival_address = NULL,
-                        arrival_x = NULL, arrival_y = NULL,
-                        route_updated_at = ?
-                    WHERE bot_user_key = ?
-                ''', (datetime.now(), user_id))
+                cursor.execute(clear_sql.format("bot_user_key"), (datetime.now(), user_id))
 
             if cursor.rowcount == 0:
                 logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
@@ -325,8 +318,8 @@ class UserService:
             return {"success": True}
 
         except Exception as e:
-            logger.error(f"경로 삭제 실패: {str(e)}")
-            return {"success": False, "error": str(e)}
+            logger.exception("경로 삭제 DB 처리 실패")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
     @staticmethod
     async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
