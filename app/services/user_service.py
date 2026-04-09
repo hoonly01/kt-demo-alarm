@@ -283,6 +283,39 @@ class UserService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
+    def delete_user_route(user_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 경로 정보 삭제 (route 관련 필드를 NULL로 초기화)
+
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key)
+            db: 데이터베이스 연결
+        """
+        try:
+            cursor = db.cursor()
+            cursor.execute('''
+                UPDATE users SET
+                    departure_name = NULL, departure_address = NULL,
+                    departure_x = NULL, departure_y = NULL,
+                    arrival_name = NULL, arrival_address = NULL,
+                    arrival_x = NULL, arrival_y = NULL,
+                    route_updated_at = ?
+                WHERE plusfriend_user_key = ?
+            ''', (datetime.now(), user_id))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            logger.info(f"경로 삭제 완료 - 사용자: {user_id}")
+            return {"success": True}
+
+        except Exception as e:
+            logger.error(f"경로 삭제 실패: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
     async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자의 marked_bus(자주 타는 버스)만 업데이트
