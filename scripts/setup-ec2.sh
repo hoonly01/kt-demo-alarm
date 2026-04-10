@@ -41,19 +41,27 @@ sudo mkdir -p /opt/kt-demo-alarm/{data,logs,topis_cache,topis_attachments}
 sudo chown -R "$USER":"$USER" /opt/kt-demo-alarm
 
 echo "=== [5/5] Nginx 설정 및 HTTPS 인증서 발급 ==="
-# 레포에서 nginx.conf 복사 (이 스크립트가 레포 루트에서 실행되는 경우)
-if [[ -f "nginx/nginx.conf" ]]; then
-  sudo cp nginx/nginx.conf /etc/nginx/sites-available/kt-demo-alarm
-  sudo sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /etc/nginx/sites-available/kt-demo-alarm
-  sudo ln -sf /etc/nginx/sites-available/kt-demo-alarm /etc/nginx/sites-enabled/kt-demo-alarm
-  sudo rm -f /etc/nginx/sites-enabled/default
-fi
-
+# Step 1: HTTP 전용 임시 설정으로 nginx 시작 (certbot HTTP 챌린지용)
+sudo tee /etc/nginx/sites-available/kt-demo-alarm > /dev/null <<NGINX_CONF
+server {
+    listen 80;
+    server_name $DOMAIN;
+}
+NGINX_CONF
+sudo ln -sf /etc/nginx/sites-available/kt-demo-alarm /etc/nginx/sites-enabled/kt-demo-alarm
+sudo rm -f /etc/nginx/sites-enabled/default
 sudo systemctl enable nginx
 sudo systemctl start nginx
 
-# Let's Encrypt 인증서 발급 (도메인 A레코드가 이 서버를 가리켜야 함)
+# Step 2: certbot이 HTTP 챌린지로 인증서 발급 후 nginx 설정을 HTTPS로 자동 수정
 sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL"
+
+# Step 3: 레포의 nginx.conf(리버스 프록시 포함)로 교체하고 도메인 치환 후 reload
+if [[ -f "nginx/nginx.conf" ]]; then
+  sudo cp nginx/nginx.conf /etc/nginx/sites-available/kt-demo-alarm
+  sudo sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /etc/nginx/sites-available/kt-demo-alarm
+  sudo nginx -t && sudo systemctl reload nginx
+fi
 
 echo ""
 echo "✅ 설정 완료!"
