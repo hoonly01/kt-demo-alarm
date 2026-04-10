@@ -265,13 +265,9 @@ async def trigger_test_alarm_for_user(
         
         # helper for background task that requires DB connection
         async def _run_route_check_for_user(uid: str):
-            import sqlite3
-            from app.database.connection import DATABASE_PATH
-            db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-            try:
+            from app.database.connection import get_db_connection
+            with get_db_connection() as db:
                 await EventService.check_route_events(user_id=uid, auto_notify=True, db=db)
-            finally:
-                db.close()
                 
         task = asyncio.create_task(_run_route_check_for_user(user_id))
         _background_tasks[task_key] = task

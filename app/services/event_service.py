@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.utils.geo_utils import haversine_distance, get_route_coordinates, is_event_near_route_accurate, is_point_near_route
-from app.database.connection import DATABASE_PATH
+from app.database.connection import get_db_connection
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -267,64 +267,62 @@ class EventService:
         logger.info("=== 정기 집회 확인 시작 ===")
 
         task_id = None
-        db = None
         try:
             task_id = AlarmStatusService.create_alarm_task(alarm_type="scheduled", total_recipients=0)
             AlarmStatusService.update_alarm_task_status(task_id, "processing")
 
-            # 데이터베이스 연결
-            db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+            with get_db_connection() as db:
+                # 활성 사용자 조회 (plusfriend_user_key 필수!)
+                cursor = db.cursor()
+                cursor.execute('''
+                    SELECT plusfriend_user_key, departure_name, arrival_name
+                    FROM users
+                    WHERE active = 1
+                      AND is_alarm_on = 1
+                      AND plusfriend_user_key IS NOT NULL
+                      AND departure_x IS NOT NULL
+                      AND departure_y IS NOT NULL
+                      AND arrival_x IS NOT NULL
+                      AND arrival_y IS NOT NULL
+                ''')
 
-            # 활성 사용자 조회 (plusfriend_user_key 필수!)
-            cursor = db.cursor()
-            cursor.execute('''
-                SELECT plusfriend_user_key, departure_name, arrival_name
-                FROM users
-                WHERE active = 1
-                  AND is_alarm_on = 1
-                  AND plusfriend_user_key IS NOT NULL
-                  AND departure_x IS NOT NULL
-                  AND departure_y IS NOT NULL
-                  AND arrival_x IS NOT NULL
-                  AND arrival_y IS NOT NULL
-            ''')
+                users = cursor.fetchall()
 
-            users = cursor.fetchall()
-            total_notifications = 0
+                logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
 
-            logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
+                # 이벤트 결과가 정확히 일치하는 사용자끼리 그룹화
+                grouped_users = {}
+                for user_row in users:
+                    plusfriend_key = user_row["plusfriend_user_key"]
+                    departure = user_row["departure_name"]
+                    arrival = user_row["arrival_name"]
 
-            # 이벤트 결과가 정확히 일치하는 사용자끼리 그룹화
-            grouped_users = {}
-            for user_row in users:
-                plusfriend_key, departure, arrival = user_row
+                    # 경로 확인
+                    result = await EventService.check_route_events(plusfriend_key, auto_notify=False, db=db)
 
-                # 경로 확인
-                result = await EventService.check_route_events(plusfriend_key, auto_notify=False, db=db)
+                    if result.events_found:
+                        # 해당 사용자에게 전달될 정확한 이벤트 집합을 키로 사용
+                        event_key = tuple(sorted(event.id for event in result.events_found))
 
-                if result.events_found:
-                    # 해당 사용자에게 전달될 정확한 이벤트 집합을 키로 사용
-                    event_key = tuple(sorted(event.id for event in result.events_found))
+                        if event_key not in grouped_users:
+                            grouped_users[event_key] = {
+                                "user_ids": [],
+                                "events_data": [
+                                    {
+                                        "id": event.id,
+                                        "title": event.title,
+                                        "location": event.location_name,
+                                        "latitude": event.latitude,
+                                        "longitude": event.longitude,
+                                        "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
+                                        "category": event.category,
+                                        "severity_level": event.severity_level
+                                    }
+                                    for event in result.events_found
+                                ]
+                            }
 
-                    if event_key not in grouped_users:
-                        grouped_users[event_key] = {
-                            "user_ids": [],
-                            "events_data": [
-                                {
-                                    "id": event.id,
-                                    "title": event.title,
-                                    "location": event.location_name,
-                                    "latitude": event.latitude,
-                                    "longitude": event.longitude,
-                                    "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
-                                    "category": event.category,
-                                    "severity_level": event.severity_level
-                                }
-                                for event in result.events_found
-                            ]
-                        }
-
-                    grouped_users[event_key]["user_ids"].append(plusfriend_key)
+                        grouped_users[event_key]["user_ids"].append(plusfriend_key)
 
             # 실제 발송 대상 수(집회가 경로에 걸린 사용자) 기록
             actual_recipients = sum(len(g["user_ids"]) for g in grouped_users.values())
@@ -379,10 +377,6 @@ class EventService:
                 "task_id": task_id,
                 "error": str(e)
             }
-
-        finally:
-            if db is not None:
-                db.close()
 
     @staticmethod
     def get_upcoming_events(
