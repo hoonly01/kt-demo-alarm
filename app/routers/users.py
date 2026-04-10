@@ -43,8 +43,8 @@ async def get_users(
                 "language": row["language"]
             }
 
-            # 경로 정보가 있는 경우만 포함
-            if all([row["departure_x"], row["departure_y"], row["arrival_x"], row["arrival_y"]]):
+            # 경로 정보가 있는 경우만 포함 (0.0 좌표를 유효값으로 처리)
+            if all(row[k] is not None for k in ("departure_x", "departure_y", "arrival_x", "arrival_y")):
                 user_data["route_info"] = {
                     "departure": {
                         "name": row["departure_name"],
