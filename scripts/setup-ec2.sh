@@ -38,7 +38,8 @@ fi
 
 echo "=== [2/5] 기본 패키지 + Nginx + Certbot 설치 ==="
 if [[ "$OS_ID" == "amzn" ]]; then
-  sudo dnf install -y curl git vim jq nginx certbot python3-certbot-nginx
+  # curl-minimal이 이미 설치되어 있어 curl 풀버전과 충돌하므로 제외
+  sudo dnf install -y git vim jq nginx certbot python3-certbot-nginx
 else
   sudo apt-get install -y curl git vim jq nginx certbot python3-certbot-nginx
 fi
