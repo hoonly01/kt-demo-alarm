@@ -125,10 +125,10 @@ jobs:
           DEBUG=false
           LOG_LEVEL=INFO
           DATABASE_PATH=/app/data/kt_demo_alarm.db
-          CRAWLING_HOUR=8
-          CRAWLING_MINUTE=30
-          ROUTE_CHECK_HOUR=7
-          ROUTE_CHECK_MINUTE=0
+          CRAWLING_HOUR=7
+          CRAWLING_MINUTE=00
+          ROUTE_CHECK_HOUR=8
+          ROUTE_CHECK_MINUTE=00
           ADMIN_USER=${ADMIN_USER}
           ADMIN_PASS=${ADMIN_PASS}
           EOF
