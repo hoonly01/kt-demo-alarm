@@ -577,13 +577,13 @@ class UserService:
                 return None
                 
             return {
-                "is_alarm_on": bool(row[0]),
-                "favorite_zone": row[1],
-                "marked_bus": row[2],
-                "departure_name": row[3],
-                "arrival_name": row[4],
-                "plusfriend_user_key": row[5],
-                "bot_user_key": row[6]
+                "is_alarm_on": bool(row["is_alarm_on"]),
+                "favorite_zone": row["favorite_zone"],
+                "marked_bus": row["marked_bus"],
+                "departure_name": row["departure_name"],
+                "arrival_name": row["arrival_name"],
+                "plusfriend_user_key": row["plusfriend_user_key"],
+                "bot_user_key": row["bot_user_key"]
             }
             
         except Exception as e:

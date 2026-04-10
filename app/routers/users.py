@@ -33,32 +33,32 @@ async def get_users(
         users = []
         for row in cursor.fetchall():
             user_data = {
-                "bot_user_key": row[0],
-                "first_message_at": row[1],
-                "last_message_at": row[2],
-                "message_count": row[3],
-                "location": row[4],
-                "active": bool(row[5]),
-                "marked_bus": row[15],
-                "language": row[16]
+                "bot_user_key": row["bot_user_key"],
+                "first_message_at": row["first_message_at"],
+                "last_message_at": row["last_message_at"],
+                "message_count": row["message_count"],
+                "location": row["location"],
+                "active": bool(row["active"]),
+                "marked_bus": row["marked_bus"],
+                "language": row["language"]
             }
-            
+
             # 경로 정보가 있는 경우만 포함
-            if all([row[8], row[9], row[12], row[13]]):  # departure_x, y, arrival_x, y
+            if all([row["departure_x"], row["departure_y"], row["arrival_x"], row["arrival_y"]]):
                 user_data["route_info"] = {
                     "departure": {
-                        "name": row[6],
-                        "address": row[7],
-                        "x": row[8],
-                        "y": row[9]
+                        "name": row["departure_name"],
+                        "address": row["departure_address"],
+                        "x": row["departure_x"],
+                        "y": row["departure_y"]
                     },
                     "arrival": {
-                        "name": row[10],
-                        "address": row[11],
-                        "x": row[12],
-                        "y": row[13]
+                        "name": row["arrival_name"],
+                        "address": row["arrival_address"],
+                        "x": row["arrival_x"],
+                        "y": row["arrival_y"]
                     },
-                    "updated_at": row[14]
+                    "updated_at": row["route_updated_at"]
                 }
             else:
                 user_data["route_info"] = None
