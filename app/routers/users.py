@@ -351,23 +351,21 @@ async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db))
 
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
     """백그라운드 작업: 경로 정보만 업데이트"""
-    from app.database.connection import DATABASE_PATH
+    from app.database.connection import get_db_connection
     try:
-        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        # [REFACTOR] 경로 정보만 업데이트
-        result = await UserService.update_user_route(
-            user_id=user_id, 
-            departure=departure, 
-            arrival=arrival, 
-            db=conn
-        )
-        conn.close()
-        
+        with get_db_connection() as conn:
+            result = await UserService.update_user_route(
+                user_id=user_id,
+                departure=departure,
+                arrival=arrival,
+                db=conn
+            )
+
         if result["success"]:
             logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
         else:
             logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
-            
+
     except Exception as e:
         logger.error(f"경로 정보 저장 중 오류: {str(e)}")
 
