@@ -143,12 +143,20 @@ jobs:
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
+          # PUBLIC_DOMAIN 설정 확인
+          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
+            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
+            exit 1
+          fi
+
           # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
-          sed "s/DOMAIN_PLACEHOLDER/${PUBLIC_DOMAIN}/g" nginx/nginx.conf > /tmp/nginx-rendered.conf
+          # /tmp 대신 예측 불가능한 임시 파일 사용
+          NGINX_TMP=$(mktemp)
+          sed "s|DOMAIN_PLACEHOLDER|${PUBLIC_DOMAIN}|g" nginx/nginx.conf > "${NGINX_TMP}"
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            /tmp/nginx-rendered.conf \
-            ${EC2_USERNAME}@${EC2_HOST}:/tmp/nginx-kt-demo-alarm.conf
-          rm -f /tmp/nginx-rendered.conf
+            "${NGINX_TMP}" \
+            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/nginx-pending.conf
+          rm -f "${NGINX_TMP}"
 
           # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
@@ -186,10 +194,10 @@ jobs:
             docker compose up -d --no-build
 
             # Nginx 설정 업데이트 (변경된 경우)
-            if [ -f /tmp/nginx-kt-demo-alarm.conf ]; then
-              sudo cp /tmp/nginx-kt-demo-alarm.conf /etc/nginx/sites-available/kt-demo-alarm
+            if [ -f /opt/kt-demo-alarm/nginx-pending.conf ]; then
+              sudo cp /opt/kt-demo-alarm/nginx-pending.conf /etc/nginx/conf.d/kt-demo-alarm.conf
               sudo nginx -t && sudo systemctl reload nginx
-              rm -f /tmp/nginx-kt-demo-alarm.conf
+              rm -f /opt/kt-demo-alarm/nginx-pending.conf
             fi
 
             # Ensure appuser owns data and attachments inside container (don't fail deploy if container isn't ready yet)
