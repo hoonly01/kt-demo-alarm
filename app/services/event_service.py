@@ -109,24 +109,24 @@ class EventService:
             events = []
             for row in cursor.fetchall():
                 events.append(EventResponse(
-                    id=row[0],
-                    title=row[1],
-                    description=row[2],
-                    location_name=row[3],
-                    location_address=row[4],
-                    latitude=row[5],
-                    longitude=row[6],
-                    start_date=row[7],
-                    end_date=row[8],
-                    category=row[9],
-                    severity_level=row[10],
-                    status=row[11],
-                    created_at=row[12],
-                    updated_at=row[13]
+                    id=row["id"],
+                    title=row["title"],
+                    description=row["description"],
+                    location_name=row["location_name"],
+                    location_address=row["location_address"],
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
+                    start_date=row["start_date"],
+                    end_date=row["end_date"],
+                    category=row["category"],
+                    severity_level=row["severity_level"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"]
                 ))
-            
+
             return events
-            
+
         except Exception as e:
             logger.error(f"집회 목록 조회 실패: {str(e)}")
             return []
@@ -159,15 +159,15 @@ class EventService:
             ''', (user_id, user_id))
             
             user_row = cursor.fetchone()
-            if not user_row or not all([user_row[2], user_row[3], user_row[6], user_row[7]]):
+            if not user_row or not all([user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]]):
                 return RouteEventCheck(
                     user_id=user_id,
                     events_found=[],
                     route_info={},
                     total_events=0
                 )
-            
-            dep_lon, dep_lat, arr_lon, arr_lat = user_row[2], user_row[3], user_row[6], user_row[7]
+
+            dep_lon, dep_lat, arr_lon, arr_lat = user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]
             
             # 활성 집회 목록 조회
             cursor.execute('''
@@ -184,35 +184,37 @@ class EventService:
             
             # 각 집회가 실제 경로 근처에 있는지 정확히 확인
             for row in events_rows:
-                event_lat, event_lon = row[5], row[6]
-                
+                event_lat, event_lon = row["latitude"], row["longitude"]
+
                 # 정확한 경로 기반 검사 (Mobility API 사용)
                 if route_coordinates and is_event_near_route_accurate(route_coordinates, event_lat, event_lon):
                     route_events.append(EventResponse(
-                        id=row[0], title=row[1], description=row[2], location_name=row[3],
-                        location_address=row[4], latitude=row[5], longitude=row[6],
-                        start_date=datetime.fromisoformat(row[7]),
-                        end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                        category=row[9], severity_level=row[10], status=row[11],
-                        created_at=datetime.fromisoformat(row[12]),
-                        updated_at=datetime.fromisoformat(row[13])
+                        id=row["id"], title=row["title"], description=row["description"],
+                        location_name=row["location_name"], location_address=row["location_address"],
+                        latitude=row["latitude"], longitude=row["longitude"],
+                        start_date=datetime.fromisoformat(row["start_date"]),
+                        end_date=datetime.fromisoformat(row["end_date"]) if row["end_date"] else None,
+                        category=row["category"], severity_level=row["severity_level"], status=row["status"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"])
                     ))
                 # Mobility API 실패 시 기존 직선 방식으로 폴백
                 elif not route_coordinates and is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
                     logger.warning("Mobility API 실패로 직선 거리 방식 사용")
                     route_events.append(EventResponse(
-                        id=row[0], title=row[1], description=row[2], location_name=row[3],
-                        location_address=row[4], latitude=row[5], longitude=row[6],
-                        start_date=datetime.fromisoformat(row[7]),
-                        end_date=datetime.fromisoformat(row[8]) if row[8] else None,
-                        category=row[9], severity_level=row[10], status=row[11],
-                        created_at=datetime.fromisoformat(row[12]),
-                        updated_at=datetime.fromisoformat(row[13])
+                        id=row["id"], title=row["title"], description=row["description"],
+                        location_name=row["location_name"], location_address=row["location_address"],
+                        latitude=row["latitude"], longitude=row["longitude"],
+                        start_date=datetime.fromisoformat(row["start_date"]),
+                        end_date=datetime.fromisoformat(row["end_date"]) if row["end_date"] else None,
+                        category=row["category"], severity_level=row["severity_level"], status=row["status"],
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"])
                     ))
             
             route_info = {
-                "departure": {"name": user_row[0], "address": user_row[1], "lat": dep_lat, "lon": dep_lon},
-                "arrival": {"name": user_row[4], "address": user_row[5], "lat": arr_lat, "lon": arr_lon}
+                "departure": {"name": user_row["departure_name"], "address": user_row["departure_address"], "lat": dep_lat, "lon": dep_lon},
+                "arrival": {"name": user_row["arrival_name"], "address": user_row["arrival_address"], "lat": arr_lat, "lon": arr_lon}
             }
             
             # 자동 알림 전송 (옵션)
@@ -422,24 +424,24 @@ class EventService:
             events = []
             for row in cursor.fetchall():
                 events.append(EventResponse(
-                    id=row[0],
-                    title=row[1],
-                    description=row[2],
-                    location_name=row[3],
-                    location_address=row[4],
-                    latitude=row[5],
-                    longitude=row[6],
-                    start_date=row[7],
-                    end_date=row[8],
-                    category=row[9],
-                    severity_level=row[10],
-                    status=row[11],
-                    created_at=row[12],
-                    updated_at=row[13]
+                    id=row["id"],
+                    title=row["title"],
+                    description=row["description"],
+                    location_name=row["location_name"],
+                    location_address=row["location_address"],
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
+                    start_date=row["start_date"],
+                    end_date=row["end_date"],
+                    category=row["category"],
+                    severity_level=row["severity_level"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"]
                 ))
-            
+
             return events
-            
+
         except Exception as e:
             logger.error(f"다가오는 집회 목록 조회 실패: {str(e)}")
             return []
@@ -476,24 +478,24 @@ class EventService:
             events = []
             for row in cursor.fetchall():
                 events.append(EventResponse(
-                    id=row[0],
-                    title=row[1],
-                    description=row[2],
-                    location_name=row[3],
-                    location_address=row[4],
-                    latitude=row[5],
-                    longitude=row[6],
-                    start_date=row[7],
-                    end_date=row[8],
-                    category=row[9],
-                    severity_level=row[10],
-                    status=row[11],
-                    created_at=row[12],
-                    updated_at=row[13]
+                    id=row["id"],
+                    title=row["title"],
+                    description=row["description"],
+                    location_name=row["location_name"],
+                    location_address=row["location_address"],
+                    latitude=row["latitude"],
+                    longitude=row["longitude"],
+                    start_date=row["start_date"],
+                    end_date=row["end_date"],
+                    category=row["category"],
+                    severity_level=row["severity_level"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"]
                 ))
-            
+
             return events
-            
+
         except Exception as e:
             logger.error(f"오늘 집회 목록 조회 실패: {str(e)}")
             return []

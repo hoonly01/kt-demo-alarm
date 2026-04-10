@@ -102,11 +102,11 @@ async def send_alarm_to_all(
         cursor = db.cursor()
         # plusfriend_user_key 우선 조회
         cursor.execute("SELECT plusfriend_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NOT NULL")
-        plusfriend_users = list(dict.fromkeys([row[0] for row in cursor.fetchall()]))
-        
+        plusfriend_users = list(dict.fromkeys([row["plusfriend_user_key"] for row in cursor.fetchall()]))
+
         # bot_user_key만 있는 사용자
         cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NULL AND bot_user_key IS NOT NULL")
-        bot_users = list(dict.fromkeys([row[0] for row in cursor.fetchall()]))
+        bot_users = list(dict.fromkeys([row["bot_user_key"] for row in cursor.fetchall()]))
         
         if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="활성 사용자가 없습니다")
