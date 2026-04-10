@@ -138,7 +138,7 @@ def split_places(s: str) -> List[str]:
     """장소 텍스트를 개별 장소로 분리"""
     s = clean_text(s).replace("\n", " / ")
     s = re.sub(r'[①-⑨]', ' / ', s)
-    parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內)\s*", s)
+    parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內|※)\s*", s)
 
     filtered = []
     for p in parts:
