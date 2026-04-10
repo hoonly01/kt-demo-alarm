@@ -142,6 +142,11 @@ jobs:
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
+          # Nginx 설정 업데이트 (nginx.conf가 변경된 경우 자동 반영)
+          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
+            nginx/nginx.conf \
+            ${EC2_USERNAME}@${EC2_HOST}:/tmp/nginx-kt-demo-alarm.conf
+
           # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
             ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
@@ -176,6 +181,13 @@ jobs:
 
             # Start without building (important!)
             docker compose up -d --no-build
+
+            # Nginx 설정 업데이트 (변경된 경우)
+            if [ -f /tmp/nginx-kt-demo-alarm.conf ]; then
+              sudo cp /tmp/nginx-kt-demo-alarm.conf /etc/nginx/sites-available/kt-demo-alarm
+              sudo nginx -t && sudo systemctl reload nginx
+              rm -f /tmp/nginx-kt-demo-alarm.conf
+            fi
 
             # Ensure appuser owns data and attachments inside container (don't fail deploy if container isn't ready yet)
             docker compose exec -u root kt-demo-alarm \
@@ -212,14 +224,14 @@ jobs:
           set -euo pipefail
           echo "Checking public health endpoint..."
           for i in {1..10}; do
-            if curl -fsS http://${EC2_HOST}:8000/ > /dev/null 2>&1; then
-              echo "✅ Application is reachable: http://${EC2_HOST}:8000/"
+            if curl -fsS https://${EC2_HOST}/ > /dev/null 2>&1; then
+              echo "✅ Application is reachable: https://${EC2_HOST}/"
               exit 0
             fi
             echo "Attempt $i: waiting..."
             sleep 5
           done
-          echo "❌ Public health check failed (verify SG inbound 8000 + app binds 0.0.0.0)"
+          echo "❌ Public health check failed (verify Nginx + SSL + SG inbound 443)"
           exit 1
 
       - name: Notify deployment status
