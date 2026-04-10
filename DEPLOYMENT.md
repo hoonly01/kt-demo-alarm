@@ -9,7 +9,7 @@
 
 ## 배포 아키텍처
 
-```
+```text
 인터넷 (HTTPS:443)
   ↓
 Nginx (EC2 호스트, Let's Encrypt SSL)
@@ -23,9 +23,10 @@ SQLite Volume (호스트 마운트)
 
 | Secret | 설명 |
 |--------|------|
-| `EC2_HOST` | EC2 Public IP 또는 도메인 |
+| `EC2_HOST` | EC2 SSH 접속용 IP 또는 호스트명 |
 | `EC2_USERNAME` | EC2 사용자 (보통 `ubuntu`) |
 | `EC2_SSH_KEY` | EC2 SSH 프라이빗 키 (pem 전체 내용) |
+| `PUBLIC_DOMAIN` | HTTPS 엔드포인트용 도메인 (TLS 인증서와 일치해야 함) |
 | `KAKAO_REST_API_KEY` | 카카오 REST API 키 |
 | `BOT_ID` | 카카오톡 봇 ID |
 | `API_KEY` | 내부 API 보안 키 |
@@ -67,7 +68,7 @@ bash setup-ec2.sh <도메인> <이메일>
 2. Docker 이미지 빌드
 3. EC2로 이미지 + `nginx.conf` + `docker-compose.yml` 전송
 4. Docker 컨테이너 교체 및 Nginx 설정 reload
-5. `https://<EC2_HOST>/` 헬스체크
+5. `https://<PUBLIC_DOMAIN>/` 헬스체크
 
 ## 수동 재시작
 
