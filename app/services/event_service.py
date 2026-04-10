@@ -159,7 +159,7 @@ class EventService:
             ''', (user_id, user_id))
             
             user_row = cursor.fetchone()
-            if not user_row or not all([user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]]):
+            if not user_row or any(user_row[k] is None for k in ("departure_x", "departure_y", "arrival_x", "arrival_y")):
                 return RouteEventCheck(
                     user_id=user_id,
                     events_found=[],
