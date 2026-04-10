@@ -91,6 +91,7 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           BOT_ID: ${{ secrets.BOT_ID }}
           API_KEY: ${{ secrets.API_KEY }}
@@ -142,10 +143,12 @@ jobs:
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
 
-          # Nginx 설정 업데이트 (nginx.conf가 변경된 경우 자동 반영)
+          # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
+          sed "s/DOMAIN_PLACEHOLDER/${PUBLIC_DOMAIN}/g" nginx/nginx.conf > /tmp/nginx-rendered.conf
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            nginx/nginx.conf \
+            /tmp/nginx-rendered.conf \
             ${EC2_USERNAME}@${EC2_HOST}:/tmp/nginx-kt-demo-alarm.conf
+          rm -f /tmp/nginx-rendered.conf
 
           # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
           ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
@@ -219,19 +222,19 @@ jobs:
 
       - name: Verify deployment (public)
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
         run: |
           set -euo pipefail
           echo "Checking public health endpoint..."
           for i in {1..10}; do
-            if curl -fsS https://${EC2_HOST}/ > /dev/null 2>&1; then
-              echo "✅ Application is reachable: https://${EC2_HOST}/"
+            if curl -fsS https://${PUBLIC_DOMAIN}/ > /dev/null 2>&1; then
+              echo "✅ Application is reachable: https://${PUBLIC_DOMAIN}/"
               exit 0
             fi
             echo "Attempt $i: waiting..."
             sleep 5
           done
-          echo "❌ Public health check failed (verify Nginx + SSL + SG inbound 443)"
+          echo "❌ Public health check failed (verify Nginx + SSL + SG inbound 443 for ${PUBLIC_DOMAIN})"
           exit 1
 
       - name: Notify deployment status
