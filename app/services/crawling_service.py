@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-집회 데이터 크롤링 서비스
+집회 데이터 크롤링 서비스 - 버전 2: pdfplumber 폴백 지원
 
 SMPA(서울경찰청) + SPATIC 양쪽 소스에서 집회 정보를 수집하고,
 Kakao API로 지오코딩을 수행하여 events 테이블에 동기화합니다.
+
+pdfminer 실패 시 자동으로 pdfplumber로 폴백합니다.
 """
 
 import re
@@ -22,13 +24,20 @@ from app.config.settings import settings
 import requests
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
+from pdfminer.layout import LAParams
 from playwright.sync_api import sync_playwright
+
+# pdfplumber는 선택적 (폴백용)
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
 
 # 로거 설정
 logger = logging.getLogger(__name__)
 
 # ------------------------------- 상수/설정 ------------------------------------
-# 프로젝트 루트 기준 data 폴더 설정 (개선: 절대 경로로 통일)
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 if not pathlib.Path(DATABASE_PATH).is_absolute():
     DB_ABS_PATH = BASE_DIR / DATABASE_PATH
@@ -54,15 +63,15 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 }
 
-# 서울 중심 좌표 (지오코딩 실패 시 폴백용)
+# 서울 중심 좌표
 DEFAULT_SEOUL_LAT = 37.5665
 DEFAULT_SEOUL_LON = 126.9780
 
 # Kakao API 설정
 KAKAO_API_TIMEOUT = 5
-KAKAO_RATE_LIMIT_DELAY = 0.1  # API Rate Limit 방지용
+KAKAO_RATE_LIMIT_DELAY = 0.1
 MAX_GEOCODING_RETRIES = 2
-GEOCODING_RETRY_DELAY = 1  # 재시도 간 대기 시간
+GEOCODING_RETRY_DELAY = 1
 
 # PDF 처리
 PDF_EXTRACTION_TIMEOUT = 30
@@ -70,7 +79,7 @@ PDF_EXTRACTION_TIMEOUT = 30
 
 # --------------------------- 공통 유틸리티 ---------------------------
 def ensure_dir(p: pathlib.Path) -> None:
-    """디렉토리 생성 (없으면 생성, 있으면 무시)"""
+    """디렉토리 생성"""
     try:
         p.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -102,11 +111,34 @@ def time_range_to_tuple(s: str) -> Optional[Tuple[str, str]]:
     return None
 
 
+def is_valid_place(place: str) -> bool:
+    """유효한 장소인지 검증"""
+    place = place.strip()
+    
+    if len(place) < 2 or place.isdigit():
+        return False
+    
+    invalid_keywords = [
+        '차로', '교차로', '신호', '근처', '부근', '방향', '방면',
+        '도로', '거리', '간선', '구간', '지점', '일대',
+        '내부', '외부', '입구', '출구', '개수'
+    ]
+    
+    if re.match(r'\d+개\w+', place):
+        return False
+    
+    for keyword in invalid_keywords:
+        if keyword in place:
+            return False
+    
+    return True
+
+
 def split_places(s: str) -> List[str]:
     """장소 텍스트를 개별 장소로 분리"""
     s = clean_text(s).replace("\n", " / ")
     s = re.sub(r'[①-⑨]', ' / ', s)
-    parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內|※)\s*", s)
+    parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內)\s*", s)
 
     filtered = []
     for p in parts:
@@ -114,9 +146,60 @@ def split_places(s: str) -> List[str]:
         if len(p) <= 1:
             continue
         p = re.sub(r'^[內内]$', '', p)
-        if p:
+        p = re.sub(r'\d+개\w+[)）]?', '', p)
+        if p and not p.isdigit():
             filtered.append(p)
+    
     return list(OrderedDict.fromkeys(filtered))
+
+
+# --------------------------- PDF 추출 유틸리티 ---------------------------
+def extract_pdf_text_with_fallback(pdf_path: pathlib.Path) -> Optional[str]:
+    """
+    PDF에서 텍스트 추출 (pdfminer → pdfplumber 폴백)
+    
+    Returns:
+        추출된 텍스트 또는 None
+    """
+    # ✅ 진단 1: PDFminer 시도
+    try:
+        logger.info(f"[PDF] pdfminer 텍스트 추출 시도...")
+        laparams = LAParams(line_margin=0.2, word_margin=0.1)
+        text = extract_text(str(pdf_path), laparams=laparams)
+        
+        if text and len(text.strip()) >= 10:
+            logger.info(f"[PDF] pdfminer 추출 성공 (길이: {len(text)} 글자)")
+            logger.debug(f"[PDF] 샘플 (첫 300글자):\n{text[:300]}")
+            return text
+        else:
+            logger.warning(f"[PDF] pdfminer 추출 결과 불충분 (길이: {len(text) if text else 0})")
+    except Exception as e:
+        logger.warning(f"[PDF] pdfminer 추출 실패: {e}")
+    
+    # ✅ 진단 2: pdfplumber 폴백
+    if PDFPLUMBER_AVAILABLE:
+        try:
+            logger.info(f"[PDF] pdfplumber 텍스트 추출 시도 (폴백)...")
+            text = ""
+            with pdfplumber.open(pdf_path) as pdf:
+                for page_idx, page in enumerate(pdf.pages):
+                    page_text = page.extract_text()
+                    if page_text:
+                        logger.debug(f"[PDF] 페이지 {page_idx + 1}: {len(page_text)} 글자 추출")
+                        text += page_text + "\n"
+            
+            if text and len(text.strip()) >= 10:
+                logger.info(f"[PDF] pdfplumber 추출 성공 (길이: {len(text)} 글자)")
+                logger.debug(f"[PDF] 샘플 (첫 300글자):\n{text[:300]}")
+                return text
+            else:
+                logger.warning(f"[PDF] pdfplumber 추출 결과 불충분 (길이: {len(text)})")
+        except Exception as e:
+            logger.warning(f"[PDF] pdfplumber 추출 실패: {e}")
+    else:
+        logger.warning("[PDF] pdfplumber가 설치되지 않았습니다. pip install pdfplumber를 실행하세요.")
+    
+    return None
 
 
 # --------------------------- 지오코딩 (Kakao) ---------------------------
@@ -134,20 +217,15 @@ PLACE_NAME_REPLACE_MAP = {
 def normalize_place_name_for_kakao(place: str) -> str:
     """Kakao API 쿼리용 장소명 정규화"""
     t = place.strip()
-    # 구분자 제거
     t = t.replace("구)", "").replace("(구)", "")
-    # 거리 정보 제거
     t = re.sub(r'\d+(\.\d+)?km', '', t)
-    # 괄호 내용 제거
     t = re.sub(r'[<\[\(].*?[>\]\)]', '', t)
     t = re.sub(r'\(.*$', '', t)
 
-    # 지명 치환
     for old, new in PLACE_NAME_REPLACE_MAP.items():
         if old in t and new not in t:
             t = t.replace(old, new)
 
-    # 방향 지시어 제거
     noise_regex = r'(동측|서측|남측|북측|동쪽|서쪽|남쪽|북쪽|건너편|맞은편|옆|방향|방면|부근|일대|진입로|사거리|교차로|출구|입구|인근|앞|뒤|안|밖)'
     t = re.sub(noise_regex, ' ', t)
     t = re.sub(r'[^\w\s\d]', ' ', t)
@@ -161,19 +239,7 @@ def _kakao_api_call(
     api_key: str,
     attempt: int = 1
 ) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    """
-    Kakao API 호출 (단일 URL)
-    
-    Args:
-        session: requests.Session 인스턴스
-        url: API 엔드포인트 (keyword 또는 address)
-        query: 검색 쿼리
-        api_key: Kakao REST API Key
-        attempt: 현재 재시도 횟수
-    
-    Returns:
-        (위도, 경도, 주소) 또는 (None, None, None)
-    """
+    """Kakao API 호출"""
     headers = {"Authorization": f"KakaoAK {api_key}"}
     try:
         r = session.get(
@@ -187,7 +253,6 @@ def _kakao_api_call(
             docs = r.json().get("documents", [])
             if docs:
                 addr = docs[0].get('address_name', '')
-                # 서울 지역 필터링
                 if "서울" in addr[:5]:
                     lat = float(docs[0]['y'])
                     lon = float(docs[0]['x'])
@@ -212,20 +277,9 @@ def _kakao_api_call(
 
 
 def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    """
-    Kakao API를 사용한 다중 쿼리 지오코딩
-    
-    Args:
-        session: requests.Session 인스턴스
-        place: 장소명
-        api_key: Kakao REST API Key
-    
-    Returns:
-        (위도, 경도, 주소) 또는 (None, None, None)
-    """
-    # API Key 검증
+    """Kakao API를 사용한 다중 쿼리 지오코딩"""
     if not api_key or not api_key.strip():
-        logger.error("[Kakao] API Key가 설정되지 않았습니다. .env 파일에 KAKAO_REST_API_KEY를 설정하세요.")
+        logger.error("[Kakao] API Key가 설정되지 않았습니다.")
         return None, None, None
     
     clean_name = normalize_place_name_for_kakao(place)
@@ -233,42 +287,34 @@ def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[
         logger.debug(f"[Kakao] 정규화 실패 (너무 짧음): {place}")
         return None, None, None
 
-    # 다중 쿼리 시도 순서
     queries = [
         f"서울 {clean_name}",
         clean_name,
     ]
     
-    # 토큰으로 분리된 경우 추가 쿼리 생성
     tokens = clean_name.split()
     if len(tokens) > 1:
         queries.append(f"서울 {tokens[-1]}")
         queries.append(f"서울 {tokens[0]}")
     
-    # 역 키워드 추가
     if not clean_name.endswith("역") and len(clean_name) <= 5:
         queries.append(f"서울 {clean_name}역")
 
-    # 중복 제거
     queries = list(OrderedDict.fromkeys(queries))
-
     logger.debug(f"[Kakao] 지오코딩 시도: {place} - 쿼리: {queries[:2]}")
 
     for query in queries:
         if len(query.replace("서울", "").strip()) < 2:
             continue
         
-        # Keyword API 먼저 시도
         lat, lon, addr = _kakao_api_call(session, KAKAO_KEYWORD_URL, query, api_key)
         if lat and lon:
             return lat, lon, addr
         
-        # Address API 시도
         lat, lon, addr = _kakao_api_call(session, KAKAO_ADDRESS_URL, query, api_key)
         if lat and lon:
             return lat, lon, addr
         
-        # Rate Limit 방지
         time.sleep(KAKAO_RATE_LIMIT_DELAY)
 
     logger.warning(f"[Kakao] 지오코딩 실패: {place}")
@@ -277,29 +323,22 @@ def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[
 
 # --------------------------- 서비스 클래스 ---------------------------
 class CrawlingService:
-    """
-    main.py의 스케줄러에서 호출되는 크롤링 서비스 클래스
-    
-    SMPA(서울경찰청) + SPATIC(경찰청 집회 시스템) 양쪽에서
-    집회 정보를 크롤링하여 데이터베이스에 동기화합니다.
-    """
+    """크롤링 서비스 클래스"""
 
     @classmethod
     async def crawl_and_sync_events(cls) -> Dict:
-        """
-        스케줄러 진입점
-        
-        라우터와의 호환성을 위해 비동기로 작동하며,
-        내부의 블로킹 I/O는 별도 스레드에서 실행됩니다.
-        """
+        """스케줄러 진입점"""
         logger.info("🔄 [스케줄러] 집회 정보 크롤링을 시작합니다.")
-        
-        # 데이터 디렉토리 생성
         ensure_dir(DATA_DIR)
         
-        # 환경변수 검증
+        # pdfplumber 사용 가능 상태 로그
+        if PDFPLUMBER_AVAILABLE:
+            logger.info("ℹ️ [PDF] pdfplumber가 사용 가능합니다 (폴백 지원)")
+        else:
+            logger.warning("⚠️ [PDF] pdfplumber가 설치되지 않았습니다. pdfminer 추출 실패 시 처리 불가능")
+        
         if not settings.KAKAO_REST_API_KEY or not settings.KAKAO_REST_API_KEY.strip():
-            error_msg = "❌ KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요."
+            error_msg = "❌ KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다."
             logger.error(error_msg)
             return {
                 "success": False,
@@ -307,17 +346,15 @@ class CrawlingService:
                 "total_crawled": 0
             }
         
-        # 동기 파이프라인 실행
         return await asyncio.to_thread(cls._run_sync_pipeline)
 
     @classmethod
     def _run_sync_pipeline(cls) -> Dict:
-        """실제 크롤링이 진행되는 동기 파이프라인 메서드"""
+        """실제 크롤링이 진행되는 동기 파이프라인"""
         with requests.Session() as session:
             session.headers.update(HEADERS)
 
             try:
-                # 1. 사이트별 데이터 수집
                 logger.info("📡 [수집] SPATIC 및 SMPA에서 데이터 수집 중...")
                 spatic_data = cls._scrape_spatic(session)
                 smpa_data = cls._scrape_smpa(session)
@@ -335,7 +372,6 @@ class CrawlingService:
 
                 logger.info(f"📍 [정제] 총 {len(data)}건의 데이터 지오코딩 진행 중...")
 
-                # 2. 데이터 정제 및 좌표 변환
                 final_list = []
                 geocoding_failed_count = 0
                 
@@ -352,7 +388,6 @@ class CrawlingService:
                             "지번주소": addr
                         })
                         
-                        # 지오코딩 실패 시 기본 좌표 사용
                         if lat is None or lon is None:
                             geocoding_failed_count += 1
                             logger.warning(
@@ -362,15 +397,13 @@ class CrawlingService:
                             new_row["경도"] = DEFAULT_SEOUL_LON
                         
                         final_list.append(new_row)
-                        # API Rate Limit 방지용 딜레이
                         time.sleep(KAKAO_RATE_LIMIT_DELAY)
 
                 if geocoding_failed_count > 0:
                     logger.warning(
-                        f"⚠️  [정제] {geocoding_failed_count}건의 장소 지오코딩 실패 - 기본 좌표로 대체됨"
+                        f"⚠️  [정제] {geocoding_failed_count}건의 장소 지오코딩 실패"
                     )
 
-                # 3. 데이터베이스 저장
                 inserted_count = cls._sync_to_database(final_list)
                 
                 logger.info(f"✅ [완료] 크롤링 및 DB 저장이 완료되었습니다. (저장된 데이터: {inserted_count}건)")
@@ -385,7 +418,7 @@ class CrawlingService:
                 }
 
             except Exception as e:
-                logger.error(f"❌ [크롤링 실패] 크롤링 파이프라인 실행 중 오류 발생: {e}", exc_info=True)
+                logger.error(f"❌ [크롤링 실패] {e}", exc_info=True)
                 return {
                     "success": False,
                     "error": str(e),
@@ -394,11 +427,7 @@ class CrawlingService:
 
     @classmethod
     def _scrape_spatic(cls, session: requests.Session) -> List[Dict]:
-        """
-        SPATIC(경찰청 집회 안내 시스템)에서 집회 데이터 수집
-        
-        Playwright를 사용하여 JavaScript 렌더링 페이지에서 데이터를 추출합니다.
-        """
+        """SPATIC에서 집회 데이터 수집"""
         logger.info("[SPATIC] Playwright 목록 수집 시작...")
         posts = []
         
@@ -460,13 +489,11 @@ class CrawlingService:
             logger.error(f"[SPATIC] Playwright 크롤링 실패: {e}")
             return []
 
-        # 중복 제거
         unique_posts = list({p["number"]: p for p in posts}.values())
         if not unique_posts:
             logger.info("[SPATIC] 집회 관련 게시글을 찾을 수 없습니다.")
             return []
 
-        # 가장 최신 게시물 선택
         unique_posts.sort(key=lambda x: int(x['number']), reverse=True)
         target = unique_posts[0]
 
@@ -520,7 +547,10 @@ class CrawlingService:
         """
         SMPA(서울경찰청)에서 집회 데이터 수집
         
-        오늘 날짜의 PDF 문서를 다운로드하여 집회 정보를 추출합니다.
+        ✅ pdfplumber 폴백 지원 버전:
+        - pdfminer 실패 시 자동으로 pdfplumber 시도
+        - 각 추출 단계별 진단 로깅
+        - 유효한 장소만 필터링
         """
         logger.info("[SMPA] PDF 수집 시작...")
         today_str = datetime.now().strftime("%y%m%d")
@@ -561,7 +591,7 @@ class CrawlingService:
                 logger.warning("[SMPA] PDF 다운로드 링크를 찾을 수 없습니다.")
                 return []
 
-            # 4. PDF 다운로드 (개선: 컨텍스트 매니저 올바르게 사용)
+            # 4. PDF 다운로드
             logger.info(f"[SMPA] PDF 다운로드 시작: {pdf_url}")
             pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
             
@@ -571,16 +601,20 @@ class CrawlingService:
             with open(pdf_path, "wb") as f:
                 f.write(r.content)
             
-            logger.info(f"[SMPA] PDF 다운로드 완료: {pdf_path}")
+            logger.info(f"[SMPA] PDF 다운로드 완료: {pdf_path} (크기: {pdf_path.stat().st_size} bytes)")
 
-            # 5. PDF 텍스트 추출
+            # 5. PDF 텍스트 추출 (폴백 지원)
             try:
-                text = extract_text(pdf_path)
+                text = extract_pdf_text_with_fallback(pdf_path)
+                
+                if not text:
+                    logger.error("[SMPA] PDF에서 텍스트를 추출하지 못했습니다.")
+                    return []
+                    
             except Exception as e:
                 logger.error(f"[SMPA] PDF 텍스트 추출 실패: {e}")
                 return []
             finally:
-                # PDF 파일 삭제 (정보 추출 후 즉시 삭제)
                 try:
                     pdf_path.unlink(missing_ok=True)
                 except Exception as e:
@@ -590,8 +624,15 @@ class CrawlingService:
             pattern = re.compile(r'(?P<start>\d{1,2}:\d{2})\s*~\s*(?P<end>\d{1,2}:\d{2})')
             matches = list(pattern.finditer(text))
             
+            logger.info(f"[SMPA] 정규식 매칭 결과: {len(matches)}개 시간대 발견")
+            if matches:
+                for idx, m in enumerate(matches[:3]):
+                    logger.debug(f"[SMPA] Match {idx}: '{m.group()}' at position {m.start()}-{m.end()}")
+            
             if not matches:
                 logger.warning("[SMPA] PDF에서 시간 정보를 찾을 수 없습니다.")
+                logger.debug(f"[SMPA] 검색 패턴: {pattern.pattern}")
+                logger.debug(f"[SMPA] 텍스트 샘플 (처음 1000글자): {text[:1000]}")
                 return []
             
             now = datetime.now()
@@ -599,7 +640,22 @@ class CrawlingService:
             
             for i, m in enumerate(matches):
                 chunk = text[m.end():(matches[i + 1].start() if i + 1 < len(matches) else len(text))].strip()
+                
+                logger.debug(f"[SMPA] Chunk {i} (길이: {len(chunk)}): {chunk[:100]}...")
+                
                 head_m = re.search(r'(\d+(?:,\d{3})*)\s*명', chunk)
+                place_text = chunk[:head_m.start()] if head_m else chunk
+                places = split_places(place_text)
+                
+                # 유효한 장소로 필터링
+                valid_places = [p for p in places if is_valid_place(p)]
+                
+                logger.debug(f"[SMPA] 청크 {i} - 원본 장소: {places}")
+                logger.debug(f"[SMPA] 청크 {i} - 필터링된 장소: {valid_places}")
+                
+                if not valid_places:
+                    logger.debug(f"[SMPA] {i}번째 청크에서 유효한 장소 추출 실패")
+                    continue
                 
                 rows.append({
                     "년": now.strftime("%Y"),
@@ -607,7 +663,7 @@ class CrawlingService:
                     "일": now.strftime("%d"),
                     "start_time": m.group('start'),
                     "end_time": m.group('end'),
-                    "장소_원본": split_places(chunk[:head_m.start()] if head_m else chunk),
+                    "장소_원본": valid_places,
                     "인원": head_m.group(1).replace(',', '') if head_m else "",
                     "비고": "SMPA",
                     "title": None,
@@ -623,15 +679,7 @@ class CrawlingService:
 
     @classmethod
     def _sync_to_database(cls, data_list: List[Dict]) -> int:
-        """
-        크롤링된 집회 정보를 데이터베이스에 저장
-        
-        Args:
-            data_list: 크롤링된 데이터 리스트
-        
-        Returns:
-            실제 삽입된 행의 개수
-        """
+        """크롤링된 집회 정보를 데이터베이스에 저장"""
         insert_data = []
         skipped_count = 0
         
@@ -656,13 +704,11 @@ class CrawlingService:
             lon = r.get('경도')
             addr = r.get('지번주소')
 
-            # 필수 값 검증
             if start_date is None:
                 skipped_count += 1
                 logger.warning(f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, 시작시간: {st_time}")
                 continue
 
-            # NOT NULL 제약이 있는 lat, lon도 이미 폴백 처리됨
             insert_data.append((
                 title,
                 description,
@@ -688,17 +734,14 @@ class CrawlingService:
             with get_db_connection() as conn:
                 cur = conn.cursor()
                 
-                # 중복 방지 인덱스 생성 시도
                 try:
                     cur.execute("""
                         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_location_date
                         ON events(location_name, start_date)
                     """)
                 except Exception:
-                    # 이미 존재하거나 기존 데이터 충돌 시 무시
                     pass
                 
-                # 데이터 삽입
                 cur.executemany("""
                     INSERT OR IGNORE INTO events (
                         title, description, location_name, location_address,
@@ -707,7 +750,6 @@ class CrawlingService:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, insert_data)
                 
-                # 실제 삽입된 행의 개수 확인
                 inserted_count = cur.rowcount
                 conn.commit()
                 
