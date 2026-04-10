@@ -84,11 +84,17 @@ sudo systemctl start nginx
 sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL"
 
 # Step 3: 레포의 nginx.conf(리버스 프록시 포함)로 교체하고 도메인 치환 후 reload
-if [[ -f "$HOME/nginx/nginx.conf" ]]; then
-  sudo cp "$HOME/nginx/nginx.conf" /etc/nginx/conf.d/kt-demo-alarm.conf
-  sudo sed -i "s/DOMAIN_PLACEHOLDER/$DOMAIN/g" /etc/nginx/conf.d/kt-demo-alarm.conf
-  sudo nginx -t && sudo systemctl reload nginx
+if [[ ! -f "$HOME/nginx/nginx.conf" ]]; then
+  echo "❌ nginx/nginx.conf 파일을 찾을 수 없습니다."
+  echo "   스크립트 실행 전에 nginx/ 디렉토리를 EC2로 전송했는지 확인하세요:"
+  echo "   scp -r nginx ec2-user@<EC2_IP>:~/"
+  exit 1
 fi
+# 도메인에 sed 구분자(|)와 충돌하는 문자가 없도록 이스케이프
+ESCAPED_DOMAIN="${DOMAIN//\//\\/}"
+sudo cp "$HOME/nginx/nginx.conf" /etc/nginx/conf.d/kt-demo-alarm.conf
+sudo sed -i "s|DOMAIN_PLACEHOLDER|${ESCAPED_DOMAIN}|g" /etc/nginx/conf.d/kt-demo-alarm.conf
+sudo nginx -t && sudo systemctl reload nginx
 
 echo ""
 echo "✅ 설정 완료!"
