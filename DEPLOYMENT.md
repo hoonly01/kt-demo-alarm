@@ -2,7 +2,7 @@
 
 ## 전제 조건
 
-- AWS EC2 (Ubuntu 22.04+)
+- AWS EC2 (Ubuntu 22.04+ 또는 Amazon Linux 2023)
 - EC2 보안그룹: 22 (SSH), 80 (HTTP), 443 (HTTPS) 오픈
 - 공인 도메인 (A레코드 → EC2 Public IP)
 - GitHub Secrets 설정 완료
@@ -24,7 +24,7 @@ SQLite Volume (호스트 마운트)
 | Secret | 설명 |
 |--------|------|
 | `EC2_HOST` | EC2 SSH 접속용 IP 또는 호스트명 |
-| `EC2_USERNAME` | EC2 사용자 (보통 `ubuntu`) |
+| `EC2_USERNAME` | EC2 사용자 (Ubuntu: `ubuntu`, Amazon Linux 2023: `ec2-user`) |
 | `EC2_SSH_KEY` | EC2 SSH 프라이빗 키 (pem 전체 내용) |
 | `PUBLIC_DOMAIN` | HTTPS 엔드포인트용 도메인 (TLS 인증서와 일치해야 함) |
 | `KAKAO_REST_API_KEY` | 카카오 REST API 키 |
