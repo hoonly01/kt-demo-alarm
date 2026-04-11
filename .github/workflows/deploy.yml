@@ -114,28 +114,28 @@ jobs:
           echo "$EC2_SSH_KEY" > ec2-key.pem
           chmod 600 ec2-key.pem
 
-          # Create .env on runner (so secrets are guaranteed to be present)
-          cat > .env <<EOF
-          KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}
-          BOT_ID=${BOT_ID}
-          API_KEY=${API_KEY}
-          GEMINI_API_KEY=${GEMINI_API_KEY}
-          SEOUL_BUS_API_KEY=${SEOUL_BUS_API_KEY}
-          TMAP_APP_KEY=${TMAP_APP_KEY}
-          ALARM_SAVE_BLOCK_ID=${ALARM_SAVE_BLOCK_ID}
-          FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}
-          ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}
-          ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}
-          DEBUG=false
-          LOG_LEVEL=INFO
-          DATABASE_PATH=/app/data/kt_demo_alarm.db
-          CRAWLING_HOUR=7
-          CRAWLING_MINUTE=00
-          ROUTE_CHECK_HOUR=8
-          ROUTE_CHECK_MINUTE=00
-          ADMIN_USER=${ADMIN_USER}
-          ADMIN_PASS=${ADMIN_PASS}
-          EOF
+          # Create .env on runner (printf prevents shell injection from special chars in secret values)
+          printf '%s\n' \
+            "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" \
+            "BOT_ID=${BOT_ID}" \
+            "API_KEY=${API_KEY}" \
+            "GEMINI_API_KEY=${GEMINI_API_KEY}" \
+            "SEOUL_BUS_API_KEY=${SEOUL_BUS_API_KEY}" \
+            "TMAP_APP_KEY=${TMAP_APP_KEY}" \
+            "ALARM_SAVE_BLOCK_ID=${ALARM_SAVE_BLOCK_ID}" \
+            "FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}" \
+            "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
+            "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
+            "DEBUG=false" \
+            "LOG_LEVEL=INFO" \
+            "DATABASE_PATH=/app/data/kt_demo_alarm.db" \
+            "CRAWLING_HOUR=7" \
+            "CRAWLING_MINUTE=00" \
+            "ROUTE_CHECK_HOUR=8" \
+            "ROUTE_CHECK_MINUTE=00" \
+            "ADMIN_USER=${ADMIN_USER}" \
+            "ADMIN_PASS=${ADMIN_PASS}" \
+            > .env
 
           # Upload artifacts/config to EC2
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
@@ -190,8 +190,8 @@ jobs:
             gunzip -c /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz | docker load
             rm -f /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
 
-            # Protect env file
-            chmod 600 .env || true
+            # Protect env file (must succeed — failure means .env is readable by all users)
+            chmod 600 .env
 
             # Start without building (important!)
             docker compose up -d --no-build
