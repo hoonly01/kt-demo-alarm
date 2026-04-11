@@ -18,6 +18,12 @@ if [[ -z "$DOMAIN" || -z "$EMAIL" ]]; then
   exit 1
 fi
 
+# 간단한 FQDN 검증 (영문/숫자/하이픈 라벨 + 점)
+if ! [[ "$DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]]; then
+  echo "❌ 유효하지 않은 도메인 형식: $DOMAIN"
+  exit 1
+fi
+
 # OS 감지
 if [ -f /etc/os-release ]; then
   . /etc/os-release
@@ -64,16 +70,22 @@ sudo chown -R "$USER":"$USER" /opt/kt-demo-alarm
 
 echo "=== [5/5] Nginx 설정 및 HTTPS 인증서 발급 ==="
 # Step 1: HTTP 전용 임시 설정으로 nginx 시작 (certbot HTTP 챌린지용)
-sudo tee /etc/nginx/conf.d/kt-demo-alarm.conf > /dev/null <<NGINX_CONF
+# Amazon Linux 2023은 conf.d만 사용; Ubuntu는 sites-available → sites-enabled 구조
+if [[ "$OS_ID" == "amzn" ]]; then
+  NGINX_SITE_CONF="/etc/nginx/conf.d/kt-demo-alarm.conf"
+else
+  NGINX_SITE_CONF="/etc/nginx/sites-available/kt-demo-alarm"
+fi
+
+sudo tee "${NGINX_SITE_CONF}" > /dev/null <<NGINX_CONF
 server {
     listen 80;
     server_name $DOMAIN;
 }
 NGINX_CONF
 
-# Amazon Linux 2023은 sites-enabled 구조 없이 conf.d 사용
 if [[ "$OS_ID" != "amzn" ]]; then
-  sudo ln -sf /etc/nginx/conf.d/kt-demo-alarm.conf /etc/nginx/sites-enabled/kt-demo-alarm
+  sudo ln -sf /etc/nginx/sites-available/kt-demo-alarm /etc/nginx/sites-enabled/kt-demo-alarm
   sudo rm -f /etc/nginx/sites-enabled/default
 fi
 
@@ -87,13 +99,15 @@ sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL"
 if [[ ! -f "$HOME/nginx/nginx.conf" ]]; then
   echo "❌ nginx/nginx.conf 파일을 찾을 수 없습니다."
   echo "   스크립트 실행 전에 nginx/ 디렉토리를 EC2로 전송했는지 확인하세요:"
-  echo "   scp -r nginx ec2-user@<EC2_IP>:~/"
+  echo "   scp -r nginx ${USER}@<EC2_IP>:~/"
   exit 1
 fi
-# 도메인에 sed 구분자(|)와 충돌하는 문자가 없도록 이스케이프
-ESCAPED_DOMAIN="${DOMAIN//\//\\/}"
-sudo cp "$HOME/nginx/nginx.conf" /etc/nginx/conf.d/kt-demo-alarm.conf
-sudo sed -i "s|DOMAIN_PLACEHOLDER|${ESCAPED_DOMAIN}|g" /etc/nginx/conf.d/kt-demo-alarm.conf
+# sed replacement 안전 처리 (\, &, | 이스케이프)
+ESCAPED_DOMAIN="${DOMAIN//\\/\\\\}"
+ESCAPED_DOMAIN="${ESCAPED_DOMAIN//&/\\&}"
+ESCAPED_DOMAIN="${ESCAPED_DOMAIN//|/\\|}"
+sudo cp "$HOME/nginx/nginx.conf" "${NGINX_SITE_CONF}"
+sudo sed -i "s|DOMAIN_PLACEHOLDER|${ESCAPED_DOMAIN}|g" "${NGINX_SITE_CONF}"
 sudo nginx -t && sudo systemctl reload nginx
 
 echo ""
@@ -101,9 +115,9 @@ echo "✅ 설정 완료!"
 echo ""
 echo "다음 단계:"
 echo "  1. /opt/kt-demo-alarm/.env 파일 생성 (.env.example 참고)"
-echo "  2. GitHub Secrets의 EC2_USERNAME을 ec2-user로 확인"
+echo "  2. GitHub Secrets의 EC2_USERNAME을 ${USER}로 확인"
 echo "  3. GitHub main 브랜치 push로 자동 배포"
 echo "  4. 배포 확인: curl https://$DOMAIN/"
 echo ""
 echo "⚠️  docker 그룹 반영을 위해 SSH 재접속 필요:"
-echo "  exit → ssh ec2-user@$DOMAIN"
+echo "  exit → ssh ${USER}@<EC2_HOST_또는_IP>"
