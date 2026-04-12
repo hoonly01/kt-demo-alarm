@@ -6,9 +6,9 @@ from typing import Optional
 
 import httpx
 
-logger = logging.getLogger(__name__)
-KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
+from app.config.settings import settings
 
+logger = logging.getLogger(__name__)
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
@@ -106,6 +106,30 @@ def is_event_near_route_accurate(route_coordinates: list[tuple[float, float]],
     return False
 
 
+def parse_linestring(linestring: str) -> list[tuple[float, float]]:
+    """
+    TMAP linestring 문자열을 [(lat, lon), ...] 형태로 변환
+    예:
+    "126.97834,37.566467 126.9785,37.56643"
+    -> [(37.566467, 126.97834), (37.56643, 126.9785)]
+    """
+    coordinates = []
+
+    if not linestring:
+        return coordinates
+
+    for point in linestring.strip().split():
+        try:
+            lon_str, lat_str = point.split(",")
+            lon = float(lon_str)
+            lat = float(lat_str)
+            coordinates.append((lat, lon))
+        except ValueError:
+            continue
+
+    return coordinates
+
+
 async def get_location_info(query: str, client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
     """
     카카오 지도 API를 사용하여 검색어를 장소 정보로 변환
@@ -117,12 +141,12 @@ async def get_location_info(query: str, client: Optional[httpx.AsyncClient] = No
     Returns:
         dict: 장소 정보 (name, address, x, y) 또는 None
     """
-    if not KAKAO_REST_API_KEY:
+    if not settings.KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
         return None
         
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}"}
     params = {"query": query}
 
     try:
@@ -158,7 +182,104 @@ async def get_location_info(query: str, client: Optional[httpx.AsyncClient] = No
         return None
 
 
-async def get_route_coordinates(start_x: float, start_y: float, 
+async def get_route_coordinates_tmap_transit(
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    client: Optional[httpx.AsyncClient] = None
+) -> list[tuple[float, float]]:
+    """
+    TMAP 대중교통 API를 사용하여 실제 경로 좌표를 가져옴
+
+    Args:
+        start_x, start_y: 출발지 경도, 위도
+        end_x, end_y: 도착지 경도, 위도
+        client: 재사용할 HTTP 클라이언트 (Optional)
+
+    Returns:
+        list[tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
+    """
+
+    if not settings.TMAP_APP_KEY:
+        logger.error("TMAP_APP_KEY가 설정되지 않았습니다.")
+        return []
+
+    url = "https://apis.openapi.sk.com/transit/routes"
+    headers = {
+        "accept": "application/json",
+        "appKey": settings.TMAP_APP_KEY,
+        "content-type": "application/json",
+    }
+    payload = {
+        "startX": str(start_x),
+        "startY": str(start_y),
+        "endX": str(end_x),
+        "endY": str(end_y),
+        "count": 1,
+        "lang": 0,
+        "format": "json",
+    }
+
+    try:
+        if client:
+            response = await client.post(url, headers=headers, json=payload)
+        else:
+            async with httpx.AsyncClient(timeout=20.0) as new_client:
+                response = await new_client.post(url, headers=headers, json=payload)
+
+        response.raise_for_status()
+        data = response.json()
+
+        itineraries = data.get("metaData", {}).get("plan", {}).get("itineraries", [])
+        if not itineraries:
+            logger.warning("TMAP 대중교통 경로를 찾을 수 없습니다.")
+            return []
+
+        route = itineraries[0]
+        coordinates = []
+
+        for leg in route.get("legs", []):
+            mode = leg.get("mode")
+
+            # 1) 버스/지하철 등 passShape.linestring 사용
+            pass_shape = leg.get("passShape", {})
+            if isinstance(pass_shape, dict):
+                linestring = pass_shape.get("linestring")
+                if linestring:
+                    coordinates.extend(parse_linestring(linestring))
+
+            # 2) 도보 구간은 steps[].linestring 사용
+            if mode == "WALK":
+                for step in leg.get("steps", []):
+                    linestring = step.get("linestring")
+                    if linestring:
+                        coordinates.extend(parse_linestring(linestring))
+
+        # 중복 제거
+        deduped = []
+        seen = set()
+        for lat, lon in coordinates:
+            key = (round(lat, 7), round(lon, 7))
+            if key not in seen:
+                seen.add(key)
+                deduped.append((lat, lon))
+
+        logger.info(f"TMAP 경로 좌표 {len(deduped)}개 추출됨")
+        return deduped
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"TMAP API HTTP 오류: {e.response.status_code} - {e.response.text}")
+        return []
+    except httpx.RequestError as e:
+        logger.error(f"TMAP API 요청 오류: {str(e)}")
+        return []
+    except Exception as e:
+        logger.error(f"TMAP 경로 좌표 조회 중 예기치 못한 오류 발생: {str(e)}")
+        return []
+
+
+async def get_route_coordinates_kakao(start_x: float, start_y: float, 
                               end_x: float, end_y: float,
                               client: Optional[httpx.AsyncClient] = None) -> list[tuple[float, float]]:
     """
@@ -172,12 +293,12 @@ async def get_route_coordinates(start_x: float, start_y: float,
     Returns:
         list[tuple[float, float]]: 경로상의 (위도, 경도) 좌표 리스트
     """
-    if not KAKAO_REST_API_KEY:
+    if not settings.KAKAO_REST_API_KEY:
         logger.error("KAKAO_REST_API_KEY가 설정되지 않았습니다.")
         return []
         
     url = "https://apis-navi.kakaomobility.com/v1/directions"
-    headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+    headers = {"Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}"}
     params = {
         "origin": f"{start_x},{start_y}",
         "destination": f"{end_x},{end_y}",
@@ -210,7 +331,7 @@ async def get_route_coordinates(start_x: float, start_y: float,
                             lat = vertexes[i + 1]  # 위도
                             coordinates.append((lat, lon))  # (위도, 경도) 순서로 반환
             
-            logger.info(f"경로 좌표 {len(coordinates)}개 추출됨")
+            logger.info(f"Kakao 경로 좌표 {len(coordinates)}개 추출됨")
             return coordinates
         else:
             logger.warning("경로를 찾을 수 없습니다.")
@@ -225,3 +346,26 @@ async def get_route_coordinates(start_x: float, start_y: float,
     except Exception as e:
         logger.error(f"경로 좌표 조회 중 예기치 못한 오류 발생: {str(e)}")
         return []
+
+
+async def get_route_coordinates(
+    start_x: float,
+    start_y: float,
+    end_x: float,
+    end_y: float,
+    client: Optional[httpx.AsyncClient] = None
+) -> list[tuple[float, float]]:
+
+    # 기본은 TMAP 사용
+    coords = await get_route_coordinates_tmap_transit(
+        start_x, start_y, end_x, end_y, client
+    )
+
+    # TMAP 실패 시 Kakao fallback
+    if not coords:
+        logger.warning("TMAP 경로 조회 실패 → Kakao fallback 사용")
+        coords = await get_route_coordinates_kakao(
+            start_x, start_y, end_x, end_y, client
+        )
+
+    return coords

@@ -33,32 +33,32 @@ async def get_users(
         users = []
         for row in cursor.fetchall():
             user_data = {
-                "bot_user_key": row[0],
-                "first_message_at": row[1],
-                "last_message_at": row[2],
-                "message_count": row[3],
-                "location": row[4],
-                "active": bool(row[5]),
-                "marked_bus": row[15],
-                "language": row[16]
+                "bot_user_key": row["bot_user_key"],
+                "first_message_at": row["first_message_at"],
+                "last_message_at": row["last_message_at"],
+                "message_count": row["message_count"],
+                "location": row["location"],
+                "active": bool(row["active"]),
+                "marked_bus": row["marked_bus"],
+                "language": row["language"]
             }
-            
-            # 경로 정보가 있는 경우만 포함
-            if all([row[8], row[9], row[12], row[13]]):  # departure_x, y, arrival_x, y
+
+            # 경로 정보가 있는 경우만 포함 (0.0 좌표를 유효값으로 처리)
+            if all(row[k] is not None for k in ("departure_x", "departure_y", "arrival_x", "arrival_y")):
                 user_data["route_info"] = {
                     "departure": {
-                        "name": row[6],
-                        "address": row[7],
-                        "x": row[8],
-                        "y": row[9]
+                        "name": row["departure_name"],
+                        "address": row["departure_address"],
+                        "x": row["departure_x"],
+                        "y": row["departure_y"]
                     },
                     "arrival": {
-                        "name": row[10],
-                        "address": row[11],
-                        "x": row[12],
-                        "y": row[13]
+                        "name": row["arrival_name"],
+                        "address": row["arrival_address"],
+                        "x": row["arrival_x"],
+                        "y": row["arrival_y"]
                     },
-                    "updated_at": row[14]
+                    "updated_at": row["route_updated_at"]
                 }
             else:
                 user_data["route_info"] = None
@@ -144,7 +144,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
                             f"📍 도착지: {arrival}\n\n"
                             "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
                             "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
                         )
                     }
                 }
@@ -263,24 +263,215 @@ async def initial_setup(request: dict, db: sqlite3.Connection = Depends(get_db))
         }
 
 
+@router.post("/alarm-setting")
+async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db)):
+    """
+    사용자 알람 설정 (Skill Block 전용)
+    - 알람 on/off 기능
+    """
+    try:
+        logger.info(f"🔍 /users/alarm-setting 요청 body: {request}")
+
+        # Skill Block 형식 파싱
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        action = request.get('action', {})
+        params = action.get('params', {})
+
+        # ID 추출
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                }
+            }
+
+        # 파라미터 추출
+        alarm_status_str = params.get('alarm_status', '').lower()
+        
+        if alarm_status_str == 'on':
+            is_alarm_on = True
+            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+        elif alarm_status_str == 'off':
+            is_alarm_on = False
+            msg = "🔕 매일 아침 알림이 꺼졌습니다.\이동 경로 집회 알림이 더 이상 발송되지 않습니다."
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 알림 설정 값입니다 ('{alarm_status_str}'). 'on' 또는 'off'여야 합니다."}}]
+                }
+            }
+
+        logger.info(f"📝 알림 설정 변경: user_id={user_id}, status={alarm_status_str}")
+
+        # 통합된 사용자 동기화 로직 사용 (사용자가 없을 경우 대비)
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # 설정 업데이트
+        result = UserService.update_alarm_setting(user_id, is_alarm_on, db)
+
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": msg
+                            }
+                        }
+                    ]
+                }
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "알람 설정 업데이트에 실패했습니다.")}}]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("알람 설정 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            }
+        }
+
+
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
     """백그라운드 작업: 경로 정보만 업데이트"""
-    from app.database.connection import DATABASE_PATH
+    from app.database.connection import get_db_connection
     try:
-        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        # [REFACTOR] 경로 정보만 업데이트
-        result = await UserService.update_user_route(
-            user_id=user_id, 
-            departure=departure, 
-            arrival=arrival, 
-            db=conn
-        )
-        conn.close()
-        
+        with get_db_connection() as conn:
+            result = await UserService.update_user_route(
+                user_id=user_id,
+                departure=departure,
+                arrival=arrival,
+                db=conn
+            )
+
         if result["success"]:
             logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
         else:
             logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
-            
+
     except Exception as e:
         logger.error(f"경로 정보 저장 중 오류: {str(e)}")
+
+@router.post("/save_marked_bus")
+async def save_marked_bus_users(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db)
+):
+    """
+    사용자 marked_bus(자주 타는 버스) 저장 (Skill Block 전용)
+    - action.params.marked_bus 사용
+    """
+    logger.info(f"🔍 /users/save_marked_bus 요청 body: {request}")
+
+    bot_user_key = None
+    plusfriend_key = None
+
+    if 'userRequest' in request:
+        user_info = request['userRequest']['user']
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+    else:
+        bot_user_key = request.get('userId', 'test-user')
+        plusfriend_key = request.get('plusfriendUserKey')
+
+    user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+    if not user_id:
+        logger.warning("save_marked_bus 요청에서 사용자 식별 정보(bot_user_key/plusfriend_key)가 누락되었습니다.")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {"simpleText": {"text": "사용자 식별 정보를 찾을 수 없습니다.\n카카오톡에서 다시 시도해 주세요."}}
+                ]
+            }
+        }
+
+    marked_bus = request.get('action', {}).get('params', {}).get('marked_bus', '')
+    marked_bus = (marked_bus or "").strip()
+
+    if not marked_bus:
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {"simpleText": {"text": "🚌 버스 번호가 비어있어요. 예: 7016"}}
+                ]
+            }
+        }
+
+    try:
+        # 사용자 동기화
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        # 즉시 저장
+        result = await UserService.update_marked_bus(
+            user_id=user_id,
+            marked_bus=marked_bus,
+            db=db
+        )
+
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"✅ 자주 타는 버스가 등록되었습니다!\n"
+                                    f"🚌 {marked_bus}\n\n"
+                                    "🔄 변경하고 싶으면 다시 등록해 주세요."
+                                )
+                            }
+                        }
+                    ]
+                }
+            }
+        else:
+            logger.warning(f"marked_bus 저장 실패 - user_id: {user_id}, error: {result.get('error')}")
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": "버스 저장에 실패했습니다. 잠시 후 다시 시도해주세요."
+                            }
+                        }
+                    ]
+                }
+            }
+
+    except Exception as e:
+        logger.exception("save_marked_bus 처리 중 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                        }
+                    }
+                ]
+            }
+        }

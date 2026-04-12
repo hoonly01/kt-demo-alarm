@@ -12,6 +12,7 @@ DATABASE_PATH = settings.DATABASE_PATH
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수 (FastAPI 용)"""
     db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    db.row_factory = sqlite3.Row
     try:
         yield db
     finally:
@@ -22,6 +23,7 @@ def get_db():
 def get_db_connection():
     """컨텍스트 매니저를 사용한 DB 연결 (일반 함수용)"""
     conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
@@ -42,7 +44,7 @@ def init_db():
     # Alarm Tasks 테이블 생성 (알림 상태 추적용)
     cursor.execute(ALARM_TASKS_TABLE_SCHEMA)
 
-    # 컬럼 2개 추가 (이미 있으면 무시) - Kakao ID 통합
+    # 컬럼 추가 로직 (이미 있으면 Exception 발생하므로 try-except로 무시)
     try:
         cursor.execute("ALTER TABLE users ADD COLUMN open_id TEXT")
         cursor.execute("ALTER TABLE users ADD COLUMN plusfriend_user_key TEXT")
@@ -50,10 +52,22 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_plusfriend_key ON users(plusfriend_user_key)")
         logger.info("✅ open_id, plusfriend_user_key 컬럼 추가 완료")
     except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e):
-            logger.info("컬럼 이미 존재")
-        else:
-            raise
+        if "duplicate column name" not in str(e).lower():
+            logger.warning(f"컬럼 갱신 실패 (무시됨): {str(e)}")
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_alarm_on BOOLEAN DEFAULT TRUE")
+        logger.info("✅ is_alarm_on 컬럼 추가 완료")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            logger.warning(f"is_alarm_on 컬럼 갱신 실패 (무시됨): {str(e)}")
+
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN favorite_zone INTEGER")
+        logger.info("✅ favorite_zone 컬럼 추가 완료")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            logger.warning(f"favorite_zone 컬럼 갱신 실패 (무시됨): {str(e)}")
 
     conn.commit()
     conn.close()

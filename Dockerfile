@@ -5,6 +5,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
+    PATH=/app/.venv/bin:$PATH \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
@@ -25,12 +26,17 @@ COPY pyproject.toml uv.lock ./
 # Install Python dependencies (no dev, use frozen lock file)
 RUN uv sync --frozen --no-dev
 
+# Install Playwright browsers and dependencies to shared location
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN mkdir -p /ms-playwright && \
+    uv run playwright install chromium --with-deps
+
 # Copy application code
 COPY . .
 
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app /ms-playwright
 USER appuser
 
 # Expose port
@@ -41,4 +47,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ || exit 1
 
 # Run the application
-CMD ["uv", "run", "--no-dev", "python", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

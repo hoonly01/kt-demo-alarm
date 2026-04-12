@@ -20,6 +20,8 @@ dependencies = [
     "pandas",
     "matplotlib",
     "pillow",
+    "playwright>=1.58.0",
+    "pydantic-settings>=2.13.0",
 ]
 
 [dependency-groups]

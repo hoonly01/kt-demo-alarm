@@ -24,8 +24,11 @@ class EventUser(BaseModel):
 
 
 class EventAPIRequest(BaseModel):
-    """Event API 요청 모델"""
-    botId: str  # 봇 ID (필수)
-    event: Event  # 이벤트 (Event 모델 사용)
-    user: EventUser  # 단일 사용자 (List가 아닌 단일 객체)
+    """Event API 요청 모델 (v2)
+
+    botId는 URL 경로에 포함되므로 body에서 제거.
+    user는 최대 100명까지 배열로 전송 가능.
+    """
+    event: Event
+    user: List[EventUser]
     params: Optional[dict] = None

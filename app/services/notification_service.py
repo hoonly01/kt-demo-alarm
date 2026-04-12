@@ -61,32 +61,38 @@ class NotificationService:
 
         try:
             event_api_request = EventAPIRequest(
-                botId=settings.BOT_ID,
                 event=Event(
                     name=alarm_request.event_name,
                     data=alarm_request.data
                 ),
-                user=EventUser(
-                    type=id_type,  # ← plusfriendUserKey 사용 (기본값)
+                user=[EventUser(
+                    type=id_type,
                     id=alarm_request.user_id
-                )
+                )],
+                params=None
             )
-            
+
+            url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
+            }
+
             # 클라이언트 컨텍스트 관리
             if client:
                 response = await client.post(
-                    settings.KAKAO_BOT_API_URL,
+                    url,
                     json=event_api_request.model_dump(),
-                    headers={"Content-Type": "application/json"},
+                    headers=headers,
                     timeout=settings.NOTIFICATION_TIMEOUT
                 )
                 return NotificationService._process_response(response, alarm_request.user_id)
             else:
                 async with httpx.AsyncClient() as new_client:
                     response = await new_client.post(
-                        settings.KAKAO_BOT_API_URL,
+                        url,
                         json=event_api_request.model_dump(),
-                        headers={"Content-Type": "application/json"},
+                        headers=headers,
                         timeout=settings.NOTIFICATION_TIMEOUT
                     )
                     return NotificationService._process_response(response, alarm_request.user_id)
@@ -137,27 +143,26 @@ class NotificationService:
 
             # 하나의 세션을 생성하여 모든 요청에 재사용
             async with httpx.AsyncClient() as client:
+                # 내부 헬퍼 함수 - 세션과 파라미터 캡처
+                async def send_to_user(user_id: str) -> Dict[str, Any]:
+                    try:
+                        alarm_request = AlarmRequest(
+                            user_id=user_id,
+                            event_name=event_name,
+                            data=data
+                        )
+                        return await NotificationService.send_individual_alarm(
+                            alarm_request, 
+                            id_type=id_type,
+                            client=client
+                        )
+                    except Exception as e:
+                        logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
+                        return {"success": False, "error": str(e)}
+
                 # 배치 단위로 처리
                 for i in range(0, len(user_ids), actual_batch_size):
                     batch_users = user_ids[i:i + actual_batch_size]
-
-                    # 배치 내 모든 사용자에게 병렬로 알림 전송
-                    async def send_to_user(user_id: str) -> Dict[str, Any]:
-                        try:
-                            alarm_request = AlarmRequest(
-                                user_id=user_id,
-                                event_name=event_name,
-                                data=data
-                            )
-                            # 생성한 클라이언트를 주입
-                            return await NotificationService.send_individual_alarm(
-                                alarm_request, 
-                                id_type=id_type,
-                                client=client
-                            )
-                        except Exception as e:
-                            logger.error(f"사용자 {user_id} 알림 전송 실패: {str(e)}")
-                            return {"success": False, "error": str(e)}
                     
                     # 배치 내 모든 작업을 동시에 실행
                     batch_tasks = [send_to_user(user_id) for user_id in batch_users]
@@ -200,11 +205,9 @@ class NotificationService:
         # 알림 전송
         alarm_request = AlarmRequest(
             user_id=user_id,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events),
-                "events": events
+                "message": message_text
             }
         )
 
@@ -225,11 +228,9 @@ class NotificationService:
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(
             user_ids=user_ids,
-            event_name="route_rally_alert",
+            event_name="morning_demo_alarm",
             data={
-                "message": message_text,
-                "events_count": len(events_data),
-                "events": events_data
+                "message": message_text
             },
             id_type=id_type
         )
@@ -244,7 +245,7 @@ class NotificationService:
             return {"valid": False, "error": "데이터는 딕셔너리 형태여야 합니다"}
         
         # 필수 필드 확인 (이벤트 이름별로 다를 수 있음)
-        if event_name == "route_rally_alert":
+        if event_name == "morning_demo_alarm":
             if "message" not in data:
                 return {"valid": False, "error": "message 필드가 필요합니다"}
         
