@@ -159,6 +159,7 @@ backup_oldfiles/
 # Memo/History MD files
 *.md
 !README.md
+!DEPLOYMENT.md
 
 # Design files
 *.vuerd.json

@@ -78,8 +78,8 @@ async def kakao_chat_fallback(request: KakaoRequest):
                         "text": (
                             "안녕하세요! 👋\n\n"
                             "저는 KT 종로구 집회 알림 봇입니다.\n"
-                            "출퇴근 경로에 예정된 집회 정보를 미리 알려드려요!\n\n"
-                            "🚗 [출퇴근 경로 등록하기] 버튼을 눌러 경로를 설정해주세요.\n"
+                            "이동 경로에 예정된 집회 정보를 미리 알려드려요!\n\n"
+                            "🚗 [이동 경로 등록하기] 버튼을 눌러 경로를 설정해주세요.\n"
                             "📢 매일 아침 7시에 경로상의 집회 정보를 안내해드립니다."
                         )
                     }
@@ -87,9 +87,9 @@ async def kakao_chat_fallback(request: KakaoRequest):
             ],
             "quickReplies": [
                 {
-                    "label": "🚗 출퇴근 경로 등록하기",
+                    "label": "🚗 이동 경로 등록하기",
                     "action": "message",
-                    "messageText": "출퇴근 경로를 등록하고 싶어요"
+                    "messageText": "이동 경로를 등록하고 싶어요"
                 }
             ]
         }

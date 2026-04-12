@@ -139,6 +139,91 @@ class UserService:
             raise
 
     @staticmethod
+    def update_alarm_setting(user_id: str, is_alarm_on: bool, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 알람 수신 설정 (on/off) 업데이트
+        
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key 또는 bot_user_key)
+            is_alarm_on: 알람 활성화 여부
+            db: 데이터베이스 연결
+            
+        Returns:
+            Dict: 처리 결과
+        """
+        try:
+            cursor = db.cursor()
+            
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute('''
+                UPDATE users SET is_alarm_on = ?
+                WHERE plusfriend_user_key = ?
+            ''', (is_alarm_on, user_id))
+            
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET is_alarm_on = ?
+                    WHERE bot_user_key = ?
+                ''', (is_alarm_on, user_id))
+            
+            if cursor.rowcount == 0:
+                logger.warning(f"알람 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+                
+            db.commit()
+            logger.info(f"사용자 알람 설정 업데이트 완료: {user_id} -> {'ON' if is_alarm_on else 'OFF'}")
+            
+            return {"success": True}
+            
+        except Exception as e:
+            logger.error(f"사용자 알람 설정 업데이트 실패: {str(e)}")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
+
+    @staticmethod
+    def update_favorite_zone(user_id: str, zone: Optional[int], db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 관심장소 구역 설정 업데이트
+
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key 또는 bot_user_key)
+            zone: 구역 번호 (1, 2, 3) 또는 None (미설정/삭제)
+            db: 데이터베이스 연결
+
+        Returns:
+            Dict: 처리 결과
+        """
+        try:
+            cursor = db.cursor()
+
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute('''
+                UPDATE users SET favorite_zone = ?
+                WHERE plusfriend_user_key = ?
+            ''', (zone, user_id))
+
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET favorite_zone = ?
+                    WHERE bot_user_key = ?
+                ''', (zone, user_id))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"관심장소 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            zone_label = f"{zone}구역" if zone else "미설정"
+            logger.info(f"사용자 관심장소 설정 업데이트 완료: {user_id} -> {zone_label}")
+
+            return {"success": True}
+
+        except Exception as e:
+            logger.error(f"사용자 관심장소 설정 업데이트 실패: {str(e)}")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
+
+    @staticmethod
     async def update_user_route(user_id: str, departure: str, arrival: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자 경로 정보만 업데이트 (출발지/도착지)
@@ -195,6 +280,92 @@ class UserService:
             
         except Exception as e:
             logger.error(f"경로 정보 업데이트 실패: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def delete_user_route(user_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 경로 정보 삭제 (route 관련 필드를 NULL로 초기화)
+
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key)
+            db: 데이터베이스 연결
+        """
+        try:
+            cursor = db.cursor()
+            clear_sql = '''
+                UPDATE users SET
+                    departure_name = NULL, departure_address = NULL,
+                    departure_x = NULL, departure_y = NULL,
+                    arrival_name = NULL, arrival_address = NULL,
+                    arrival_x = NULL, arrival_y = NULL,
+                    route_updated_at = ?
+                WHERE {} = ?
+            '''
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute(clear_sql.format("plusfriend_user_key"), (datetime.now(), user_id))
+
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute(clear_sql.format("bot_user_key"), (datetime.now(), user_id))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            logger.info(f"경로 삭제 완료 - 사용자: {user_id}")
+            return {"success": True}
+
+        except Exception as e:
+            logger.exception("경로 삭제 DB 처리 실패")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
+
+    @staticmethod
+    async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자의 marked_bus(자주 타는 버스)만 업데이트
+        - plusfriend_user_key 우선
+        - 없으면 bot_user_key로 fallback
+        """
+        try:
+            cursor = db.cursor()
+
+            # 1. plusfriend_user_key 기준 업데이트
+            cursor.execute('''
+                UPDATE users SET
+                    marked_bus = ?,
+                    last_message_at = ?
+                WHERE plusfriend_user_key = ?
+            ''', (
+                marked_bus,
+                datetime.now(),
+                user_id
+            ))
+
+            # 2. 업데이트 안 됐으면 bot_user_key로 fallback
+            if cursor.rowcount == 0:
+                cursor.execute('''
+                    UPDATE users SET
+                        marked_bus = ?,
+                        last_message_at = ?
+                    WHERE bot_user_key = ?
+                ''', (
+                    marked_bus,
+                    datetime.now(),
+                    user_id
+                ))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"marked_bus 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            logger.info(f"marked_bus 업데이트 완료 - 사용자: {user_id}, bus: {marked_bus}")
+            return {"success": True, "marked_bus": marked_bus}
+
+        except Exception as e:
+            logger.error(f"marked_bus 업데이트 실패: {str(e)}")
             return {"success": False, "error": str(e)}
 
     @staticmethod
@@ -369,4 +540,52 @@ class UserService:
             
         except Exception as e:
             logger.error(f"사용자 경로 정보 조회 실패: {str(e)}")
+            return None
+
+    @staticmethod
+    def get_user_info(user_id: str, db: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+        """
+        사용자의 전체 정보 조회 (알람 설정, 관심구역, 경로, 버스 등)
+        
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key 또는 bot_user_key)
+            db: 데이터베이스 연결
+            
+        Returns:
+            Optional[Dict]: 사용자 정보 또는 None
+        """
+        try:
+            cursor = db.cursor()
+            
+            SELECT_FIELDS = '''
+                SELECT 
+                    is_alarm_on, favorite_zone, marked_bus, 
+                    departure_name, arrival_name,
+                    plusfriend_user_key, bot_user_key
+                FROM users 
+            '''
+
+            # 1단계: plusfriend_user_key로 조회 (우선)
+            cursor.execute(SELECT_FIELDS + 'WHERE plusfriend_user_key = ? LIMIT 1', (user_id,))
+            row = cursor.fetchone()
+
+            # 2단계: 없으면 bot_user_key로 조회 (fallback)
+            if not row:
+                cursor.execute(SELECT_FIELDS + 'WHERE bot_user_key = ? LIMIT 1', (user_id,))
+                row = cursor.fetchone()
+            if not row:
+                return None
+                
+            return {
+                "is_alarm_on": bool(row["is_alarm_on"]),
+                "favorite_zone": row["favorite_zone"],
+                "marked_bus": row["marked_bus"],
+                "departure_name": row["departure_name"],
+                "arrival_name": row["arrival_name"],
+                "plusfriend_user_key": row["plusfriend_user_key"],
+                "bot_user_key": row["bot_user_key"]
+            }
+            
+        except Exception as e:
+            logger.error(f"사용자 정보 조회 실패: {str(e)}")
             return None

@@ -64,7 +64,8 @@ class AlarmStatusService:
         status: str,
         successful_sends: Optional[int] = None,
         failed_sends: Optional[int] = None,
-        error_messages: Optional[List[str]] = None
+        error_messages: Optional[List[str]] = None,
+        total_recipients: Optional[int] = None
     ) -> bool:
         """
         알림 작업 상태 업데이트
@@ -99,6 +100,10 @@ class AlarmStatusService:
                 if error_messages is not None:
                     update_fields.append("error_messages = ?")
                     update_values.append(json.dumps(error_messages))
+
+                if total_recipients is not None:
+                    update_fields.append("total_recipients = ?")
+                    update_values.append(total_recipients)
                 
                 # 완료 상태인 경우 완료 시간 추가
                 if status in ["completed", "failed", "partial"]:
