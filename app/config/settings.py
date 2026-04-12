@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     CRAWLING_MINUTE: int = 30
     ROUTE_CHECK_HOUR: int = 7
     ROUTE_CHECK_MINUTE: int = 0
+    ZONE_CHECK_HOUR: int = 8
+    ZONE_CHECK_MINUTE: int = 0
     
     # --- Notification Configuration ---
     BATCH_SIZE: int = 100
