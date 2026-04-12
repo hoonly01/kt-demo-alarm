@@ -40,6 +40,33 @@ class NotificationService:
         return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
 
     @staticmethod
+    def _format_zone_message(zone_name: str, events: List[Dict[str, Any]]) -> str:
+        """
+        구역 기반 집회 알림 메시지 포맷팅
+
+        Args:
+            zone_name: 구역 이름 (예: "광화문광장(1구역)")
+            events: 집회 정보 목록
+
+        Returns:
+            str: 포맷팅된 메시지 텍스트
+        """
+        event_messages = []
+        for event in events:
+            severity_level = event.get("severity_level", 1)
+            severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+            event_messages.append(
+                f"{severity_emoji} {event['title']}\n"
+                f"📍 {event['location']}\n"
+                f"⏰ {event['start_date']}\n"
+                f"🏷️ {event.get('category', '일반')}"
+            )
+        return (
+            f"설정하신 {zone_name}에 집회가 감지되었습니다.\n\n"
+            + "\n\n".join(event_messages)
+        )
+
+    @staticmethod
     async def send_individual_alarm(
         alarm_request: AlarmRequest, 
         id_type: str = "plusfriendUserKey",
