@@ -465,7 +465,9 @@ class EventService:
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
-                WHERE status = 'active' AND date(start_date) = ?
+                WHERE status = 'active'
+                  AND date(start_date) = ?
+                  AND (location_name LIKE '%종로%' OR location_address LIKE '%종로%')
                 ORDER BY start_date ASC
             ''', (today_kst_str,))
             
