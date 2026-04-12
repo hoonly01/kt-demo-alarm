@@ -49,6 +49,8 @@ class ZoneAlarmService:
                            latitude, longitude, start_date, category, severity_level
                     FROM events
                     WHERE status = 'active'
+                      AND latitude IS NOT NULL
+                      AND longitude IS NOT NULL
                       AND start_date > datetime('now', '+9 hours')
                     ORDER BY start_date
                 ''')
