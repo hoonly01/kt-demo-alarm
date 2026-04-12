@@ -10,14 +10,15 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
-def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None):
+def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None, zone_check_func=None):
     """
     스케줄러 설정 및 작업 등록
-    
+
     Args:
         crawling_func: 크롤링 함수 (SMPA 집회 데이터)
         route_check_func: 경로 확인 함수
         bus_crawling_func: 버스 통제 공지 재크롤링 함수 (선택)
+        zone_check_func: 구역 알람 확인 함수 (선택)
     """
     # 설정된 시간에 SMPA 집회 데이터 크롤링 및 동기화
     scheduler.add_job(
@@ -47,8 +48,19 @@ def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None):
             replace_existing=True
         )
 
+    # 구역 알람 확인
+    if zone_check_func:
+        scheduler.add_job(
+            zone_check_func,
+            CronTrigger(hour=settings.ZONE_CHECK_HOUR, minute=settings.ZONE_CHECK_MINUTE, timezone='Asia/Seoul'),
+            id="zone_alarm_check",
+            name="Zone Alarm Check",
+            replace_existing=True
+        )
+
     bus_job_info = f", {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 버스 통제 공지 갱신" if bus_crawling_func else ""
-    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인{bus_job_info}")
+    zone_job_info = f", {settings.ZONE_CHECK_HOUR:02d}:{settings.ZONE_CHECK_MINUTE:02d} 구역 확인" if zone_check_func else ""
+    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인{bus_job_info}{zone_job_info}")
 
 
 def start_scheduler():
