@@ -113,7 +113,7 @@ class ZoneAlarmService:
             total_success = 0
             total_fail = 0
 
-            for group_key, group_data in grouped.items():
+            for group_data in grouped.values():
                 zone_name = group_data["zone_name"]
                 user_ids = group_data["user_ids"]
                 events_data = group_data["events_data"]
