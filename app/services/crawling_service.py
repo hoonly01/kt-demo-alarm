@@ -11,6 +11,7 @@ Kakao API로 지오코딩을 수행하여 events 테이블에 동기화합니다
 2. PLACE_NAME_REPLACE_MAP에 '효자PB' 매핑 추가
 3. SPATIC 테이블에서 장소 필터링 강화 및 진단 로깅 추가
 4. 특수문자 제거 강화로 '舊)효자PB' 형식 처리 개선
+5. pdfminer 실패 시 자동으로 pdfplumber로 폴백합니다.
 """
 
 import re
@@ -224,7 +225,6 @@ def normalize_place_name_for_kakao(place: str) -> str:
     """Kakao API 쿼리용 장소명 정규화"""
     t = place.strip()
 
-    # ✅ 수정 2: 특수문자 제거 강화 (舊, 新 등)
     t = re.sub(r'[舊新\(\)（）]', '', t)
 
     t = t.replace("구)", "").replace("(구)", "")

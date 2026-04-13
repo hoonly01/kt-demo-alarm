@@ -11,6 +11,7 @@ from app.services.user_service import UserService
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["kakao-skills"])
 
+# ─── 집회 정보 조회 ─────────────────────────────────────────
 
 @router.post("/upcoming-protests")
 async def get_upcoming_protests(
@@ -69,7 +70,6 @@ async def get_upcoming_protests(
         }
     }
 
-
 @router.post("/today-protests")
 async def get_today_protests(
     request: dict,
@@ -123,6 +123,7 @@ async def get_today_protests(
         }
     }
 
+# ─── 사용자 경로 정보 저장 ─────────────────────────────────────
 
 @router.post("/check-route")
 async def check_user_route_events(
@@ -159,7 +160,7 @@ async def check_user_route_events(
                             "text": (
                                 "✅ 좋은 소식입니다!\n\n"
                                 "등록하신 경로에 예정된 집회가 없습니다.\n"
-                                "안전한 출퇴근 되세요! 😊"
+                                "안전한 이동 되세요! 😊"
                             )
                         }
                     }
@@ -181,7 +182,7 @@ async def check_user_route_events(
     message_text = (
         f"⚠️ 경로상에 {len(result.events_found)}개의 집회가 감지되었습니다:\n\n"
         + "\n\n".join(event_messages)
-        + "\n\n출퇴근 시 우회 경로를 고려해주세요."
+        + "\n\n우회 경로를 고려해주세요."
     )
 
     return {
@@ -197,13 +198,124 @@ async def check_user_route_events(
         }
     }
 
+@router.post("/route-setting")
+async def get_route_setting_selection(request: dict):
+    """
+    이동경로 관리 선택 UI 반환 (카카오톡 Skill Block)
+    - ListCard 형식으로 "설정" / "삭제" 2개 항목 표시
+    - action:block + extra 방식으로 각 블록에 직접 전달
+    """
+    logger.info(f"🔍 /route-setting 요청: {request}")
+
+    setup_block_id = settings.ROUTE_SETUP_BLOCK_ID
+    delete_block_id = settings.ROUTE_DELETE_BLOCK_ID
+
+    if setup_block_id:
+        setup_item = {
+            "title": "✏️ 설정",
+            "description": "출발지/도착지를 새로 등록합니다",
+            "action": "block",
+            "blockId": setup_block_id,
+        }
+    else:
+        setup_item = {
+            "title": "✏️ 설정",
+            "description": "출발지/도착지를 새로 등록합니다",
+            "action": "message",
+            "messageText": "경로 설정",
+        }
+
+    if delete_block_id:
+        delete_item = {
+            "title": "🗑️ 삭제",
+            "description": "등록된 이동 경로를 삭제합니다",
+            "action": "block",
+            "blockId": delete_block_id,
+        }
+    else:
+        delete_item = {
+            "title": "🗑️ 삭제",
+            "description": "등록된 이동 경로를 삭제합니다",
+            "action": "message",
+            "messageText": "경로 삭제",
+        }
+
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "listCard": {
+                        "header": {"title": "🚍 이동 경로 관리"},
+                        "items": [setup_item, delete_item],
+                    }
+                }
+            ]
+        },
+    }
+
+@router.post("/route-setting/delete")
+async def delete_route_setting(
+    request: dict,
+    db: sqlite3.Connection = Depends(get_db),
+):
+    """
+    이동경로 삭제 처리 (카카오톡 Skill Block)
+    - 사용자의 departure_*, arrival_* 필드를 NULL로 초기화
+    """
+    try:
+        logger.info(f"🔍 /route-setting/delete 요청: {request}")
+
+        user_request = request.get('userRequest', {})
+        user_info = user_request.get('user', {})
+        bot_user_key = user_info.get('id')
+        properties = user_info.get('properties', {})
+        plusfriend_key = properties.get('plusfriendUserKey')
+
+        user_id = plusfriend_key if plusfriend_key else bot_user_key
+
+        if not user_id:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "사용자 식별 정보가 누락되었습니다. 카카오톡 채널을 통해 다시 시도해주세요."}}]
+                },
+            }
+
+        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+
+        result = UserService.delete_user_route(user_id, db)
+
+        if result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": "🗑️ 이동 경로가 삭제되었습니다.\n다시 등록하려면 [🚗 이동 경로 등록하기]를 눌러주세요."}}]
+                },
+            }
+        else:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [{"simpleText": {"text": result.get("error", "경로 삭제에 실패했습니다.")}}]
+                },
+            }
+
+    except Exception:
+        logger.exception("이동경로 삭제 중 시스템 오류 발생")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [{"simpleText": {"text": "시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}}]
+            },
+        }
 
 @router.post("/save_user_info")
-async def save_user_info(request: dict, background_tasks: BackgroundTasks):
+async def save_user_info(request: dict):
     """
     카카오톡 스킬 블록에서 사용자 경로 정보를 저장하는 엔드포인트
-    - 출발지와 도착지만 저장 (간단 버전)
-    - 백그라운드 처리로 빠른 응답
+    - 출발지와 도착지만 저장
+    - 사용자가 입력한 장소명을 기준으로 검색된 실제 장소 정보를 응답에 표시
 
     Parameters in action.params:
     - departure: 출발지 (예: "영통역")
@@ -225,62 +337,86 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
 
     # 출발지와 도착지 정보 추출
     params = request.get('action', {}).get('params', {})
-    departure = params.get('departure', '')
-    arrival = params.get('arrival', '')
+    departure = params.get('departure', '').strip()
+    arrival = params.get('arrival', '').strip()
 
-    logger.info(f"📍 경로: {departure} → {arrival}")
+    logger.info(f"📍 입력 경로: {departure} → {arrival}")
 
-    # 사용자 생성/업데이트 (동기화)
     from app.services.user_service import UserService
     from app.database.connection import get_db_connection
 
-    with get_db_connection() as db:
-        # [REFACTOR] 통합된 사용자 동기화 로직 사용
-        UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
+    try:
+        with get_db_connection() as db:
+            # 사용자 생성/동기화
+            UserService.sync_kakao_user(bot_user_key, plusfriend_key, db)
 
-    # 백그라운드에서 경로 정보 저장 (Route Only Update)
-    async def save_route_to_db_task(user_id: str, departure: str, arrival: str):
-        """백그라운드 작업: 경로 정보만 업데이트"""
-        from app.database.connection import get_db_connection
-        try:
-            with get_db_connection() as conn:
-                # [REFACTOR] 경로 정보만 업데이트하는 메서드 호출
-                result = await UserService.update_user_route(
-                    user_id=user_id,
-                    departure=departure,
-                    arrival=arrival,
-                    db=conn
-                )
+            # 경로 정보 저장 + 실제 검색 결과 받기
+            result = await UserService.update_user_route(
+                user_id=user_id,
+                departure=departure,
+                arrival=arrival,
+                db=db
+            )
 
-                if result["success"]:
-                    logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
-                else:
-                    logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
-
-        except Exception as e:
-            logger.error(f"경로 정보 저장 중 오류: {str(e)}")
-
-    background_tasks.add_task(save_route_to_db_task, user_id, departure, arrival)
-
-    # 즉시 응답 (사용자 대기 시간 단축)
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": (
-                            f"📍 출발지: {departure}\n"
-                            f"📍 도착지: {arrival}\n\n"
-                            "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
-                            "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
-                        )
-                    }
+        # 저장 실패 시
+        if not result["success"]:
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"경로 등록에 실패했습니다.\n"
+                                    f"사유: {result.get('error', '알 수 없는 오류')}\n\n"
+                                    "역명, 건물명처럼 더 정확한 장소명으로 다시 입력해 주세요."
+                                )
+                            }
+                        }
+                    ]
                 }
-            ]
+            }
+
+        departure_info = result["departure"]
+        arrival_info = result["arrival"]
+
+        # 저장 성공 시: 실제 검색된 장소명 + 주소를 보여줌
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": (
+                                f"📍 출발지: {departure_info['name']} ({departure_info['address']})\n"
+                                f"📍 도착지: {arrival_info['name']} ({arrival_info['address']})\n\n"
+                                "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
+                                "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
+                                "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
+                            )
+                        }
+                    }
+                ]
+            }
         }
-    }
+
+    except Exception as e:
+        logger.error(f"/save_user_info 처리 중 오류: {str(e)}")
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": (
+                                "경로 등록 중 오류가 발생했습니다.\n"
+                                "잠시 후 다시 시도해 주세요."
+                            )
+                        }
+                    }
+                ]
+            }
+        }
 
 
 # ─── 관심장소 알림 설정 ─────────────────────────────────────
@@ -306,7 +442,7 @@ ZONE_PARAM_MAP = {
     "1구역": 1,
     "2구역": 2,
     "3구역": 3,
-    "미설정": None,
+    "삭제": None,
 }
 
 
@@ -340,21 +476,21 @@ async def get_favorite_zone_selection(request: dict):
                 "messageText": info["title"],
             })
 
-    # 미설정 옵션 추가
+    # 삭제 옵션 추가
     if save_block_id:
         items.append({
-            "title": "미설정",
+            "title": "삭제",
             "description": "기존 관심장소 정보를 삭제합니다",
             "action": "block",
             "blockId": save_block_id,
-            "extra": {"zone": "미설정"},
+            "extra": {"zone": "삭제"},
         })
     else:
         items.append({
-            "title": "미설정",
+            "title": "삭제",
             "description": "기존 관심장소 정보를 삭제합니다",
             "action": "message",
-            "messageText": "미설정",
+            "messageText": "삭제",
         })
 
     return {
@@ -382,7 +518,7 @@ async def save_favorite_zone(
     """
     관심장소 구역 선택 저장 (카카오톡 Skill Block)
     - 사용자가 선택한 구역을 DB에 저장
-    - (우선) action.clientExtra.zone: "1구역", "2구역", "3구역", "미설정"  ← block+extra 방식
+    - (우선) action.clientExtra.zone: "1구역", "2구역", "3구역", "삭제"  ← block+extra 방식
     - (fallback) action.params.zone: "1구역", ...                         ← message 방식
     """
     try:
@@ -418,7 +554,7 @@ async def save_favorite_zone(
             return {
                 "version": "2.0",
                 "template": {
-                    "outputs": [{"simpleText": {"text": f"올바르지 않은 구역 값입니다 ('{zone_param}'). 1구역, 2구역, 3구역, 미설정 중 선택해주세요."}}]
+                    "outputs": [{"simpleText": {"text": f"올바르지 않은 구역 값입니다 ('{zone_param}'). 1구역, 2구역, 3구역, 삭제 중 선택해주세요."}}]
                 }
             }
 
@@ -582,14 +718,14 @@ async def get_alarm_setting_selection(
         items = [
             {
                 "title": "🔔 알람 켜기",
-                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "description": "매일 아침 이동 경로 집회 알림을 받습니다",
                 "action": "block",
                 "blockId": save_block_id,
                 "extra": {"alarm_status": "on"},
             },
             {
                 "title": "🔕 알람 끄기",
-                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "description": "이동 경로 집회 알림을 받지 않습니다",
                 "action": "block",
                 "blockId": save_block_id,
                 "extra": {"alarm_status": "off"},
@@ -599,13 +735,13 @@ async def get_alarm_setting_selection(
         items = [
             {
                 "title": "🔔 알람 켜기",
-                "description": "매일 아침 출퇴근 경로 집회 알림을 받습니다",
+                "description": "매일 아침 이동 경로 집회 알림을 받습니다",
                 "action": "message",
                 "messageText": "알림 켜기",
             },
             {
                 "title": "🔕 알람 끄기",
-                "description": "출퇴근 경로 집회 알림을 받지 않습니다",
+                "description": "이동 경로 집회 알림을 받지 않습니다",
                 "action": "message",
                 "messageText": "알림 끄기",
             },
@@ -688,9 +824,9 @@ async def save_alarm_setting(
 
         if result["success"]:
             if is_alarm_on:
-                msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+                msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
             else:
-                msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+                msg = "🔕 매일 아침 알림이 꺼졌습니다.\n이동 경로 집회 알림이 더 이상 발송되지 않습니다."
 
             return {
                 "version": "2.0",

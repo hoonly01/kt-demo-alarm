@@ -100,18 +100,50 @@ async def send_alarm_to_all(
     """전체 활성 사용자에게 알림 전송"""
     try:
         cursor = db.cursor()
-        cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1")
+        # plusfriend_user_key 우선 조회
+        cursor.execute("SELECT plusfriend_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NOT NULL")
+        plusfriend_users = list(dict.fromkeys([row["plusfriend_user_key"] for row in cursor.fetchall()]))
+
+        # bot_user_key만 있는 사용자
+        cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NULL AND bot_user_key IS NOT NULL")
+        bot_users = list(dict.fromkeys([row["bot_user_key"] for row in cursor.fetchall()]))
         
-        user_ids = [row[0] for row in cursor.fetchall()]
-        
-        if not user_ids:
+        if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="활성 사용자가 없습니다")
         
-        result = await NotificationService.send_bulk_alarm(
-            user_ids=user_ids,
-            event_name=event_name,
-            data=data
-        )
+        result = {"total_users": 0, "total_sent": 0, "total_failed": 0}
+        
+        if plusfriend_users:
+            pf_result = await NotificationService.send_bulk_alarm(
+                user_ids=plusfriend_users,
+                event_name=event_name,
+                data=data,
+                id_type="plusfriendUserKey"
+            )
+            if pf_result.get("success", True):  # Assume True if missing, or maybe success is explicitly returned
+                result["total_users"] += pf_result.get("total_users", 0)
+                result["total_sent"] += pf_result.get("total_sent", 0)
+                result["total_failed"] += pf_result.get("total_failed", 0)
+            else:
+                logger.error(f"plusfriend_user_key 알림 전송 실패: {pf_result.get('error')}")
+                result["total_users"] += len(plusfriend_users)
+                result["total_failed"] += len(plusfriend_users)
+            
+        if bot_users:
+            bot_result = await NotificationService.send_bulk_alarm(
+                user_ids=bot_users,
+                event_name=event_name,
+                data=data,
+                id_type="botUserKey"
+            )
+            if bot_result.get("success", True):
+                result["total_users"] += bot_result.get("total_users", 0)
+                result["total_sent"] += bot_result.get("total_sent", 0)
+                result["total_failed"] += bot_result.get("total_failed", 0)
+            else:
+                logger.error(f"bot_user_key 알림 전송 실패: {bot_result.get('error')}")
+                result["total_users"] += len(bot_users)
+                result["total_failed"] += len(bot_users)
         
         return {
             "message": f"전체 알림 전송 완료",
@@ -120,6 +152,8 @@ async def send_alarm_to_all(
             "failed": result["total_failed"]
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"전체 알림 전송 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,7 +170,12 @@ async def send_filtered_alarm(
         cursor = db.cursor()
         
         # 기본 쿼리
-        query = "SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1"
+        query = """
+            SELECT plusfriend_user_key, bot_user_key 
+            FROM users 
+            WHERE active = 1 AND is_alarm_on = 1
+            AND (plusfriend_user_key IS NOT NULL OR bot_user_key IS NOT NULL)
+        """
         params = []
         
         # 필터 조건 추가
@@ -148,23 +187,56 @@ async def send_filtered_alarm(
             query += " AND marked_bus = ?"
             params.append(request.filter_marked_bus)
         
-        if request.filter_has_route:
+        if request.filter_has_route is not None:
             if request.filter_has_route:
                 query += " AND departure_x IS NOT NULL AND arrival_x IS NOT NULL"
             else:
                 query += " AND (departure_x IS NULL OR arrival_x IS NULL)"
         
         cursor.execute(query, params)
-        user_ids = [row[0] for row in cursor.fetchall()]
+        rows = cursor.fetchall()
         
-        if not user_ids:
-            raise HTTPException(status_code=404, detail="필터 조건에 맞는 사용자가 없습니다")
+        plusfriend_users_raw = [r[0] for r in rows if r[0] is not None]
+        bot_users_raw = [r[1] for r in rows if r[0] is None and r[1] is not None]
+        plusfriend_users = list(dict.fromkeys(plusfriend_users_raw))
+        bot_users = list(dict.fromkeys(bot_users_raw))
         
-        result = await NotificationService.send_bulk_alarm(
-            user_ids=user_ids,
-            event_name=request.event_name,
-            data=request.data
-        )
+        if not plusfriend_users and not bot_users:
+            raise HTTPException(status_code=404, detail="조건에 맞는 사용자가 없습니다")
+        
+        result = {"total_users": 0, "total_sent": 0, "total_failed": 0}
+        
+        if plusfriend_users:
+            pf_result = await NotificationService.send_bulk_alarm(
+                user_ids=plusfriend_users,
+                event_name=request.event_name,
+                data=request.data,
+                id_type="plusfriendUserKey"
+            )
+            if pf_result.get("success", True):
+                result["total_users"] += pf_result.get("total_users", 0)
+                result["total_sent"] += pf_result.get("total_sent", 0)
+                result["total_failed"] += pf_result.get("total_failed", 0)
+            else:
+                logger.error(f"plusfriend_user_key 알림 전송 실패: {pf_result.get('error')}")
+                result["total_users"] += len(plusfriend_users)
+                result["total_failed"] += len(plusfriend_users)
+            
+        if bot_users:
+            bot_result = await NotificationService.send_bulk_alarm(
+                user_ids=bot_users,
+                event_name=request.event_name,
+                data=request.data,
+                id_type="botUserKey"
+            )
+            if bot_result.get("success", True):
+                result["total_users"] += bot_result.get("total_users", 0)
+                result["total_sent"] += bot_result.get("total_sent", 0)
+                result["total_failed"] += bot_result.get("total_failed", 0)
+            else:
+                logger.error(f"bot_user_key 알림 전송 실패: {bot_result.get('error')}")
+                result["total_users"] += len(bot_users)
+                result["total_failed"] += len(bot_users)
         
         return {
             "message": f"필터링된 알림 전송 완료",
@@ -178,6 +250,8 @@ async def send_filtered_alarm(
             "failed": result["total_failed"]
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"필터링된 알림 전송 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
