@@ -149,6 +149,7 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 topis_attachments/
+topis_cache/
 
 # --- Project Specific ---
 # Temporary/Backup files
