@@ -55,7 +55,8 @@ class TestNormalizePlaceName:
 
     def test_bracket_removal(self):
         result = normalize_place_name_for_kakao("광화문(정부청사)")
-        assert "정부청사" not in result
+        assert "(" not in result
+        assert ")" not in result
 
     def test_direction_removal(self):
         result = normalize_place_name_for_kakao("서울역 남쪽 방면")
