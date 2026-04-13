@@ -24,11 +24,6 @@ class Settings(BaseSettings):
     # Gemini API 설정 (버스 통제 알림용)
     GEMINI_API_KEY: str = ""
 
-    # Works AI (BizRouter) 설정
-    WORKS_AI_API_KEY: str = ""
-    WORKS_AI_BASE_URL: str = "https://api.bizrouter.ai/v1"
-    WORKS_AI_MODEL: str = "google/gemini-3-pro"
-
     # --- Bus API Configuration ---
     SEOUL_BUS_API_KEY: str = ""
     RENDER_EXTERNAL_URL: str = "http://localhost:8000"
@@ -55,6 +50,8 @@ class Settings(BaseSettings):
     CRAWLING_MINUTE: int = 30
     ROUTE_CHECK_HOUR: int = 7
     ROUTE_CHECK_MINUTE: int = 0
+    ZONE_CHECK_HOUR: int = 8
+    ZONE_CHECK_MINUTE: int = 0
     
     # --- Notification Configuration ---
     BATCH_SIZE: int = 100
