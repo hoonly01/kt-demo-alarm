@@ -37,7 +37,7 @@ class NotificationService:
                 f"🏷️ {event.get('category', '일반')}"
             )
 
-        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages) + "\n\n더 자세한 정보는 아래 링크를 참고해주세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
 
     @staticmethod
     async def send_individual_alarm(
