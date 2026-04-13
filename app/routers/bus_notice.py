@@ -45,11 +45,30 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
         
         callback_url = user_request.get('callbackUrl')
         route_number = params.get('route_number')
+        utterance = user_request.get('utterance', '')
+        
+        # 1. 수동 추출 로직 (params에 없거나 불완전할 경우 utterance에서 직접 추출)
+        if not route_number or not str(route_number).strip():
+            import re
+            # 한글+숫자+영문 패턴(서초03, 2014, 01A, N61, M7731 등) 검색
+            match = re.search(r'([가-힣A-Z]*\d+[가-힣A-Z\-]*)', utterance.upper())
+            if match:
+                route_number = match.group(1)
+            else:
+                # '번' 자 앞의 숫자/문자 검색
+                match_korean = re.search(r'([가-힣A-Z\d]+)\s*번', utterance)
+                if match_korean:
+                    route_number = match_korean.group(1)
+
+        # 2. 노선 번호 정규화 (군더더기 제거)
+        if route_number:
+            route_number = str(route_number).replace('번', '').replace('버스', '').strip()
+            # 611번(구) 같은 특이 케이스 대응은 추후 확장
         
         if not route_number:
             return {
                 "version": "2.0",
-                "template": {"outputs": [{"simpleText": {"text": "버스 노선 번호를 입력해주세요."}}]}
+                "template": {"outputs": [{"simpleText": {"text": "버스 노선 번호를 입력해주세요.\n(예: 100 또는 100번)"}}]}
             }
             
         # 콜백 처리가 가능한 경우

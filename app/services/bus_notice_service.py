@@ -331,7 +331,7 @@ class BusNoticeService:
         if detour_path:
             detour_short = detour_path[:60] + '...' if len(detour_path) > 60 else detour_path
             info_text += f"🔄 우회: {detour_short}\n"
-        info_text += "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요."
+        info_text += "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
         
         # 도메인 추가 (이미지 URL이 상대경로인 경우)
         full_image_url = image_url
