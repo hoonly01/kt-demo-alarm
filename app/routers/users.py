@@ -33,32 +33,32 @@ async def get_users(
         users = []
         for row in cursor.fetchall():
             user_data = {
-                "bot_user_key": row[0],
-                "first_message_at": row[1],
-                "last_message_at": row[2],
-                "message_count": row[3],
-                "location": row[4],
-                "active": bool(row[5]),
-                "marked_bus": row[15],
-                "language": row[16]
+                "bot_user_key": row["bot_user_key"],
+                "first_message_at": row["first_message_at"],
+                "last_message_at": row["last_message_at"],
+                "message_count": row["message_count"],
+                "location": row["location"],
+                "active": bool(row["active"]),
+                "marked_bus": row["marked_bus"],
+                "language": row["language"]
             }
-            
-            # 경로 정보가 있는 경우만 포함
-            if all([row[8], row[9], row[12], row[13]]):  # departure_x, y, arrival_x, y
+
+            # 경로 정보가 있는 경우만 포함 (0.0 좌표를 유효값으로 처리)
+            if all(row[k] is not None for k in ("departure_x", "departure_y", "arrival_x", "arrival_y")):
                 user_data["route_info"] = {
                     "departure": {
-                        "name": row[6],
-                        "address": row[7],
-                        "x": row[8],
-                        "y": row[9]
+                        "name": row["departure_name"],
+                        "address": row["departure_address"],
+                        "x": row["departure_x"],
+                        "y": row["departure_y"]
                     },
                     "arrival": {
-                        "name": row[10],
-                        "address": row[11],
-                        "x": row[12],
-                        "y": row[13]
+                        "name": row["arrival_name"],
+                        "address": row["arrival_address"],
+                        "x": row["arrival_x"],
+                        "y": row["arrival_y"]
                     },
-                    "updated_at": row[14]
+                    "updated_at": row["route_updated_at"]
                 }
             else:
                 user_data["route_info"] = None
@@ -144,7 +144,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
                             f"📍 도착지: {arrival}\n\n"
                             "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
                             "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 출퇴근 경로 등록하기] 버튼을 눌러주세요."
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
                         )
                     }
                 }
@@ -298,10 +298,10 @@ async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db))
         
         if alarm_status_str == 'on':
             is_alarm_on = True
-            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 출퇴근 경로에 영향을 주는 집회 정보를 안내해 드립니다."
+            msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
         elif alarm_status_str == 'off':
             is_alarm_on = False
-            msg = "🔕 매일 아침 알림이 꺼졌습니다.\n출퇴근 경로 집회 알림이 더 이상 발송되지 않습니다."
+            msg = "🔕 매일 아침 알림이 꺼졌습니다.\이동 경로 집회 알림이 더 이상 발송되지 않습니다."
         else:
             return {
                 "version": "2.0",
@@ -351,23 +351,21 @@ async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db))
 
 async def save_route_to_db(user_id: str, departure: str, arrival: str):
     """백그라운드 작업: 경로 정보만 업데이트"""
-    from app.database.connection import DATABASE_PATH
+    from app.database.connection import get_db_connection
     try:
-        conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-        # [REFACTOR] 경로 정보만 업데이트
-        result = await UserService.update_user_route(
-            user_id=user_id, 
-            departure=departure, 
-            arrival=arrival, 
-            db=conn
-        )
-        conn.close()
-        
+        with get_db_connection() as conn:
+            result = await UserService.update_user_route(
+                user_id=user_id,
+                departure=departure,
+                arrival=arrival,
+                db=conn
+            )
+
         if result["success"]:
             logger.info(f"사용자 {user_id} 경로 정보 저장 완료")
         else:
             logger.error(f"사용자 {user_id} 경로 정보 저장 실패: {result.get('error')}")
-            
+
     except Exception as e:
         logger.error(f"경로 정보 저장 중 오류: {str(e)}")
 

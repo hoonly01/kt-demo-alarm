@@ -3,10 +3,11 @@ services:
     image: kt-demo-alarm:latest
     pull_policy: never # (중요) 로컬에 load된 이미지 사용 강제
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:
+      - TZ=Asia/Seoul
       - DEBUG=false
       - LOG_LEVEL=INFO
       - DATABASE_PATH=/app/data/kt_demo_alarm.db

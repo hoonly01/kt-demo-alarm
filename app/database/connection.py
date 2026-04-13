@@ -12,6 +12,7 @@ DATABASE_PATH = settings.DATABASE_PATH
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수 (FastAPI 용)"""
     db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    db.row_factory = sqlite3.Row
     try:
         yield db
     finally:
@@ -22,6 +23,7 @@ def get_db():
 def get_db_connection():
     """컨텍스트 매니저를 사용한 DB 연결 (일반 함수용)"""
     conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:

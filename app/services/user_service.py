@@ -283,6 +283,45 @@ class UserService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
+    def delete_user_route(user_id: str, db: sqlite3.Connection) -> Dict[str, Any]:
+        """
+        사용자 경로 정보 삭제 (route 관련 필드를 NULL로 초기화)
+
+        Args:
+            user_id: 사용자 ID (plusfriend_user_key)
+            db: 데이터베이스 연결
+        """
+        try:
+            cursor = db.cursor()
+            clear_sql = '''
+                UPDATE users SET
+                    departure_name = NULL, departure_address = NULL,
+                    departure_x = NULL, departure_y = NULL,
+                    arrival_name = NULL, arrival_address = NULL,
+                    arrival_x = NULL, arrival_y = NULL,
+                    route_updated_at = ?
+                WHERE {} = ?
+            '''
+            # 1. plusfriend_user_key로 우선 업데이트 시도
+            cursor.execute(clear_sql.format("plusfriend_user_key"), (datetime.now(), user_id))
+
+            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
+            if cursor.rowcount == 0:
+                cursor.execute(clear_sql.format("bot_user_key"), (datetime.now(), user_id))
+
+            if cursor.rowcount == 0:
+                logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
+                return {"success": False, "error": "사용자를 찾을 수 없습니다"}
+
+            db.commit()
+            logger.info(f"경로 삭제 완료 - 사용자: {user_id}")
+            return {"success": True}
+
+        except Exception as e:
+            logger.exception("경로 삭제 DB 처리 실패")
+            return {"success": False, "error": "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
+
+    @staticmethod
     async def update_marked_bus(user_id: str, marked_bus: str, db: sqlite3.Connection) -> Dict[str, Any]:
         """
         사용자의 marked_bus(자주 타는 버스)만 업데이트
@@ -538,13 +577,13 @@ class UserService:
                 return None
                 
             return {
-                "is_alarm_on": bool(row[0]),
-                "favorite_zone": row[1],
-                "marked_bus": row[2],
-                "departure_name": row[3],
-                "arrival_name": row[4],
-                "plusfriend_user_key": row[5],
-                "bot_user_key": row[6]
+                "is_alarm_on": bool(row["is_alarm_on"]),
+                "favorite_zone": row["favorite_zone"],
+                "marked_bus": row["marked_bus"],
+                "departure_name": row["departure_name"],
+                "arrival_name": row["arrival_name"],
+                "plusfriend_user_key": row["plusfriend_user_key"],
+                "bot_user_key": row["bot_user_key"]
             }
             
         except Exception as e:

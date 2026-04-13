@@ -9,11 +9,14 @@ class Settings(BaseSettings):
     # --- Kakao API Configuration ---
     KAKAO_REST_API_KEY: str = ""
     BOT_ID: str = ""
-    KAKAO_BOT_API_URL: str = "https://bot-api.kakao.com/v1/bots/message/send"
+    KAKAO_BOT_API_URL: str = "https://bot-api.kakao.com/v2/bots/{bot_id}/talk"
     # 알람 On/Off ListCard에서 사용할 저장 스킬 블록 ID (카카오 챗봇 관리자센터에서 확인)
     ALARM_SAVE_BLOCK_ID: Optional[str] = None
     # 관심장소 ListCard에서 사용할 저장 스킬 블록 ID (카카오 챗봇 관리자센터에서 확인)
     FAVORITE_ZONE_SAVE_BLOCK_ID: Optional[str] = None
+    # 이동경로 2단계 UI 블록 ID (카카오 챗봇 관리자센터에서 확인)
+    ROUTE_SETUP_BLOCK_ID: Optional[str] = None   # "설정" 버튼 → 기존 출발지 입력 블록
+    ROUTE_DELETE_BLOCK_ID: Optional[str] = None  # "삭제" 버튼 → /route-setting/delete 블록
 
     # --- TMAP API Configuration ---
     TMAP_APP_KEY: str = ""
@@ -47,6 +50,8 @@ class Settings(BaseSettings):
     CRAWLING_MINUTE: int = 30
     ROUTE_CHECK_HOUR: int = 7
     ROUTE_CHECK_MINUTE: int = 0
+    ZONE_CHECK_HOUR: int = 8
+    ZONE_CHECK_MINUTE: int = 0
     
     # --- Notification Configuration ---
     BATCH_SIZE: int = 100

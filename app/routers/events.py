@@ -31,10 +31,12 @@ async def create_event(
         
         if row:
             return EventResponse(
-                id=row[0], title=row[1], description=row[2], location_name=row[3],
-                location_address=row[4], latitude=row[5], longitude=row[6],
-                start_date=row[7], end_date=row[8], category=row[9],
-                severity_level=row[10], status=row[11], created_at=row[12], updated_at=row[13]
+                id=row["id"], title=row["title"], description=row["description"],
+                location_name=row["location_name"], location_address=row["location_address"],
+                latitude=row["latitude"], longitude=row["longitude"],
+                start_date=row["start_date"], end_date=row["end_date"], category=row["category"],
+                severity_level=row["severity_level"], status=row["status"],
+                created_at=row["created_at"], updated_at=row["updated_at"]
             )
     
     raise HTTPException(status_code=400, detail=result.get("error", "이벤트 생성에 실패했습니다"))
@@ -86,7 +88,7 @@ async def check_user_route_events(
                             "text": (
                                 "✅ 좋은 소식입니다!\n\n"
                                 "등록하신 경로에 예정된 집회가 없습니다.\n"
-                                "안전한 출퇴근 되세요! 😊"
+                                "안전한 이동 되세요! 😊"
                             )
                         }
                     }
@@ -108,7 +110,7 @@ async def check_user_route_events(
     message_text = (
         f"⚠️ 경로상에 {len(result.events_found)}개의 집회가 감지되었습니다:\n\n"
         + "\n\n".join(event_messages)
-        + "\n\n출퇴근 시 우회 경로를 고려해주세요."
+        + "\n\n우회 경로를 고려해주세요."
     )
 
     return {
@@ -170,14 +172,14 @@ async def auto_check_all_routes(
             }
     
     # 모든 사용자에 대한 작업을 병렬로 실행
-    tasks = [process_user(user_row[0]) for user_row in users]
+    tasks = [process_user(user_row["user_id"]) for user_row in users]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     # 예외 처리 결과 변환
     processed_results = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            user_id = users[i][0]
+            user_id = users[i]["user_id"]
             logger.error(f"사용자 {user_id} 처리 중 예외: {str(result)}")
             processed_results.append({
                 "user_id": user_id,
