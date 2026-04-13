@@ -148,7 +148,6 @@ Desktop.ini
 *.db
 *.sqlite
 *.sqlite3
-topis_attachments/
 
 # --- Project Specific ---
 # Temporary/Backup files
@@ -169,4 +168,3 @@ erd.json
 # Claude AI
 .claude/
 CLAUDE.md
-
