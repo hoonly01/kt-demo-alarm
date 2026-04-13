@@ -63,11 +63,12 @@ app/
 - **중복 제거**: 스마트 데이터 중복 방지
 - **완전한 CRUD**: 집회 정보 생성/조회/수정/삭제
 
-### 🚌 버스 통제 알림 (New!)
-- **실시간 데이터 수집**: TOPIS 버스 운행 변경 공지사항 자동 크롤링
-- **AI 기반 분석**: Gemini API를 활용한 비정형 데이터(텍스트, 첨부파일) 구조화
-- **시각화**: 우회 경로 및 통제 정보를 시각적인 이미지로 생성하여 제공
-- **카카오톡 챗봇**: "100번 확인해줘", "100번 이미지" 등의 명령어로 즉시 조회 가능
+### 🚌 버스 통제 알림 (Advanced!)
+- **초정밀 시각 분석(Vision-First)**: **Gemini 3.1 Pro Preview**를 활용하여 텍스트 데이터의 오염(Hallucination) 없이 PDF 내 노선도와 우회 경로를 시각적으로 직접 추출합니다.
+- **하이브리드 앵커링 기술**: [텍스트 레이어] - [이미지 태그]를 1:1로 교차 전달(Interleaving)하여, 페이지 번호가 명시되지 않은 문서에서도 100% 정확한 페이지 매핑을 보장합니다.
+- **고해상도 지도 시각화**: 200 DPI 고해상도로 우회 경로를 렌더링하여 노선별 상세 변경 구간을 선명하게 제공합니다.
+- **정밀 데이터 추출**: AI가 인쇄된 정보와 지도를 상호 검증하여, 불확실한 데이터는 제외하고 검증된 노선 정보만 추출하는 엄격한 데이터 정합성을 유지합니다.
+- **카카오톡 챗봇 & 링크 연동**: "100번 확인해줘", "100번 이미지" 등의 명령어로 즉시 조회 가능하며, 알림 메시지 하단에 **TOPIS 실시간 통제 지도 링크**를 기본 제공합니다.
 
 
 ### 👥 사용자 관리
@@ -99,7 +100,8 @@ app/
 - **카카오 Mobility API**: 보행 경로 계산
 - **SMPA 크롤링**: 집회 데이터 자동 수집
 - **TOPIS 크롤링**: 버스 통제 정보 수집
-- **Google Gemini API**: 공지사항 문서 분석 및 정보 추출
+- **Google Gemini 3.1 Pro Preview**: 순수 시각 분석 및 이미지-텍스트 교차 검증을 통한 정보 추출
+- **PyMuPDF (fitz)**: 고해상도(200 DPI) PDF 렌더링 및 이미지 정밀 캡처
 
 
 ### Development
@@ -146,8 +148,10 @@ DEBUG=true
 # 데이터베이스 설정 (SQLite 파일은 자동 생성됨)
 DATABASE_PATH=users.db
 
-# Gemini API 설정 (버스 통제 알림용)
-GOOGLE_API_KEY=your_gemini_api_key_here
+# Works AI (BizRouter) 설정 (버스 통제 알림용)
+WORKS_AI_API_KEY=your_works_ai_api_key_here
+WORKS_AI_BASE_URL=https://api.bizrouter.io/v1
+WORKS_AI_MODEL=google/gemini-3.1-pro-preview
 
 # 서울특별시 정류소정보조회 서비스 API 키 (https://www.data.go.kr/data/15000303/openapi.do)
 SEOUL_BUS_API_KEY=your_seoul_bus_api_key_here
