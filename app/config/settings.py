@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     # --- Kakao API ---
     KAKAO_REST_API_KEY: str = ""
     BOT_ID: str = ""
+
+    # --- Block IDs for Kakao Chatbot ---
     ALARM_SAVE_BLOCK_ID: Optional[str] = None
     FAVORITE_ZONE_SAVE_BLOCK_ID: Optional[str] = None
     ROUTE_SETUP_BLOCK_ID: Optional[str] = None
