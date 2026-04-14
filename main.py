@@ -6,7 +6,7 @@ Router-Service-Repository 패턴을 적용한 깔끔한 아키텍처
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 import logging
 import os
@@ -119,6 +119,21 @@ def read_root():
         version=settings.APP_VERSION,
         status="healthy"
     )
+
+@app.post("/mock_callback")
+async def mock_callback_receiver(request: Request):
+    """콜백 결과를 터미널에 예쁘게 출력해주는 테스트용 엔드포인트"""
+    import json
+    try:
+        body = await request.json()
+        print("\n" + "═"*50)
+        print("📢 [최종 콜백 수신됨] - 카카오톡으로 전송될 내용")
+        print("═"*50)
+        print(json.dumps(body, indent=2, ensure_ascii=False))
+        print("═"*50 + "\n")
+    except Exception as e:
+        print(f"콜백 수신 중 오류: {e}")
+    return {"status": "ok"}
 
 
 

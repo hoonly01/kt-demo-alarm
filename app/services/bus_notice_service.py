@@ -22,16 +22,20 @@ class BusNoticeService:
     async def initialize(cls):
         """크롤러 초기화 및 데이터 로드"""
         try:
-            if not settings.GEMINI_API_KEY:
-                logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+            # 설정에서 키 존재 확인
+            has_works_ai = bool(settings.WORKS_AI_API_KEY)
+            has_gemini = bool(settings.GEMINI_API_KEY)
+
+            if not has_works_ai and not has_gemini:
+                logger.warning("⚠️ 분석을 위한 AI API 키(Works AI 또는 Gemini)가 설정되지 않아 서비스를 사용할 수 없습니다.")
                 return
 
-            logger.info("🚌 BusNoticeService 초기화 중...")
+            logger.info(f"🚌 BusNoticeService 초기화 중... (Works AI: {has_works_ai}, Gemini Fallback: {has_gemini})")
             
-            # 크롤러 인스턴스 생성
+            # 크롤러 인스턴스 생성 (Gemini 키는 있으면 넣고 없으면 None)
             cls.crawler = TOPISCrawler(
-                gemini_api_key=settings.GEMINI_API_KEY,
-                cache_file="topis_cache/topis_cache.json"  # Docker 볼륨 마운트 경로 내 저장
+                gemini_api_key=settings.GEMINI_API_KEY if has_gemini else None,
+                cache_file="topis_cache/topis_cache.json"
             )
             
             # 초기 데이터 로드 (동기 함수를 비동기로 실행)
