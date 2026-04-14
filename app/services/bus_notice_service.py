@@ -174,7 +174,7 @@ class BusNoticeService:
                         # URL 반환
                         filename = os.path.basename(image_path)
                         # TODO: 호스트 도메인은 요청 컨텍스트나 설정에서 가져와야 함
-                        return f"/static/route_images/{filename}"
+                        return f"/static/{filename}"
             return None
         except Exception as e:
             logger.error(f"이미지 생성 실패 ({route_number}): {e}")
@@ -222,6 +222,11 @@ class BusNoticeService:
             
         target_notice = None
         for notice in notices:
+            # 1순위: 해당 노선에 대한 명시적인 이미지 경로가 있는 경우
+            if route_number in notice.get('route_images', {}):
+                target_notice = notice
+                break
+            # 2순위: 노선 페이지 정보가 있는 경우
             route_pages = notice.get('route_pages', {})
             if route_number in route_pages:
                 target_notice = notice
@@ -234,7 +239,7 @@ class BusNoticeService:
         route_images = target_notice.get('route_images', {})
         if route_number in route_images and os.path.exists(route_images[route_number]):
             filename = os.path.basename(route_images[route_number])
-            return f"/static/route_images/{filename}"
+            return f"/static/{filename}"
             
         # 없으면 생성
         image_url = await asyncio.to_thread(cls._generate_image_sync, route_number, target_notice)

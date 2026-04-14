@@ -310,6 +310,33 @@ class TOPISCrawler:
         except Exception as e:
             print(f"첨부파일 정리 중 오류: {e}")
 
+    def _pdf_to_base64_images(self, pdf_path, start_page=0, end_page=None):
+        """PDF의 특정 범위 페이지를 이미지(base64)와 텍스트 레이어로 추출 (메모리 최적화)"""
+        images_b64 = []
+        pages_text = []
+        try:
+            import fitz
+            doc = fitz.open(pdf_path)
+            total_pages = len(doc)
+            
+            if end_page is None or end_page > total_pages:
+                end_page = total_pages
+                
+            for page_num in range(start_page, end_page):
+                page = doc.load_page(page_num)
+                
+                # 1. 텍스트 추출
+                pages_text.append(page.get_text())
+                
+                # 2. 이미지 렌더링
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_data = pix.tobytes("jpeg")
+                images_b64.append(base64.b64encode(img_data).decode('utf-8'))
+            doc.close()
+        except Exception as e:
+            print(f"PDF 하이브리드 추출 실패 ({pdf_path}, 범위: {start_page}-{end_page}): {e}")
+        return images_b64, pages_text
+
     def _convert_pdf_page_to_image(self, pdf_path, page_num, route_number, notice_seq):
         """PDF의 특정 페이지를 이미지로 변환"""
         if not PDF_PROCESSING_AVAILABLE:
@@ -674,10 +701,13 @@ JSON 형식:
             pre_info = {"general_periods": [], "control_type": "우회/통제"}
             try:
                 if content and len(str(content).strip()) > 10:
-                    text_only_prompt = f"""다음 서울시 버스 통제 공지 본문에서 '전체 통제 기간'을 추출하세요.
-1. 날짜 표준화: YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM
-2. 연도가 '26'처럼 짧으면 '2026'으로 변환
-3. 오직 JSON {{"general_periods": ["..."], "control_type": "..."}} 형식으로만 답하세요.
+                    text_only_prompt = f"""당신은 제공된 본문 텍스트에서 버스 통제 및 우회 기간(날짜와 시간)을 추출하는 전문가입니다.
+[규칙]
+1. 날짜 표준화 형식: 'YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM' (24시간제)
+2. 연도 보정: '26.4.4' 또는 '26년 4월 4일'처럼 두 자리 연도가 나오면 무조건 '2026'으로 변환하세요. (내년은 2027로 변환)
+3. 시간 누락 시: 시간이 없으면 '00:00 ~ 23:59'로 간주하세요.
+4. 요일 무시: '(토)', '(일)' 등의 요일 정보는 파싱 시 제거하세요.
+5. 출력 형식: 오직 JSON {{"general_periods": ["기간1", "기간2"], "control_type": "우회/통제/무정차"}} 형식으로만 답변하세요.
 
 [본문]
 {content}"""
@@ -689,7 +719,11 @@ JSON 형식:
             except Exception as e:
                 logger.warning(f"본문 사전 분석 중 오류(건너뜀): {e}")
 
-            # 1. 첨부파일 전수 스캔 및 데이터 준비
+            # 1. 문서 인덱싱 (메모리 절약을 위해 분석 전 페이지 정보만 수집)
+            page_map = []  # (파일경로, 원본페이지번호, 확장자)
+            downloaded_files = []
+            temp_files = []
+            
             if attachments:
                 for attachment in attachments:
                     file_path = self._download_attachment(attachment, save_to_folder=save_attachments)
@@ -699,15 +733,16 @@ JSON 형식:
                         ext = os.path.splitext(converted_path)[1].lower()
                         
                         if ext == '.pdf':
-                            # 이미지와 페이지별 텍스트를 함께 추출
-                            imgs, txts = self._pdf_to_base64_images(converted_path)
-                            images_b64_all.extend(imgs)
-                            pages_text_all.extend(txts)
+                            import fitz
+                            try:
+                                doc = fitz.open(converted_path)
+                                for p in range(len(doc)):
+                                    page_map.append((converted_path, p, '.pdf'))
+                                doc.close()
+                            except Exception as e:
+                                print(f"  - ⚠️ PDF 페이지 인덱싱 실패: {e}")
                         elif ext in ['.png', '.jpg', '.jpeg', '.webp']:
-                            # 단일 이미지는 텍스트 없음으로 처리
-                            with open(converted_path, "rb") as imm:
-                                images_b64_all.append(base64.b64encode(imm.read()).decode('utf-8'))
-                                pages_text_all.append("")
+                            page_map.append((converted_path, 0, ext))
                         
                         if not save_attachments:
                             temp_files.append(file_path)
@@ -717,7 +752,9 @@ JSON 형식:
             # 2. 분할 분석 (Chunking) 실행
             # AI가 한 번에 처리할 이미지 수
             chunk_size = 10
-            total_images = len(images_b64_all)
+            # 2. 분할 분석 (Chunking) - 필요한 페이지만 실시간 렌더링
+            chunk_size = 10
+            total_pages = len(page_map)
             final_data = {
                 "control_type": "우회",
                 "general_periods": pre_info["general_periods"],
@@ -726,87 +763,103 @@ JSON 형식:
                 "route_pages": {}
             }
             
-            # 이미지가 없거나 적은 경우와 많은 경우를 나눠서 처리
-            chunks = []
-            text_chunks = []
-            if total_images == 0:
-                chunks = [[]]
-                text_chunks = [[""]]
-            else:
-                for i in range(0, total_images, chunk_size):
-                    chunks.append(images_b64_all[i:i + chunk_size])
-                    text_chunks.append(pages_text_all[i:i + chunk_size])
-            
-            print(f"  - 총 {total_images}개의 페이지를 {len(chunks)}개의 청크로 나누어 정밀 분석(이미지+텍스트 하이브리드)합니다.")
-
-            for idx, chunk_images in enumerate(chunks):
-                start_page = idx * chunk_size + 1
-                end_page = min((idx + 1) * chunk_size, total_images) if total_images > 0 else 0
+            if total_pages > 0:
+                num_chunks = (total_pages + chunk_size - 1) // chunk_size
+                print(f"  - 총 {total_pages}개의 페이지를 {num_chunks}개의 청크로 정밀 분석합니다.")
                 
-                # 하이브리드 분석 프롬프트
-                chunk_prompt = f"""당신은 제공된 이미지와 시스템 텍스트 레이어를 1:1로 대조하며 서울시 버스 우회 정보를 추출하는 전문가입니다.
-추출 규격은 다음과 같습니다:
-{prompt}
-"""
-                
-                # 메시지 구성
-                content_parts = [{"type": "text", "text": chunk_prompt}]
-                for p_idx, (p_txt, p_img) in enumerate(zip(text_chunks[idx], chunk_images)):
-                    abs_page = start_page + p_idx
-                    content_parts.append({
-                        "type": "text", 
-                        "text": f"\n\n### [전체 문서 기준 {abs_page}페이지] ###\n*텍스트 레이어 정보:\n{p_txt}"
-                    })
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{p_img}"}
-                    })
-                
-                # API 호출
-                print(f"    - 청크 {idx+1}/{len(chunks)} 분석 중...", flush=True)
-                chunk_data = self._call_works_ai_api(content_parts, is_multimodal=True, max_retries=max_retries)
-                
-                if not chunk_data:
-                    print(f"    ⚠️ 청크 {idx+1} 분석 실패 (결과 없음)")
-                    continue
-                        
-                # 데이터 병합
-                if idx == 0:
-                    final_data["control_type"] = chunk_data.get("control_type", final_data["control_type"])
-                
-                new_periods = chunk_data.get("general_periods", [])
-                if isinstance(new_periods, list):
-                    for p in new_periods:
-                        if p and p not in final_data["general_periods"]:
-                            final_data["general_periods"].append(p)
+                for i in range(0, total_pages, chunk_size):
+                    chunk_index = i // chunk_size + 1
+                    chunk_pages = page_map[i : i + chunk_size]
                     
-                if "station_info" in chunk_data:
-                    final_data["station_info"].update(chunk_data["station_info"])
-                if "detour_routes" in chunk_data:
-                    final_data["detour_routes"].update(chunk_data["detour_routes"])
-                if "route_pages" in chunk_data:
-                    final_data["route_pages"].update(chunk_data["route_pages"])
+                    # 실시간 이미지/텍스트 추출 (메모리 유지 시간 최소화)
+                    images_b64_chunk = []
+                    texts_chunk = []
+                    
+                    for f_path, p_idx, f_ext in chunk_pages:
+                        if f_ext == '.pdf':
+                            imgs_tmp, txts_tmp = self._pdf_to_base64_images(f_path, p_idx, p_idx + 1)
+                            if imgs_tmp:
+                                images_b64_chunk.append(imgs_tmp[0])
+                                texts_chunk.append(txts_tmp[0])
+                            else:
+                                texts_chunk.append("")
+                        else:
+                            with open(f_path, "rb") as imm:
+                                images_b64_chunk.append(base64.b64encode(imm.read()).decode('utf-8'))
+                                texts_chunk.append("")
 
-            # 최종 데이터 정규화 및 보강
+                    # AI 호출 프롬프트 구성
+                    chunk_prompt = f"""당신은 제공된 이미지와 시스템 텍스트 레이어를 1:1로 대조하며 서울시 버스 우회 정보를 추출하는 전문가입니다.
+    추출 규격은 다음과 같습니다:
+    {prompt}
+    """
+                    content_parts = [{"type": "text", "text": chunk_prompt}]
+                    for p_idx, (p_txt, p_img) in enumerate(zip(texts_chunk, images_b64_chunk)):
+                        abs_page = i + p_idx + 1
+                        content_parts.append({
+                            "type": "text", 
+                            "text": f"\n\n### [전체 문서 기준 {abs_page}페이지] ###\n*텍스트 레이어 정보:\n{p_txt}"
+                        })
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{p_img}"}
+                        })
+                    
+                    print(f"    - 청크 {chunk_index}/{num_chunks} 분석 중...")
+                    chunk_data = self._call_works_ai_api(content_parts, is_multimodal=True, max_retries=max_retries)
+                    
+                    if chunk_data:
+                        # 데이터 병합
+                        if chunk_data.get("station_info"):
+                            for sid, info in chunk_data["station_info"].items():
+                                if sid not in final_data["station_info"]:
+                                    final_data["station_info"][sid] = info
+                                else:
+                                    if info.get('periods'):
+                                        final_data["station_info"][sid]["periods"].extend(info['periods'])
+                        
+                        if chunk_data.get("detour_routes"):
+                            for route, path in chunk_data.get("detour_routes", {}).items():
+                                norm_r = re.sub(r'[^0-9a-zA-Z]', '', str(route))
+                                final_data["detour_routes"][norm_r] = path
+                        
+                        if chunk_data.get("route_pages"):
+                            for route, page in chunk_data.get("route_pages", {}).items():
+                                norm_k = re.sub(r'[^0-9a-zA-Z]', '', str(route))
+                                # 청크 내 상대 페이지를 전체 절대 페이지 번호로 변환하여 저장
+                                final_data["route_pages"][norm_k] = i + page
+
+            # 최종 데이터 보강 및 이미지 생성
             enriched_station_info = self._enrich_station_info(final_data["station_info"])
-            
             station_periods = {}
             for sid, info in enriched_station_info.items():
                 if info.get('periods'):
                     station_periods[sid] = info['periods']
 
-            # 이미지 생성 로직
+            # 이미지 생성 및 매칭 로직 (page_map 활용)
             route_images = {}
             if save_attachments and downloaded_files:
-                for route_number, page_num in final_data["route_pages"].items():
-                    for file_path in downloaded_files:
-                        if file_path.lower().endswith('.pdf'):
+                for route_number, absolute_page in final_data["route_pages"].items():
+                    norm_route = re.sub(r'[^0-9a-zA-Z]', '', str(route_number))
+                    # absolute_page는 1부터 시작
+                    if 0 < absolute_page <= total_pages:
+                        f_path, p_idx, f_ext = page_map[absolute_page - 1]
+                        if f_ext == '.pdf':
                             image_path = self._convert_pdf_page_to_image(
-                                file_path, page_num - 1, route_number, notice_seq
+                                f_path, p_idx, route_number, notice_seq
                             )
                             if image_path:
-                                route_images[route_number] = image_path
-                            break
+                                route_images[norm_route] = image_path
+                        else:
+                            # 이미지 파일인 경우도 PDF와 동일하게 page_{번호} 형식으로 저장
+                            ext = os.path.splitext(f_path)[1].lower()
+                            filename = f"route_{norm_route}_seq_{notice_seq}_page_{absolute_page}{ext}"
+                            dest_path = os.path.join(self.images_folder, filename)
+                            try:
+                                import shutil
+                                shutil.copy2(f_path, dest_path)
+                                route_images[norm_route] = dest_path
+                            except: pass
             
             return {
                 "seq": notice_seq,
@@ -847,7 +900,7 @@ JSON 형식:
             "messages": messages,
             "response_format": {"type": "json_object"},
             "temperature": 0.0,
-            "thinking_level": "medium",
+            "thinking_level": "high",
             "include_thoughts": False
         }
 
@@ -981,6 +1034,17 @@ JSON 형식:
                                         if image_path:
                                             route_images[route_number] = image_path
                                         break
+                                    elif file_path.lower() in [f.lower() for f in downloaded_files if not f.lower().endswith('.pdf')]:
+                                        # 이미지 파일인 경우 (페이지 1로 간주하거나 AI가 지정한 페이지 사용)
+                                        ext = os.path.splitext(file_path)[1].lower()
+                                        filename = f"route_{re.sub(r'[^0-9a-zA-Z]', '', str(route_number))}_seq_{notice_seq}_page_{page_num}{ext}"
+                                        dest_path = os.path.join(self.images_folder, filename)
+                                        try:
+                                            import shutil
+                                            shutil.copy2(file_path, dest_path)
+                                            route_images[route_number] = dest_path
+                                        except: pass
+                                        break
                         
                         print(f"  Gemini 추출 성공 (시도 {attempt + 1})")
                         return {
@@ -1058,7 +1122,7 @@ JSON 형식:
             print("새로운 게시물이 없습니다.")
         else:
             for notice in notice_list['rows']:
-                seq = notice['bdwrSeq']
+                seq = str(notice['bdwrSeq'])
                 
                 # 캐시 확인
                 if hasattr(self, 'cache_data') and str(seq) in self.cache_data["notices"]:
@@ -1082,18 +1146,18 @@ JSON 형식:
                 if detail:
                     notice_data.update(detail)
                     
-                    # Gemini로 정보 추출 (첨부파일은 임시로만 처리)
                     extracted = self._extract_with_gemini(
                         detail['content'], 
                         detail['attachments'], 
                         seq,
-                        save_attachments=False  # 크롤링 시에는 저장하지 않음
+                        save_attachments=True  # 분석 시 상세 이미지 생성 활성화
                     )
                     notice_data.update(extracted)
                 
                 # 캐시에 저장
                 if hasattr(self, 'cache_data'):
                     self.cache_data["notices"][str(seq)] = notice_data
+                    self._save_cache()  # ✅ 실시간 저장 활성화
                 new_count += 1
                 
                 time.sleep(1)  # API 제한 고려
