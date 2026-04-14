@@ -127,7 +127,7 @@ async def mock_callback_receiver(request: Request):
     try:
         body = await request.json()
         print("\n" + "═"*50)
-        print("📢 [최종 콜백 수신됨] - 카카오톡으로 전송될 내용")
+        print("📢 [실전 시뮬레이션 결과] - 카톡 유저가 받게 될 메시지")
         print("═"*50)
         print(json.dumps(body, indent=2, ensure_ascii=False))
         print("═"*50 + "\n")
