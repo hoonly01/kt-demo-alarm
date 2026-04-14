@@ -107,6 +107,7 @@ jobs:
           FAVORITE_ZONE_SAVE_BLOCK_ID: ${{ secrets.FAVORITE_ZONE_SAVE_BLOCK_ID }}
           ROUTE_SETUP_BLOCK_ID: ${{ secrets.ROUTE_SETUP_BLOCK_ID }}
           ROUTE_DELETE_BLOCK_ID: ${{ secrets.ROUTE_DELETE_BLOCK_ID }}
+          WORKS_AI_API_KEY: ${{ secrets.WORKS_AI_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -128,6 +129,7 @@ jobs:
             "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
             "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
             "RENDER_EXTERNAL_URL=https://${PUBLIC_DOMAIN}" \
+            "WORKS_AI_API_KEY=${WORKS_AI_API_KEY}" \
             "ADMIN_USER=${ADMIN_USER}" \
             "ADMIN_PASS=${ADMIN_PASS}" \
             > .env
