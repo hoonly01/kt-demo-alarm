@@ -115,6 +115,12 @@ jobs:
           echo "$EC2_SSH_KEY" > ec2-key.pem
           chmod 600 ec2-key.pem
 
+          # PUBLIC_DOMAIN 설정 확인
+          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
+            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
+            exit 1
+          fi
+
           # Create .env on runner (printf prevents shell injection from special chars in secret values)
           # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
           printf '%s\n' \
@@ -142,12 +148,6 @@ jobs:
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
-
-          # PUBLIC_DOMAIN 설정 확인
-          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
-            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
-            exit 1
-          fi
 
           # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
           # /tmp 대신 예측 불가능한 임시 파일 사용
