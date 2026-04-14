@@ -6,7 +6,7 @@ Router-Service-Repository 패턴을 적용한 깔끔한 아키텍처
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 import logging
 import os
@@ -57,8 +57,9 @@ async def lifespan(app: FastAPI):
         f"{settings.ZONE_CHECK_HOUR:02d}:{settings.ZONE_CHECK_MINUTE:02d} 구역체크"
     )
     
-    # 버스 알림 서비스: startup에서 초기화하지 않음
-    # 집회 크롤링과 동일하게 스케줄러(BusNoticeService.refresh)에 의해서만 동작
+    # 버스 알림 서비스 초기화 (서버 시작 시 즉시 크롤러 생성 및 데이터 로드)
+    # 이제 사용자가 서버 재시작 직후에도 버스 검색을 바로할 수 있습니다.
+    await BusNoticeService.initialize()
     
     yield
     
@@ -118,6 +119,21 @@ def read_root():
         version=settings.APP_VERSION,
         status="healthy"
     )
+
+@app.post("/mock_callback")
+async def mock_callback_receiver(request: Request):
+    """콜백 결과를 터미널에 예쁘게 출력해주는 테스트용 엔드포인트"""
+    import json
+    try:
+        body = await request.json()
+        print("\n" + "═"*50)
+        print("📢 [최종 콜백 수신됨] - 카카오톡으로 전송될 내용")
+        print("═"*50)
+        print(json.dumps(body, indent=2, ensure_ascii=False))
+        print("═"*50 + "\n")
+    except Exception as e:
+        print(f"콜백 수신 중 오류: {e}")
+    return {"status": "ok"}
 
 
 
