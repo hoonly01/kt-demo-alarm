@@ -10,6 +10,13 @@ from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# 관심장소 구역 정의 (중심 좌표 + 반경)
+FAVORITE_ZONES = {
+    1: {"name": "광화문광장(1구역)", "lat": 37.5720, "lon": 126.9769, "radius_m": 2000},
+    2: {"name": "세검정(2구역)",     "lat": 37.6050, "lon": 126.9680, "radius_m": 1300},
+    3: {"name": "한국방송통신대학교(3구역)", "lat": 37.5790, "lon": 127.0030, "radius_m": 1300},
+}
+
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
     Haversine 공식을 사용하여 두 지점 간의 거리를 계산 (단위: 미터)

@@ -41,14 +41,21 @@ async def lifespan(app: FastAPI):
     
     # 스케줄러 설정 및 시작
     from app.services.event_service import EventService
+    from app.services.zone_alarm_service import ZoneAlarmService
     setup_scheduler(
         crawling_func=CrawlingService.crawl_and_sync_events,  # 실제 크롤링 서비스 연동
         route_check_func=EventService.scheduled_route_check,
         bus_crawling_func=BusNoticeService.refresh,           # 버스 통제 공지 재크롤링
+        zone_check_func=ZoneAlarmService.scheduled_zone_check,
     )
     start_scheduler()
-    
-    logger.info(f"스케줄러가 시작되었습니다: {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로체크")
+
+    logger.info(
+        f"스케줄러가 시작되었습니다: "
+        f"{settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, "
+        f"{settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로체크, "
+        f"{settings.ZONE_CHECK_HOUR:02d}:{settings.ZONE_CHECK_MINUTE:02d} 구역체크"
+    )
     
     # 버스 알림 서비스 초기화 (서버 시작 시 즉시 크롤러 생성 및 데이터 로드)
     # 이제 사용자가 서버 재시작 직후에도 버스 검색을 바로할 수 있습니다.

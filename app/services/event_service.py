@@ -460,14 +460,17 @@ class EventService:
             # KST 오늘 날짜 문자열 (YYYY-MM-DD)
             today_kst_str = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
             
+            jongno_pattern = '%종로%'
             cursor.execute('''
                 SELECT id, title, description, location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
-                WHERE status = 'active' AND date(start_date) = ?
+                WHERE status = 'active'
+                  AND date(start_date) = ?
+                  AND (location_name LIKE ? OR location_address LIKE ?)
                 ORDER BY start_date ASC
-            ''', (today_kst_str,))
+            ''', (today_kst_str, jongno_pattern, jongno_pattern))
             
             events = []
             for row in cursor.fetchall():

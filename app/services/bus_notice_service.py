@@ -22,8 +22,8 @@ class BusNoticeService:
     async def initialize(cls):
         """크롤러 초기화 및 데이터 로드"""
         try:
-            if not settings.GEMINI_API_KEY and not settings.WORKS_AI_API_KEY:
-                logger.warning("⚠️ GEMINI_API_KEY 또는 WORKS_AI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+            if not settings.GEMINI_API_KEY:
+                logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
                 return
 
             logger.info("🚌 BusNoticeService 초기화 중...")
@@ -31,10 +31,7 @@ class BusNoticeService:
             # 크롤러 인스턴스 생성
             cls.crawler = TOPISCrawler(
                 gemini_api_key=settings.GEMINI_API_KEY,
-                works_ai_api_key=settings.WORKS_AI_API_KEY,
-                works_ai_base_url=settings.WORKS_AI_BASE_URL,
-                works_ai_model=settings.WORKS_AI_MODEL,
-                cache_file="topis_cache/topis_cache.json"
+                cache_file="topis_cache/topis_cache.json"  # Docker 볼륨 마운트 경로 내 저장
             )
             
             # 초기 데이터 로드 (동기 함수를 비동기로 실행)
@@ -61,8 +58,8 @@ class BusNoticeService:
         
         크롤러가 초기화되지 않은 경우(서버 최초 기동 후 첫 실행) 자동으로 초기화합니다.
         """
-        if not settings.GEMINI_API_KEY and not settings.WORKS_AI_API_KEY:
-            logger.warning("⚠️ API 키가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+        if not settings.GEMINI_API_KEY:
+            logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
             return
 
         # 크롤러 미초기화 시 자동 생성 (서버 시작 후 첫 스케줄러 실행)
@@ -70,9 +67,6 @@ class BusNoticeService:
             logger.info("🚌 BusNoticeService 크롤러 최초 초기화...")
             cls.crawler = TOPISCrawler(
                 gemini_api_key=settings.GEMINI_API_KEY,
-                works_ai_api_key=settings.WORKS_AI_API_KEY,
-                works_ai_base_url=settings.WORKS_AI_BASE_URL,
-                works_ai_model=settings.WORKS_AI_MODEL,
                 cache_file="topis_cache/topis_cache.json"
             )
 
