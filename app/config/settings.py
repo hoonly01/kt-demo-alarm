@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     # --- Kakao API Configuration ---
     KAKAO_REST_API_KEY: str = ""
     BOT_ID: str = ""
-    KAKAO_BOT_API_URL: str = "https://bot-api.kakao.com/v2/bots/{bot_id}/talk"
     # 알람 On/Off ListCard에서 사용할 저장 스킬 블록 ID (카카오 챗봇 관리자센터에서 확인)
     ALARM_SAVE_BLOCK_ID: Optional[str] = None
     # 관심장소 ListCard에서 사용할 저장 스킬 블록 ID (카카오 챗봇 관리자센터에서 확인)
