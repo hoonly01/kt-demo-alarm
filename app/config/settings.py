@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     WORKS_AI_BASE_URL: str = "https://api.bizrouter.ai/v1"
     WORKS_AI_MODEL: str = "google/gemini-3.1-pro-preview"
 
+    # 파일 및 경로 설정 (비민감 정보)
+    CACHE_FILE: str = "topis_cache/topis_cache.json"
+    ATTACHMENT_FOLDER: str = "topis_attachments"
+
     # --- Bus API Configuration ---
     SEOUL_BUS_API_KEY: str = ""
     RENDER_EXTERNAL_URL: str = "http://localhost:8000"
