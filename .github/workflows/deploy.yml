@@ -115,6 +115,7 @@ jobs:
           chmod 600 ec2-key.pem
 
           # Create .env on runner (printf prevents shell injection from special chars in secret values)
+          # 주의: DEBUG, DATABASE_PATH, 스케줄 값은 docker-compose.yml environment에서 관리
           printf '%s\n' \
             "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" \
             "BOT_ID=${BOT_ID}" \
@@ -126,13 +127,7 @@ jobs:
             "FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}" \
             "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
             "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
-            "DEBUG=false" \
-            "LOG_LEVEL=INFO" \
-            "DATABASE_PATH=/app/data/kt_demo_alarm.db" \
-            "CRAWLING_HOUR=7" \
-            "CRAWLING_MINUTE=00" \
-            "ROUTE_CHECK_HOUR=8" \
-            "ROUTE_CHECK_MINUTE=00" \
+            "RENDER_EXTERNAL_URL=https://${PUBLIC_DOMAIN}" \
             "ADMIN_USER=${ADMIN_USER}" \
             "ADMIN_PASS=${ADMIN_PASS}" \
             > .env
