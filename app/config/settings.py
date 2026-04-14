@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     DATABASE_PATH: str = "kt_demo_alarm.db"
     
     # --- Scheduling Configuration ---
-    CRAWLING_HOUR: int = 8
-    CRAWLING_MINUTE: int = 30
-    ROUTE_CHECK_HOUR: int = 7
+    CRAWLING_HOUR: int = 7
+    CRAWLING_MINUTE: int = 0
+    ROUTE_CHECK_HOUR: int = 8
     ROUTE_CHECK_MINUTE: int = 0
     ZONE_CHECK_HOUR: int = 8
     ZONE_CHECK_MINUTE: int = 0

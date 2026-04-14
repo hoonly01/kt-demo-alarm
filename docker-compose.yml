@@ -8,15 +8,7 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-      - DEBUG=false
       - DATABASE_PATH=/app/data/kt_demo_alarm.db
-      # production 스케줄 (settings.py 기본값과 다른 운영 시간)
-      - CRAWLING_HOUR=7
-      - CRAWLING_MINUTE=00
-      - ROUTE_CHECK_HOUR=8
-      - ROUTE_CHECK_MINUTE=00
-      - ZONE_CHECK_HOUR=8
-      - ZONE_CHECK_MINUTE=0
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
