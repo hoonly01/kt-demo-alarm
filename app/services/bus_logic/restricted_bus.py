@@ -11,9 +11,9 @@ if sys.stdout.encoding != 'utf-8':
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     except Exception:
         pass
-
 import requests
 import urllib3
+
 import json
 import time
 import os
@@ -61,7 +61,7 @@ except ImportError:
 
 
 class TOPISCrawler:
-    def __init__(self, gemini_api_key=None, works_ai_api_key=None, works_ai_base_url=None, works_ai_model=None, cache_file="topis_cache.json"):
+    def __init__(self, gemini_api_key=None, cache_file="topis_cache.json"):
         """TOPIS 크롤러 초기화"""
         self.base_url = "https://topis.seoul.go.kr"
         self.service_key = settings.SEOUL_BUS_API_KEY
@@ -89,49 +89,15 @@ class TOPISCrawler:
             'Referer': 'https://topis.seoul.go.kr/notice/openNoticeList.do'
         })
         
-        # Works AI 및 Gemini 설정
-        self.works_ai_api_key = works_ai_api_key or settings.WORKS_AI_API_KEY or os.getenv("WORKS_AI_API_KEY")
-        self.works_ai_base_url = works_ai_base_url or settings.WORKS_AI_BASE_URL or os.getenv("WORKS_AI_BASE_URL", "https://api.bizrouter.ai/v1")
-        self.works_ai_model = works_ai_model or settings.WORKS_AI_MODEL or os.getenv("WORKS_AI_MODEL", "google/gemini-3.1-pro-preview")
-        
-        # Gemini API 키 (동작 호환성을 위해 유지)
-        self.gemini_api_key = gemini_api_key or settings.GEMINI_API_KEY
+        # Gemini 설정
+        if not gemini_api_key:
+            gemini_api_key = settings.GEMINI_API_KEY
             
-        if not self.works_ai_api_key and not self.gemini_api_key:
-            raise RuntimeError("Works AI API Key 또는 Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
+        if not gemini_api_key:
+            raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
         
-        # Works AI를 우선 사용
-        if self.works_ai_api_key:
-            print(f"Works AI 모드 활성화 (모델: {self.works_ai_model})")
-        else:
-            print("Gemini API 모드 활성화")
-            genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel("gemini-3.1-pro-preview")
-
-    def _pdf_to_base64_images(self, pdf_path, max_images=500):
-        """PDF 페이지를 Base64 이미지 리스트와 페이지별 텍스트 리스트로 변환"""
-        if not PDF_PROCESSING_AVAILABLE:
-            return [], []
-        
-        images_b64 = []
-        pages_text = []
-        try:
-            doc = fitz.open(pdf_path)
-            for i in range(min(len(doc), max_images)):
-                page = doc.load_page(i)
-                
-                # 1. 텍스트 추출 (현재 페이지 전용)
-                pages_text.append(page.get_text())
-                
-                # 2. 이미지 변환 (150 DPI)
-                pix = page.get_pixmap(dpi=150)
-                img_data = pix.tobytes("jpg", jpg_quality=80)
-                images_b64.append(base64.b64encode(img_data).decode('utf-8'))
-            doc.close()
-        except Exception as e:
-            print(f"PDF 처리 실패: {e}")
-        
-        return images_b64, pages_text
+        genai.configure(api_key=gemini_api_key)
+        self.gemini_model = genai.GenerativeModel("gemini-2.5-pro")
 
     def _parse_period(self, period_str):
         """기간 문자열을 datetime 객체로 파싱"""
@@ -336,9 +302,11 @@ class TOPISCrawler:
                 for file_path, _ in files_to_delete:
                     try:
                         os.remove(file_path)
-                        print(f"오래된 파일 삭제: {os.path.basename(file_path)}", flush=True)
+                        print(f"오래된 파일 삭제: {os.path.basename(file_path)}")
                     except Exception as e:
-                        pass
+                        print(f"파일 삭제 실패 {file_path}: {e}")
+                
+                print(f"총 {len(files_to_delete)}개 파일 정리 완료")
                 
         except Exception as e:
             print(f"첨부파일 정리 중 오류: {e}")
@@ -628,20 +596,29 @@ class TOPISCrawler:
         """Gemini를 사용한 정보 추출 (재시도 로직 포함)"""
         prompt = f"""서울시 버스 운행 변경 공지사항을 분석하여 다음 정보를 JSON 형식으로 추출하세요.
 
-본문과 첨부파일(텍스트 및 이미지)에서 다음 정보를 **누락 없이** 모두 찾아주세요:
+본문과 첨부파일에서 다음 정보를 모두 찾아주세요:
 
 1. **통제 정류소**: 정류소 이름과 ARS ID (5자리 번호) 이름 중에는 **창덕궁.우리소리박물관**처럼 이름에 .이 들어간 이름도 있으니 유의하세요.
 2. **공통 통제 기간(general_periods)**: 공지사항 상단이나 본문에 명시된 **행사 전체 통제 일시**를 반드시 찾으세요. (예: 26.4.5 06:00~11:30 -> 2026-04-05 06:00~2026-04-05 11:30)
-3. **통제 기간 표준화**: 모든 날짜와 시간은 YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM 형식으로 표준화하세요. 단, 연도가 '26년'으로 표기된 경우 반드시 '2026년'으로 변환하세요.
+3. **통제 기간 표준화**: 모든 날짜와 시간은 YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM 형식으로 표준화하세요. 단, 연도가 두 자리(예: '26', '27')로 표기된 경우 현재 시스템 연도에 맞춰 반드시 '20XX' 형식으로 변환하세요.
 4. **대상 노선**: 영향받는 버스 노선 번호들 (반드시 **파일 전체**에서 언급된 모든 노선 번호를 찾으세요)
 5. **통제 유형**: '우회', '폐쇄', '미정차', '단축운행' 등
 6. **우회 경로**: 노선별 변경된 경로 정보 (반드시 모든 노선의 우회 경로를 찾으세요)
 7. **페이지 정보**: 첨부파일에서 각 노선 정보를 찾은 페이지 번호 (1부터 시작, 매우 중요)
 8. **통제 범위**: 각 정류소에서 "특정 노선만 통제" 또는 "전체 통제" 여부
 
-**중요**: 첨부파일이 수십~백여 페이지에 달할 수 있습니다. 1~2페이지뿐만 아니라 제공된 모든 텍스트와 이미지 내용을 꼼꼼히 확인하여 언급된 모든 버스 노선 번호와 그에 해당하는 상세 우회 정보, 페이지 번호를 추출해야 합니다. 정보가 너무 많아 JSON 크기 제한이 걱정된다면, 적어도 노선별 우회 정보(detour_routes)와 페이지 번호(route_pages)는 반드시 전수 추출하세요.
+통제 범위 판단 기준:
+- 문서에서 "○○번 버스만", "특정 노선", "일부 노선"과 같은 표현이 있으면 "특정노선"
+- "모든 버스", "전체 노선", "해당 정류소"와 같은 표현이 있으면 "전체통제"
+- 명시적인 표현이 없고 여러 노선이 나열되어 있으면 "특정노선"
+- 불분명한 경우 "전체통제"로 간주
 
 날짜 표준화 규칙:
+- '8.15', '8월 15일' → '{datetime.now().year}-08-15' (현재년도 기준)
+- 시간 없으면 시작: 00:00, 종료: 23:59
+- 종료일 없으면 시작일과 동일
+
+통제 정류장명을 찾을 수 없으면 "정보없음"으로 기재하도록.
 
 JSON 형식:
 {{
@@ -735,7 +712,7 @@ JSON 형식:
                                 temp_files.append(converted_path)
 
             # 2. 분할 분석 (Chunking) 실행
-            # AI가 한 번에 처리할 이미지 수 (10장으로 줄여 타임아웃 방지)
+            # AI가 한 번에 처리할 이미지 수
             chunk_size = 10
             total_images = len(images_b64_all)
             final_data = {
@@ -763,58 +740,26 @@ JSON 형식:
                 start_page = idx * chunk_size + 1
                 end_page = min((idx + 1) * chunk_size, total_images) if total_images > 0 else 0
                 
-                # 현재 청크에 해당하는 텍스트 레이어만 추출
-                current_text_context = ""
-                for p_idx, p_text in enumerate(text_chunks[idx]):
-                    abs_page = start_page + p_idx
-                    current_text_context += f"--- [이미지 {p_idx+1} (전체문서 기준 {abs_page}페이지)] ---\n{p_text}\n"
-
-                # 하이브리드 분석 프롬프트 (교차 대조 방식)
+                # 하이브리드 분석 프롬프트
                 chunk_prompt = f"""당신은 제공된 이미지와 시스템 텍스트 레이어를 1:1로 대조하며 서울시 버스 우회 정보를 추출하는 전문가입니다.
-
-[분석 환경]
-- 현재 범위: 전체 문서 중 {start_page}페이지 ~ {end_page}페이지 (총 {len(chunk_images)}장)
-- 데이터 구성: 각 이미지 바로 위에는 시스템이 부여한 '### [전체 문서 기준 X페이지] ###' 태그와 해당 페이지의 텍스트 레이어 정보가 제공됩니다.
-
-[추출 규칙]
-1. **페이지 번호(page_num) 확정**: 원본 이미지에 적힌 번호와 상관없이, 각 이미지 바로 위에 제공된 **'### [전체 문서 기준 X페이지] ###' 태그의 숫자**를 절대적인 페이지 번호(page_num)로 사용하세요.
-2. **상호 검증**: 제공된 텍스트 레이어에서 노선 번호(예: 2014)를 확인하고, 바로 아래 이미지에서 해당 노선의 실제 우회 정보가 있는지 시각적으로 교차 검증하세요.
-3. **분석 범위**: 현재 제공된 {start_page}~{end_page}페이지 범위 내에서 확인되는 정보만 추출하세요.
-
 추출 규격은 다음과 같습니다:
 {prompt}
 """
                 
-                # 메시지 구성 (텍스트-이미지 인터리빙)
+                # 메시지 구성
                 content_parts = [{"type": "text", "text": chunk_prompt}]
-                
                 for p_idx, (p_txt, p_img) in enumerate(zip(text_chunks[idx], chunk_images)):
                     abs_page = start_page + p_idx
-                    # 페이지 선언 텍스트 추가
                     content_parts.append({
                         "type": "text", 
-                        "text": f"\n\n### [전체 문서 기준 {abs_page}페이지] ###\n*텍스트 레이어 정보:\n{p_txt}\n[바로 아래 이미지는 위 텍스트가 추출된 {abs_page}페이지의 원본 이미지입니다.]"
+                        "text": f"\n\n### [전체 문서 기준 {abs_page}페이지] ###\n*텍스트 레이어 정보:\n{p_txt}"
                     })
-                    # 대응하는 이미지 추가
                     content_parts.append({
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{p_img}"}
                     })
                 
-                payload = {
-                    "model": self.works_ai_model,
-                    "messages": [{"role": "user", "content": content_parts}],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.0,
-                    "thinking_level": "medium",
-                    "include_thoughts": False
-                }
-                headers = {
-                    "Authorization": f"Bearer {self.works_ai_api_key}",
-                    "Content-Type": "application/json"
-                }
-
-                # API 호출 (공통 메서드 사용)
+                # API 호출
                 print(f"    - 청크 {idx+1}/{len(chunks)} 분석 중...", flush=True)
                 chunk_data = self._call_works_ai_api(content_parts, is_multimodal=True, max_retries=max_retries)
                 
@@ -825,22 +770,19 @@ JSON 형식:
                 # 데이터 병합
                 if idx == 0:
                     final_data["control_type"] = chunk_data.get("control_type", final_data["control_type"])
-                    
-                # 공통 통제 기간 누적 병합 (중복 제거)
+                
                 new_periods = chunk_data.get("general_periods", [])
                 if isinstance(new_periods, list):
                     for p in new_periods:
                         if p and p not in final_data["general_periods"]:
                             final_data["general_periods"].append(p)
                     
-                # 누적 병합 (정류소, 우회정보, 페이지)
                 if "station_info" in chunk_data:
                     final_data["station_info"].update(chunk_data["station_info"])
                 if "detour_routes" in chunk_data:
                     final_data["detour_routes"].update(chunk_data["detour_routes"])
                 if "route_pages" in chunk_data:
                     final_data["route_pages"].update(chunk_data["route_pages"])
-                                    
 
             # 최종 데이터 정규화 및 보강
             enriched_station_info = self._enrich_station_info(final_data["station_info"])
@@ -850,7 +792,7 @@ JSON 형식:
                 if info.get('periods'):
                     station_periods[sid] = info['periods']
 
-            # 이미지 생성 로직 (분석된 route_pages 기반)
+            # 이미지 생성 로직
             route_images = {}
             if save_attachments and downloaded_files:
                 for route_number, page_num in final_data["route_pages"].items():
@@ -863,7 +805,6 @@ JSON 형식:
                                 route_images[route_number] = image_path
                             break
             
-            # 최종 결과 조립
             return {
                 "seq": notice_seq,
                 "control_type": final_data["control_type"],
@@ -879,7 +820,6 @@ JSON 형식:
             print(f"Works AI 분석 중 치명적 오류: {e}")
             return self._get_default_extraction_result()
         finally:
-            # 임시 파일 정리
             if not save_attachments:
                 for temp_file in temp_files:
                     try:
@@ -892,22 +832,13 @@ JSON 형식:
                         pass
 
     def _call_works_ai_api(self, content, is_multimodal=False, max_retries=3):
-        """Works AI API 호출 공통 메서드 (재시도 및 결과 정규화 포함)"""
-        import json
-        import requests
-        import time
-        
+        """Works AI API 호출 공통 메서드"""
         headers = {
             "Authorization": f"Bearer {self.works_ai_api_key}",
             "Content-Type": "application/json"
         }
         
-        # 텍스트 단독인 경우와 멀티모달인 경우 메시지 구성 처리
-        if not is_multimodal:
-            messages = [{"role": "user", "content": [{"type": "text", "text": str(content)}]}]
-        else:
-            messages = [{"role": "user", "content": content}]
-
+        messages = [{"role": "user", "content": [{"type": "text", "text": str(content)}]}] if not is_multimodal else [{"role": "user", "content": content}]
         payload = {
             "model": self.works_ai_model,
             "messages": messages,
@@ -919,45 +850,24 @@ JSON 형식:
 
         for attempt in range(max_retries):
             try:
-                response = requests.post(
-                    f"{self.works_ai_base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=300
-                )
+                response = requests.post(f"{self.works_ai_base_url}/chat/completions", headers=headers, json=payload, timeout=300)
                 response.raise_for_status()
-                
                 result = response.json()
                 content_str = result['choices'][0]['message']['content']
                 data = json.loads(self._clean_json_response(content_str))
-                
-                # 리스트 형태로 온 경우 첫 번째 항목 사용
-                if isinstance(data, list) and len(data) > 0:
-                    data = data[0]
-                elif not isinstance(data, dict):
-                    data = {}
-                    
-                return data
+                return data if isinstance(data, dict) else (data[0] if isinstance(data, list) and data else {})
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"      - API 호출 시도 {attempt+1} 실패: {e}. 2초 후 재시도...", flush=True)
                     time.sleep(2)
                 else:
                     logger.error(f"Works AI API 최종 호출 실패: {e}")
         return None
 
     def _clean_json_response(self, text):
-        """JSON 응답 문자열에서 마크다운 코드 블록 등을 제거하고 순수 JSON만 반환"""
-        if not text:
-            return "{}"
-        
-        # ```json ... ``` 또는 ``` ... ``` 블록 제거
+        """JSON 응답 마크다운 제거"""
+        if not text: return "{}"
         text = re.sub(r'```json\s*', '', text)
-        text = re.sub(r'```\s*', '', text)
-        
-        # 앞뒤 공백 제거
-        text = text.strip()
-        
+        text = re.sub(r'```\s*', '', text).strip()
         return text
 
     def _get_default_extraction_result(self):
@@ -973,8 +883,7 @@ JSON 형식:
         }
 
     def _extract_with_gemini_native(self, prompt, attachments, notice_seq, save_attachments=False, max_retries=5):
-        """기존 Gemini Native API를 사용한 정보 추출 (Fallback용)"""
-
+        """Gemini Native API Fallback용"""
         gemini_files = []
         temp_files = []
         downloaded_files = []
@@ -1123,7 +1032,15 @@ JSON 형식:
                         pass
         
         # 기본값 반환
-        return self._get_default_extraction_result()
+        return {
+            'control_type': '통제',
+            'general_periods': [],
+            'station_periods': {},
+            'station_info': {},
+            'detour_routes': {},
+            'route_pages': {},
+            'route_images': {}
+        }
 
     def crawl_notices(self):
         """공지사항 크롤링 (최신 5개만, 캐시는 전체 로드)"""
@@ -1162,7 +1079,7 @@ JSON 형식:
                 if detail:
                     notice_data.update(detail)
                     
-                    # AI로 정보 추출 (첨부파일은 임시로만 처리)
+                    # Gemini로 정보 추출 (첨부파일은 임시로만 처리)
                     extracted = self._extract_with_gemini(
                         detail['content'], 
                         detail['attachments'], 

@@ -15,29 +15,45 @@ class NotificationService:
     """알림 전송 비즈니스 로직"""
 
     @staticmethod
+    def _format_event_block(event: Dict[str, Any]) -> str:
+        """단일 집회 정보를 이모지 블록으로 포맷팅"""
+        severity_level = event.get("severity_level", 1)
+        severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+        return (
+            f"{severity_emoji} {event['title']}\n"
+            f"📍 {event['location']}\n"
+            f"⏰ {event['start_date']}\n"
+            f"🏷️ {event.get('category', '일반')}"
+        )
+
+    @staticmethod
     def _format_event_message(events: List[Dict[str, Any]]) -> str:
         """
         집회 정보를 텍스트 메시지로 포맷팅
-        
+
         Args:
             events: 집회 정보 목록
-            
+
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        event_messages = []
-        for event in events:
-            severity_level = event.get("severity_level", 1)
-            severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+        blocks = [NotificationService._format_event_block(e) for e in events]
+        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(blocks)
 
-            event_messages.append(
-                f"{severity_emoji} {event['title']}\n"
-                f"📍 {event['location']}\n"
-                f"⏰ {event['start_date']}\n"
-                f"🏷️ {event.get('category', '일반')}"
-            )
+    @staticmethod
+    def _format_zone_message(zone_name: str, events: List[Dict[str, Any]]) -> str:
+        """
+        구역 기반 집회 알림 메시지 포맷팅
 
-        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(event_messages)
+        Args:
+            zone_name: 구역 이름 (예: "광화문광장(1구역)")
+            events: 집회 정보 목록
+
+        Returns:
+            str: 포맷팅된 메시지 텍스트
+        """
+        blocks = [NotificationService._format_event_block(e) for e in events]
+        return f"설정하신 {zone_name}에 집회가 감지되었습니다.\n\n" + "\n\n".join(blocks)
 
     @staticmethod
     async def send_individual_alarm(
