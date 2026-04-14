@@ -69,6 +69,50 @@ def init_db():
         if "duplicate column name" not in str(e).lower():
             logger.warning(f"favorite_zone 컬럼 갱신 실패 (무시됨): {str(e)}")
 
+    # bot_user_key NOT NULL 제약 제거 (채널 웹훅 신규 사용자는 open_id만 있음)
+    try:
+        cursor.execute("PRAGMA table_info(users)")
+        columns = cursor.fetchall()
+        bot_col = next((c for c in columns if c[1] == 'bot_user_key'), None)
+        if bot_col and bot_col[3] == 1:  # notnull=1 이면 마이그레이션 필요
+            logger.info("🔄 bot_user_key NOT NULL 제약 제거 마이그레이션 시작")
+            cursor.execute("PRAGMA foreign_keys=OFF")
+            cursor.execute('''
+                CREATE TABLE users_migration_tmp (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bot_user_key TEXT UNIQUE,
+                    open_id TEXT,
+                    plusfriend_user_key TEXT,
+                    first_message_at DATETIME,
+                    last_message_at DATETIME,
+                    message_count INTEGER DEFAULT 1,
+                    location TEXT,
+                    active BOOLEAN DEFAULT TRUE,
+                    is_alarm_on BOOLEAN DEFAULT TRUE,
+                    departure_name TEXT,
+                    departure_address TEXT,
+                    departure_x REAL,
+                    departure_y REAL,
+                    arrival_name TEXT,
+                    arrival_address TEXT,
+                    arrival_x REAL,
+                    arrival_y REAL,
+                    route_updated_at DATETIME,
+                    marked_bus TEXT,
+                    language TEXT,
+                    favorite_zone INTEGER
+                )
+            ''')
+            cursor.execute("INSERT INTO users_migration_tmp SELECT * FROM users")
+            cursor.execute("DROP TABLE users")
+            cursor.execute("ALTER TABLE users_migration_tmp RENAME TO users")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_open_id ON users(open_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_plusfriend_key ON users(plusfriend_user_key)")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            logger.info("✅ bot_user_key NOT NULL 제약 제거 완료")
+    except Exception as e:
+        logger.warning(f"bot_user_key 마이그레이션 실패: {str(e)}")
+
     conn.commit()
     conn.close()
     print("✅ 데이터베이스 초기화 완료")
