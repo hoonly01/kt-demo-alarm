@@ -61,14 +61,15 @@ except ImportError:
 
 
 class TOPISCrawler:
-    def __init__(self, gemini_api_key=None, cache_file="topis_cache.json"):
+    def __init__(self, gemini_api_key=None, cache_file=None, download_folder=None):
         """TOPIS 크롤러 초기화"""
+        from app.config.settings import settings
         self.base_url = "https://topis.seoul.go.kr"
         self.service_key = settings.SEOUL_BUS_API_KEY
         
-        # 캐시 및 다운로드 폴더 경로 조정 (프로젝트 루트 기준)
-        self.cache_file = cache_file
-        self.download_folder = "topis_attachments"
+        # 설정 우선순위: 생성자 인자 > settings.py 설정
+        self.cache_file = cache_file or settings.CACHE_FILE
+        self.download_folder = download_folder or settings.ATTACHMENT_FOLDER
         self.images_folder = os.path.join(self.download_folder, "route_images")
         
         # 폴더 생성
@@ -78,26 +79,24 @@ class TOPISCrawler:
         self.cache_data = self._load_cache()
         
         # 세션 설정
-        # 주의: TOPIS 사이트가 자체 서명 인증서를 사용하므로 SSL 검증을 비활성화합니다.
-        # 네트워크 환경이 변경 시 verify=True로 전환을 검토하세요.
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json, text/javascript, */*; q=0.01',
             'X-Requested-With': 'XMLHttpRequest',
-            'Referer': 'https://topis.seoul.go.kr/notice/openNoticeList.do'
+            'Referer': f"{self.base_url}/notice/openNoticeList.do"
         })
         
-        # Gemini 설정
-        if not gemini_api_key:
-            gemini_api_key = settings.GEMINI_API_KEY
-            
-        if not gemini_api_key:
-            raise RuntimeError("Gemini API Key가 필요합니다. 환경변수 설정을 확인하세요.")
+        # AI 설정 (settings.py 연동)
+        self.gemini_api_key = gemini_api_key or settings.GEMINI_API_KEY
+        self.works_ai_api_key = settings.WORKS_AI_API_KEY
+        self.works_ai_base_url = settings.WORKS_AI_BASE_URL
+        self.works_ai_model = settings.WORKS_AI_MODEL
         
-        genai.configure(api_key=gemini_api_key)
-        self.gemini_model = genai.GenerativeModel("gemini-2.5-pro")
+        if self.gemini_api_key:
+            genai.configure(api_key=self.gemini_api_key)
+            self.gemini_model = genai.GenerativeModel("gemini-2.5-pro")
 
     def _parse_period(self, period_str):
         """기간 문자열을 datetime 객체로 파싱"""
