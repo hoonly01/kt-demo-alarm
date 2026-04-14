@@ -656,8 +656,12 @@ JSON 형식:
         if self.works_ai_api_key:
             return self._extract_with_works_ai(prompt, attachments, notice_seq, content=content, save_attachments=save_attachments, max_retries=max_retries)
         
-        # 기존 Gemini 사용 모드 (Fallback)
-        return self._extract_with_gemini_native(prompt, attachments, notice_seq, save_attachments, max_retries)
+        # 기존 Gemini 사용 모드 (Fallback) - 키가 있을 때만 시도
+        if self.gemini_api_key:
+            return self._extract_with_gemini_native(prompt, attachments, notice_seq, save_attachments, max_retries)
+        
+        # 키도 없고 Works AI도 실패했다면 기본값 반환
+        return self._get_default_extraction_result()
 
     def _extract_with_works_ai(self, prompt, attachments, notice_seq, content=None, save_attachments=False, max_retries=3):
         """Works AI (BizRouter)를 사용한 정보 추출 (대용량 PDF 분할 분석 적용)"""
