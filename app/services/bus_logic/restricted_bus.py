@@ -1,5 +1,8 @@
 import sys
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 터미널 출력 한글 깨짐 방지 (UTF-8 강제 설정)
 if sys.stdout.encoding != 'utf-8':
@@ -628,12 +631,13 @@ class TOPISCrawler:
 본문과 첨부파일(텍스트 및 이미지)에서 다음 정보를 **누락 없이** 모두 찾아주세요:
 
 1. **통제 정류소**: 정류소 이름과 ARS ID (5자리 번호) 이름 중에는 **창덕궁.우리소리박물관**처럼 이름에 .이 들어간 이름도 있으니 유의하세요.
-2. **통제 기간**: YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM 형식으로 표준화
-3. **대상 노선**: 영향받는 버스 노선 번호들 (반드시 **파일 전체**에서 언급된 모든 노선 번호를 찾으세요)
-4. **통제 유형**: '우회', '폐쇄', '미정차', '단축운행' 등
-5. **우회 경로**: 노선별 변경된 경로 정보 (반드시 모든 노선의 우회 경로를 찾으세요)
-6. **페이지 정보**: 첨부파일에서 각 노선 정보를 찾은 페이지 번호 (1부터 시작, 매우 중요)
-7. **통제 범위**: 각 정류소에서 "특정 노선만 통제" 또는 "전체 통제" 여부
+2. **공통 통제 기간(general_periods)**: 공지사항 상단이나 본문에 명시된 **행사 전체 통제 일시**를 반드시 찾으세요. (예: 26.4.5 06:00~11:30 -> 2026-04-05 06:00~2026-04-05 11:30)
+3. **통제 기간 표준화**: 모든 날짜와 시간은 YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM 형식으로 표준화하세요. 단, 연도가 '26년'으로 표기된 경우 반드시 '2026년'으로 변환하세요.
+4. **대상 노선**: 영향받는 버스 노선 번호들 (반드시 **파일 전체**에서 언급된 모든 노선 번호를 찾으세요)
+5. **통제 유형**: '우회', '폐쇄', '미정차', '단축운행' 등
+6. **우회 경로**: 노선별 변경된 경로 정보 (반드시 모든 노선의 우회 경로를 찾으세요)
+7. **페이지 정보**: 첨부파일에서 각 노선 정보를 찾은 페이지 번호 (1부터 시작, 매우 중요)
+8. **통제 범위**: 각 정류소에서 "특정 노선만 통제" 또는 "전체 통제" 여부
 
 **중요**: 첨부파일이 수십~백여 페이지에 달할 수 있습니다. 1~2페이지뿐만 아니라 제공된 모든 텍스트와 이미지 내용을 꼼꼼히 확인하여 언급된 모든 버스 노선 번호와 그에 해당하는 상세 우회 정보, 페이지 번호를 추출해야 합니다. 정보가 너무 많아 JSON 크기 제한이 걱정된다면, 적어도 노선별 우회 정보(detour_routes)와 페이지 번호(route_pages)는 반드시 전수 추출하세요.
 
@@ -671,14 +675,14 @@ JSON 형식:
 본문:
 {content}"""
 
-        # 웍스 AI 사용 모드
+        # 웍스 AI 사용 모드 (content 인자 추가)
         if self.works_ai_api_key:
-            return self._extract_with_works_ai(prompt, attachments, notice_seq, save_attachments, max_retries)
+            return self._extract_with_works_ai(prompt, attachments, notice_seq, content=content, save_attachments=save_attachments, max_retries=max_retries)
         
         # 기존 Gemini 사용 모드 (Fallback)
         return self._extract_with_gemini_native(prompt, attachments, notice_seq, save_attachments, max_retries)
 
-    def _extract_with_works_ai(self, prompt, attachments, notice_seq, save_attachments=False, max_retries=3):
+    def _extract_with_works_ai(self, prompt, attachments, notice_seq, content=None, save_attachments=False, max_retries=3):
         """Works AI (BizRouter)를 사용한 정보 추출 (대용량 PDF 분할 분석 적용)"""
         images_b64_all = []
         pages_text_all = []
@@ -686,6 +690,25 @@ JSON 형식:
         downloaded_files = []
         
         try:
+            # 0. 본문(content)에서 기본 정보(통제 기간 등) 먼저 추출 (PDF 분석 전 보강)
+            pre_info = {"general_periods": [], "control_type": "우회/통제"}
+            try:
+                if content and len(str(content).strip()) > 10:
+                    text_only_prompt = f"""다음 서울시 버스 통제 공지 본문에서 '전체 통제 기간'을 추출하세요.
+1. 날짜 표준화: YYYY-MM-DD HH:MM ~ YYYY-MM-DD HH:MM
+2. 연도가 '26'처럼 짧으면 '2026'으로 변환
+3. 오직 JSON {{"general_periods": ["..."], "control_type": "..."}} 형식으로만 답하세요.
+
+[본문]
+{content}"""
+                    # 공통 메서드로 본문 즉시 분석
+                    pre_data = self._call_works_ai_api(text_only_prompt, max_retries=max_retries)
+                    if pre_data and pre_data.get("general_periods"):
+                        pre_info["general_periods"] = pre_data["general_periods"]
+                        print(f"  - 본문에서 통제 기간 사전 추출 성공: {pre_info['general_periods']}", flush=True)
+            except Exception as e:
+                logger.warning(f"본문 사전 분석 중 오류(건너뜀): {e}")
+
             # 1. 첨부파일 전수 스캔 및 데이터 준비
             if attachments:
                 for attachment in attachments:
@@ -717,7 +740,7 @@ JSON 형식:
             total_images = len(images_b64_all)
             final_data = {
                 "control_type": "우회",
-                "general_periods": [],
+                "general_periods": pre_info["general_periods"],
                 "station_info": {},
                 "detour_routes": {},
                 "route_pages": {}
@@ -791,41 +814,33 @@ JSON 형식:
                     "Content-Type": "application/json"
                 }
 
-                # API 호출 (재시도 포함)
-                for attempt in range(max_retries):
-                    try:
-                        print(f"    - 청크 {idx+1}/{len(chunks)} 분석 중 (시도 {attempt+1})...", flush=True)
-                        response = requests.post(f"{self.works_ai_base_url}/chat/completions", headers=headers, json=payload, timeout=300)
-                        response.raise_for_status()
+                # API 호출 (공통 메서드 사용)
+                print(f"    - 청크 {idx+1}/{len(chunks)} 분석 중...", flush=True)
+                chunk_data = self._call_works_ai_api(content_parts, is_multimodal=True, max_retries=max_retries)
+                
+                if not chunk_data:
+                    print(f"    ⚠️ 청크 {idx+1} 분석 실패 (결과 없음)")
+                    continue
                         
-                        chunk_result = response.json()
-                        chunk_content = chunk_result['choices'][0]['message']['content']
-                        chunk_data = json.loads(chunk_content)
-                        
-                        # 리스트로 왔을 경우 첫 번째 항목 사용 (방어 로직)
-                        if isinstance(chunk_data, list) and len(chunk_data) > 0:
-                            chunk_data = chunk_data[0]
-                        elif not isinstance(chunk_data, dict):
-                            chunk_data = {}
-                        
-                        # 데이터 병합
-                        if idx == 0:
-                            final_data["control_type"] = chunk_data.get("control_type", final_data["control_type"])
-                            final_data["general_periods"] = chunk_data.get("general_periods", [])
-                            
-                        # 누적 병합 (정류소, 우회정보, 페이지)
-                        if "station_info" in chunk_data:
-                            final_data["station_info"].update(chunk_data["station_info"])
-                        if "detour_routes" in chunk_data:
-                            final_data["detour_routes"].update(chunk_data["detour_routes"])
-                        if "route_pages" in chunk_data:
-                            final_data["route_pages"].update(chunk_data["route_pages"])
+                # 데이터 병합
+                if idx == 0:
+                    final_data["control_type"] = chunk_data.get("control_type", final_data["control_type"])
+                    
+                # 공통 통제 기간 누적 병합 (중복 제거)
+                new_periods = chunk_data.get("general_periods", [])
+                if isinstance(new_periods, list):
+                    for p in new_periods:
+                        if p and p not in final_data["general_periods"]:
+                            final_data["general_periods"].append(p)
+                    
+                # 누적 병합 (정류소, 우회정보, 페이지)
+                if "station_info" in chunk_data:
+                    final_data["station_info"].update(chunk_data["station_info"])
+                if "detour_routes" in chunk_data:
+                    final_data["detour_routes"].update(chunk_data["detour_routes"])
+                if "route_pages" in chunk_data:
+                    final_data["route_pages"].update(chunk_data["route_pages"])
                                     
-                        break # 성공 시 재시도 루프 탈출
-                    except Exception as e:
-                        print(f"    - 청크 {idx+1} 호출 오류: {e}", flush=True)
-                        if attempt == max_retries - 1:
-                            print(f"    - 청크 {idx+1} 분석 포기", flush=True)
 
             # 최종 데이터 정규화 및 보강
             enriched_station_info = self._enrich_station_info(final_data["station_info"])
@@ -875,6 +890,75 @@ JSON 형식:
                             shutil.rmtree(temp_dir, ignore_errors=True)
                     except Exception:
                         pass
+
+    def _call_works_ai_api(self, content, is_multimodal=False, max_retries=3):
+        """Works AI API 호출 공통 메서드 (재시도 및 결과 정규화 포함)"""
+        import json
+        import requests
+        import time
+        
+        headers = {
+            "Authorization": f"Bearer {self.works_ai_api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # 텍스트 단독인 경우와 멀티모달인 경우 메시지 구성 처리
+        if not is_multimodal:
+            messages = [{"role": "user", "content": [{"type": "text", "text": str(content)}]}]
+        else:
+            messages = [{"role": "user", "content": content}]
+
+        payload = {
+            "model": self.works_ai_model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.0,
+            "thinking_level": "medium",
+            "include_thoughts": False
+        }
+
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    f"{self.works_ai_base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=300
+                )
+                response.raise_for_status()
+                
+                result = response.json()
+                content_str = result['choices'][0]['message']['content']
+                data = json.loads(self._clean_json_response(content_str))
+                
+                # 리스트 형태로 온 경우 첫 번째 항목 사용
+                if isinstance(data, list) and len(data) > 0:
+                    data = data[0]
+                elif not isinstance(data, dict):
+                    data = {}
+                    
+                return data
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"      - API 호출 시도 {attempt+1} 실패: {e}. 2초 후 재시도...", flush=True)
+                    time.sleep(2)
+                else:
+                    logger.error(f"Works AI API 최종 호출 실패: {e}")
+        return None
+
+    def _clean_json_response(self, text):
+        """JSON 응답 문자열에서 마크다운 코드 블록 등을 제거하고 순수 JSON만 반환"""
+        if not text:
+            return "{}"
+        
+        # ```json ... ``` 또는 ``` ... ``` 블록 제거
+        text = re.sub(r'```json\s*', '', text)
+        text = re.sub(r'```\s*', '', text)
+        
+        # 앞뒤 공백 제거
+        text = text.strip()
+        
+        return text
 
     def _get_default_extraction_result(self):
         """기본 추출 결과 반환"""

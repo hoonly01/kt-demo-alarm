@@ -262,7 +262,20 @@ class BusNoticeService:
 
             notices = cls.crawler.filter_by_date(cls.cached_notices, target_date)
             if not notices:
-                await cls.send_error_callback(callback_url, normalized_route, f"날짜 {target_date}에 통제 정보가 없습니다.")
+                # '통제 정보 없음'은 오류가 아니므로 친절한 안내 메시지 전송
+                callback_message = {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                }
+                            }
+                        ]
+                    }
+                }
+                await cls._send_callback_request(callback_url, callback_message)
                 return
 
             # 해당 노선 찾기
@@ -281,7 +294,20 @@ class BusNoticeService:
                         break
             
             if not target_notice:
-                await cls.send_error_callback(callback_url, normalized_route, f"날짜 {target_date}에 노선 {normalized_route}의 통제 정보가 없습니다.")
+                # 해당 날짜에 공지는 있으나, 요청한 노선은 통제 대상이 아닌 경우
+                callback_message = {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                }
+                            }
+                        ]
+                    }
+                }
+                await cls._send_callback_request(callback_url, callback_message)
                 return
 
             # 이미지 생성/조회
@@ -306,7 +332,21 @@ class BusNoticeService:
                     notice_title, detour_path, image_url, control_periods
                 )
             else:
-                await cls.send_error_callback(callback_url, normalized_route, "이미지 생성에 실패했습니다.")
+                # 이미지는 못 만들었지만 정보는 있는 경우 (최대한 텍스트로라도 안내)
+                notice_title = target_notice.get('title', '제목 없음')
+                callback_message = {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": f"ℹ️ 노선 {normalized_route}번 안내\n\n해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                }
+                            }
+                        ]
+                    }
+                }
+                await cls._send_callback_request(callback_url, callback_message)
 
         except Exception as e:
             logger.error(f"백그라운드 처리 오류: {e}")
@@ -371,7 +411,7 @@ class BusNoticeService:
                 "outputs": [
                     {
                         "simpleText": {
-                            "text": f"❌ 노선 {route_number}번\n\n{error_message}\n\n다시 시도해주세요."
+                            "text": f"❌ 노선 {route_number}번\n\n{error_message}"
                         }
                     }
                 ]

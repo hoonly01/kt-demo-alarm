@@ -50,8 +50,9 @@ async def lifespan(app: FastAPI):
     
     logger.info(f"스케줄러가 시작되었습니다: {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로체크")
     
-    # 버스 알림 서비스: startup에서 초기화하지 않음
-    # 집회 크롤링과 동일하게 스케줄러(BusNoticeService.refresh)에 의해서만 동작
+    # 버스 알림 서비스 초기화 (서버 시작 시 즉시 크롤러 생성 및 데이터 로드)
+    # 이제 사용자가 서버 재시작 직후에도 버스 검색을 바로할 수 있습니다.
+    await BusNoticeService.initialize()
     
     yield
     
