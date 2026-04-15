@@ -39,10 +39,22 @@ def _log_bus_notice_init_result(task: asyncio.Task) -> None:
 
     exc = task.exception()
     if exc:
-        logger.error(f"❌ BusNoticeService 백그라운드 초기화 실패: {exc}")
+        logger.error(
+            "❌ BusNoticeService 백그라운드 초기화 실패",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         return
 
-    logger.info("✅ BusNoticeService 백그라운드 초기화 완료")
+    result = task.result()
+    if result == "success" or getattr(BusNoticeService, "crawler", None) is not None:
+        logger.info("✅ BusNoticeService 백그라운드 초기화 완료")
+        return
+
+    if result == "skipped":
+        logger.info("⏭️ BusNoticeService 백그라운드 초기화 스킵: WORKS_AI_API_KEY 미설정")
+        return
+
+    logger.error("❌ BusNoticeService 백그라운드 초기화 실패: 초기화 결과가 유효하지 않습니다.")
 
 
 @asynccontextmanager
@@ -88,6 +100,8 @@ async def lifespan(app: FastAPI):
             await bus_notice_init_task
         except asyncio.CancelledError:
             logger.info("🛑 종료 중 BusNoticeService 초기화 태스크를 정리했습니다.")
+        except Exception:
+            logger.exception("종료 중 BusNoticeService 초기화 태스크 정리 과정에서 예외가 발생했습니다.")
 
     shutdown_scheduler()
 
