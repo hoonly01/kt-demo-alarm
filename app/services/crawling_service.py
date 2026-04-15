@@ -314,8 +314,8 @@ class CrawlingService:
         else:
             logger.warning("⚠️ [PDF] pdfplumber가 설치되지 않았습니다.")
 
-        if not settings.KAKAO_REST_API_KEY or not settings.KAKAO_REST_API_KEY.strip():
-            error_msg = "❌ KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다."
+        if not settings.KAKAO_LOCATION_API_KEY or not settings.KAKAO_LOCATION_API_KEY.strip():
+            error_msg = "❌ KAKAO_LOCATION_API_KEY 환경변수가 설정되지 않았습니다."
             logger.error(error_msg)
             return {
                 "success": False,
@@ -355,7 +355,7 @@ class CrawlingService:
                 for row in data:
                     places = row.get("장소_원본", [])
                     for place in places:
-                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_REST_API_KEY)
+                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_LOCATION_API_KEY)
 
                         # ✅ 핵심 수정 1: 지오코딩 실패 시 행 건너뜀 (NOT NULL 제약 준수)
                         if lat is None or lon is None:

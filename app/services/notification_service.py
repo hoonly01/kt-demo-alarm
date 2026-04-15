@@ -91,7 +91,7 @@ class NotificationService:
             url = f"https://bot-api.kakao.com/v2/bots/{settings.BOT_ID}/talk"
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
+                "Authorization": f"KakaoAK {settings.KAKAO_EVENT_API_KEY}",
             }
 
             # 클라이언트 컨텍스트 관리
