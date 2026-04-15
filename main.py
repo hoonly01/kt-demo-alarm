@@ -54,6 +54,10 @@ def _log_bus_notice_init_result(task: asyncio.Task) -> None:
         logger.info("⏭️ BusNoticeService 백그라운드 초기화 스킵: WORKS_AI_API_KEY 미설정")
         return
 
+    if result == "failed":
+        logger.error("❌ BusNoticeService 백그라운드 초기화 실패")
+        return
+
     logger.error("❌ BusNoticeService 백그라운드 초기화 실패: 초기화 결과가 유효하지 않습니다.")
 
 

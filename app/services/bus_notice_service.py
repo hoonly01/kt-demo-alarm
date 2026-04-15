@@ -51,8 +51,8 @@ class BusNoticeService:
             cls._image_task.add_done_callback(_log_task_error)
             return "success"
             
-        except Exception as e:
-            logger.error(f"❌ BusNoticeService 초기화 실패: {e}")
+        except Exception:
+            logger.exception("❌ BusNoticeService 초기화 실패")
             cls.crawler = None
             cls.cached_notices = {}
             return "failed"
