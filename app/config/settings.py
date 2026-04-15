@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     """애플리케이션 설정 클래스"""
 
     # --- Kakao API ---
-    KAKAO_REST_API_KEY: str = ""
+    KAKAO_EVENT_API_KEY: str = ""
+    KAKAO_LOCATION_API_KEY: str = ""
     BOT_ID: str = ""
 
     # --- Block IDs for Kakao Chatbot ---

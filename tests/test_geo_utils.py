@@ -59,7 +59,7 @@ async def test_get_location_info_mocked():
     }
     
     # Mock the API Key
-    with patch.object(settings, "KAKAO_REST_API_KEY", "test_key"):
+    with patch.object(settings, "KAKAO_LOCATION_API_KEY", "test_key"):
         # Test with injected client
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.return_value = MagicMock(
@@ -98,7 +98,7 @@ async def test_get_route_coordinates_mocked():
     }
     
     # Mock the API Key
-    with patch.object(settings, "KAKAO_REST_API_KEY", "test_key"):
+    with patch.object(settings, "KAKAO_LOCATION_API_KEY", "test_key"):
         client = AsyncMock(spec=httpx.AsyncClient)
         client.get.return_value = MagicMock(
             status_code=200,

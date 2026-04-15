@@ -134,7 +134,8 @@ cp .env.example .env
 # 또는 직접 생성
 cat > .env << EOF
 # 카카오 API 설정
-KAKAO_REST_API_KEY=your_kakao_rest_api_key
+KAKAO_EVENT_API_KEY=your_kakao_event_api_key
+KAKAO_LOCATION_API_KEY=your_kakao_location_api_key
 BOT_ID=your_bot_id
 
 # 보안 설정 (필수)
@@ -557,7 +558,8 @@ cp .env.example .env  # 또는 수동으로 .env 파일 생성
 ```bash
 # .env 파일이 없는 경우 (git ignored 파일)
 # README의 환경변수 설정 섹션을 참고하여 .env 파일을 직접 생성
-echo "KAKAO_REST_API_KEY=your_key_here" > .env
+echo "KAKAO_EVENT_API_KEY=your_event_key_here" > .env
+echo "KAKAO_LOCATION_API_KEY=your_location_key_here" >> .env
 echo "BOT_ID=your_bot_id_here" >> .env
 ```
 
