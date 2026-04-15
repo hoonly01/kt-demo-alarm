@@ -88,7 +88,7 @@ class NotificationService:
                 params=None
             )
 
-            url = settings.KAKAO_BOT_API_URL.format(bot_id=settings.BOT_ID)
+            url = f"https://bot-api.kakao.com/v2/bots/{settings.BOT_ID}/talk"
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
