@@ -20,14 +20,14 @@ class BusNoticeService:
     
     @classmethod
     async def initialize(cls):
-        """크롤러 초기화 및 데이터 로드"""
+        """크롤러 초기화 및 데이터 로드 상태를 반환한다."""
         try:
             # 설정에서 키 존재 확인
             has_works_ai = bool(settings.WORKS_AI_API_KEY)
 
             if not has_works_ai:
                 logger.warning("⚠️ 분석을 위한 Works AI API 키가 설정되지 않아 서비스를 사용할 수 없습니다.")
-                return
+                return "skipped"
 
             logger.info("🚌 BusNoticeService 초기화 중... (Works AI 사용)")
             
@@ -49,10 +49,13 @@ class BusNoticeService:
 
             cls._image_task = asyncio.create_task(cls.generate_all_route_images())
             cls._image_task.add_done_callback(_log_task_error)
+            return "success"
             
         except Exception as e:
             logger.error(f"❌ BusNoticeService 초기화 실패: {e}")
+            cls.crawler = None
             cls.cached_notices = {}
+            return "failed"
 
     @classmethod
     async def refresh(cls):
@@ -430,4 +433,3 @@ class BusNoticeService:
                     logger.info(f"콜백 전송 결과: {response.status}")
         except Exception as e:
             logger.error(f"콜백 전송 실패: {e}")
-

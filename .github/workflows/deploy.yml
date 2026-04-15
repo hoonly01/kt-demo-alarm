@@ -176,8 +176,8 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # Remove all unused images (stack is down, so old app image is safe to remove)
-            docker image prune -a -f || true
+            # Remove only dangling image layers to keep deploy cleanup cheap.
+            docker image prune -f || true
 
             echo "=== Disk usage (after prune) ==="
             df -h
@@ -205,14 +205,25 @@ jobs:
               chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache || true
 
             echo "Waiting for service health..."
+            service_healthy=0
             for i in {1..60}; do
               if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
                 echo "✅ Service is healthy on localhost:8000"
+                service_healthy=1
                 break
               fi
               echo "Attempt $i: not ready yet..."
               sleep 5
             done
+
+            if [ "$service_healthy" -ne 1 ]; then
+              echo "❌ Service did not become healthy on localhost:8000 within 300 seconds"
+              echo "docker compose ps:"
+              docker compose ps
+              echo "Recent logs:"
+              docker compose logs --tail=100
+              exit 1
+            fi
 
             echo "docker compose ps:"
             docker compose ps
