@@ -147,7 +147,7 @@ async def get_bus_service_status():
 async def manual_bus_refresh():
     """버스 통제 공지 수동 재크롤링 (테스트/운영용)"""
     if not BusNoticeService.crawler:
-        raise HTTPException(status_code=503, detail="크롤러가 초기화되지 않았습니다. (GEMINI_API_KEY 확인)")
+        raise HTTPException(status_code=503, detail="크롤러가 초기화되지 않았습니다. (WORKS_AI_API_KEY 확인)")
     await BusNoticeService.refresh()
     return {
         "message": "버스 통제 공지 재크롤링 완료",

@@ -22,7 +22,7 @@ client = TestClient(app)
 
 @pytest.mark.asyncio
 async def test_bus_notice_service_initialization(monkeypatch):
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
+    monkeypatch.setattr(settings, "WORKS_AI_API_KEY", "test_key")
     print("Testing BusNoticeService initialization...")
     # Mock TOPISCrawler
     with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
@@ -39,7 +39,7 @@ async def test_bus_notice_service_initialization(monkeypatch):
 @pytest.mark.asyncio
 async def test_bus_notice_service_refresh(monkeypatch):
     """refresh()가 크롤러를 재호출하고 캐시를 갱신하는지 검증"""
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
+    monkeypatch.setattr(settings, "WORKS_AI_API_KEY", "test_key")
     with patch("app.services.bus_notice_service.TOPISCrawler") as MockCrawler:
         mock_instance = MockCrawler.return_value
         mock_instance.crawl_notices.return_value = (
@@ -61,7 +61,7 @@ async def test_bus_notice_service_refresh(monkeypatch):
 @pytest.mark.asyncio
 async def test_bus_notice_service_refresh_without_crawler(monkeypatch):
     """크롤러가 초기화되지 않은 상태에서 refresh()를 호출하면 새로 생성하고 동작하는지 검증"""
-    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test_key")
+    monkeypatch.setattr(settings, "WORKS_AI_API_KEY", "test_key")
     # Reset class-level state for deterministic testing
     monkeypatch.setattr(BusNoticeService, "crawler", None)
     monkeypatch.setattr(BusNoticeService, "cached_notices", {})
