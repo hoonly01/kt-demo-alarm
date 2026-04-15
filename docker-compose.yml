@@ -12,8 +12,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - topis_cache:/app/topis_cache
-      - topis_attachments:/app/topis_attachments
+      - ./topis_cache:/app/topis_cache
+      - ./topis_attachments:/app/topis_attachments
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
@@ -38,5 +38,3 @@ volumes:
   # postgres_data:  # Uncomment if using PostgreSQL
   data_volume:
   logs_volume:
-  topis_cache:
-  topis_attachments:

@@ -19,8 +19,7 @@ class Settings(BaseSettings):
     # --- TMAP API ---
     TMAP_APP_KEY: str = ""
 
-    # --- AI ---
-    GEMINI_API_KEY: str = ""
+    # Works AI (BizRouter) 설정
     WORKS_AI_API_KEY: Optional[str] = None
     WORKS_AI_BASE_URL: str = "https://api.bizrouter.ai/v1"
     WORKS_AI_MODEL: str = "google/gemini-3.1-pro-preview"

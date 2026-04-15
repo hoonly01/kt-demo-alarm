@@ -24,17 +24,15 @@ class BusNoticeService:
         try:
             # 설정에서 키 존재 확인
             has_works_ai = bool(settings.WORKS_AI_API_KEY)
-            has_gemini = bool(settings.GEMINI_API_KEY)
 
-            if not has_works_ai and not has_gemini:
-                logger.warning("⚠️ 분석을 위한 AI API 키(Works AI 또는 Gemini)가 설정되지 않아 서비스를 사용할 수 없습니다.")
+            if not has_works_ai:
+                logger.warning("⚠️ 분석을 위한 Works AI API 키가 설정되지 않아 서비스를 사용할 수 없습니다.")
                 return
 
-            logger.info(f"🚌 BusNoticeService 초기화 중... (Works AI: {has_works_ai}, Gemini Fallback: {has_gemini})")
+            logger.info("🚌 BusNoticeService 초기화 중... (Works AI 사용)")
             
-            # 크롤러 인스턴스 생성 (Gemini 키는 있으면 넣고 없으면 None)
+            # 크롤러 인스턴스 생성
             cls.crawler = TOPISCrawler(
-                gemini_api_key=settings.GEMINI_API_KEY if has_gemini else None,
                 cache_file="topis_cache/topis_cache.json"
             )
             
@@ -62,15 +60,14 @@ class BusNoticeService:
         
         크롤러가 초기화되지 않은 경우(서버 최초 기동 후 첫 실행) 자동으로 초기화합니다.
         """
-        if not settings.GEMINI_API_KEY:
-            logger.warning("⚠️ GEMINI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
+        if not settings.WORKS_AI_API_KEY:
+            logger.warning("⚠️ WORKS_AI_API_KEY가 설정되지 않아 버스 알림 서비스를 사용할 수 없습니다.")
             return
 
         # 크롤러 미초기화 시 자동 생성 (서버 시작 후 첫 스케줄러 실행)
         if not cls.crawler:
             logger.info("🚌 BusNoticeService 크롤러 최초 초기화...")
             cls.crawler = TOPISCrawler(
-                gemini_api_key=settings.GEMINI_API_KEY,
                 cache_file="topis_cache/topis_cache.json"
             )
 

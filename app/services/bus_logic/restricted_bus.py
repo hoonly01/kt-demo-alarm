@@ -28,7 +28,6 @@ import pandas as pd
 import shutil
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
-import google.generativeai as genai
 from app.config.settings import settings
 
 try:
@@ -61,7 +60,7 @@ except ImportError:
 
 
 class TOPISCrawler:
-    def __init__(self, gemini_api_key=None, cache_file=None, download_folder=None):
+    def __init__(self, cache_file=None, download_folder=None):
         """TOPIS 크롤러 초기화"""
         from app.config.settings import settings
         self.base_url = "https://topis.seoul.go.kr"
@@ -89,15 +88,10 @@ class TOPISCrawler:
         })
         
         # AI 설정 (settings.py 연동)
-        self.gemini_api_key = gemini_api_key or settings.GEMINI_API_KEY
         self.works_ai_api_key = settings.WORKS_AI_API_KEY
         self.works_ai_base_url = settings.WORKS_AI_BASE_URL
         self.works_ai_model = settings.WORKS_AI_MODEL
         
-        if self.gemini_api_key:
-            genai.configure(api_key=self.gemini_api_key)
-            self.gemini_model = genai.GenerativeModel("gemini-2.5-pro")
-
     def _parse_period(self, period_str):
         """기간 문자열을 datetime 객체로 파싱"""
         try:
@@ -619,7 +613,7 @@ class TOPISCrawler:
         return enriched
 
     def _extract_with_gemini(self, content, attachments, notice_seq, save_attachments=False, max_retries=5):
-        """Gemini를 사용한 정보 추출 (재시도 로직 포함)"""
+        """Works AI(BizRouter) 전용 정보 추출 (프롬프트 포함)"""
         prompt = f"""서울시 버스 운행 변경 공지사항을 분석하여 다음 정보를 JSON 형식으로 추출하세요.
 
 본문과 첨부파일에서 다음 정보를 모두 찾아주세요:
@@ -678,16 +672,15 @@ JSON 형식:
 본문:
 {content}"""
 
-        # 웍스 AI 사용 모드 (content 인자 추가)
+        # 웍스 AI 사용 모드
         if self.works_ai_api_key:
             return self._extract_with_works_ai(prompt, attachments, notice_seq, content=content, save_attachments=save_attachments, max_retries=max_retries)
         
-        # 기존 Gemini 사용 모드 (Fallback) - 키가 있을 때만 시도
-        if self.gemini_api_key:
-            return self._extract_with_gemini_native(prompt, attachments, notice_seq, save_attachments, max_retries)
-        
-        # 키도 없고 Works AI도 실패했다면 기본값 반환
+        # 설정된 키가 없을 경우
+        logger.error("Works AI API 키가 설정되지 않았습니다.")
         return self._get_default_extraction_result()
+
+
 
     def _extract_with_works_ai(self, prompt, attachments, notice_seq, content=None, save_attachments=False, max_retries=3):
         """Works AI (BizRouter)를 사용한 정보 추출 (대용량 PDF 분할 분석 적용)"""
