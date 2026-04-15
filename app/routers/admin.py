@@ -129,17 +129,50 @@ def get_total_users() -> int:
         result = cursor.fetchone()
         return result[0] if result else 0
 
+def _get_table_columns(cursor, table_name: str) -> Set[str]:
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    columns = set()
+    for row in cursor.fetchall():
+        if isinstance(row, dict):
+            columns.add(row["name"])
+        else:
+            columns.add(row[1])
+    return columns
+
 def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
     with get_db_connection() as conn:
         conn.row_factory = dict_factory
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, bot_user_key, plusfriend_user_key, open_id, active, is_alarm_on, 
-                   departure_name, arrival_name, marked_bus, 
-                   COALESCE(favorite_zone, 0) as favorite_zone,
-                   first_message_at as created_at, message_count 
-            FROM users 
-            ORDER BY id DESC 
+
+        user_columns = _get_table_columns(cursor, "users")
+        select_fields = [
+            "id",
+            "bot_user_key",
+            "active",
+            "departure_name",
+            "arrival_name",
+            "marked_bus",
+            "first_message_at as created_at",
+            "message_count",
+        ]
+
+        optional_fields = {
+            "plusfriend_user_key": "plusfriend_user_key",
+            "open_id": "open_id",
+            "is_alarm_on": "is_alarm_on",
+            "favorite_zone": "COALESCE(favorite_zone, 0) as favorite_zone",
+        }
+
+        for column_name, sql in optional_fields.items():
+            if column_name in user_columns:
+                select_fields.append(sql)
+            else:
+                select_fields.append(f"NULL as {column_name}" if column_name != "favorite_zone" else "0 as favorite_zone")
+
+        cursor.execute(f"""
+            SELECT {', '.join(select_fields)}
+            FROM users
+            ORDER BY id DESC
             LIMIT ? OFFSET ?
         """, (limit, offset))
         return cursor.fetchall()
@@ -152,60 +185,64 @@ async def dashboard(
     _username: str = Depends(verify_admin)
 ):
     """Render the back-office dashboard"""
-    
-    offset = (page - 1) * page_size
-    
-    # Run database queries in parallel
-    events, alarms, users, total_users = await asyncio.gather(
-        asyncio.to_thread(fetch_recent_events),
-        asyncio.to_thread(fetch_recent_alarms),
-        asyncio.to_thread(fetch_paginated_users, page_size, offset),
-        asyncio.to_thread(get_total_users)
-    )
-    
-    total_pages = math.ceil(total_users / page_size) if total_users > 0 else 1
-    
-    # Get Scheduler Status
-    scheduler_status = get_scheduler_status()
-    
-    # Calculate some summary statistics
-    total_events = len(events)
-    total_alarms = len(alarms)
-    total_alarms_sent = sum(a.get("total_recipients", 0) for a in alarms)
-    successful_sends = sum(a.get("successful_sends", 0) for a in alarms)
-    failed_sends = sum(a.get("failed_sends", 0) for a in alarms)
-    
-    success_rate = 0
-    if total_alarms_sent > 0:
-        success_rate = round((successful_sends / total_alarms_sent) * 100, 1)
 
-    return templates.TemplateResponse(
-        "admin_dashboard.html",
-        {
-            "request": request,
-            "events": events,
-            "alarms": alarms,
-            "users": users,
-            "scheduler_status": scheduler_status,
-            "pagination": {
-                "page": page,
-                "page_size": page_size,
-                "total_users": total_users,
-                "total_pages": total_pages,
-                "has_previous": page > 1,
-                "has_next": page < total_pages,
-                "previous_page": page - 1,
-                "next_page": page + 1
-            },
-            "stats": {
-                "total_events": total_events,
-                "total_alarms": total_alarms,
-                "total_alarms_sent": total_alarms_sent,
-                "success_rate": success_rate,
-                "failed_sends": failed_sends
+    try:
+        offset = (page - 1) * page_size
+
+        # Run database queries in parallel
+        events, alarms, users, total_users = await asyncio.gather(
+            asyncio.to_thread(fetch_recent_events),
+            asyncio.to_thread(fetch_recent_alarms),
+            asyncio.to_thread(fetch_paginated_users, page_size, offset),
+            asyncio.to_thread(get_total_users)
+        )
+
+        total_pages = math.ceil(total_users / page_size) if total_users > 0 else 1
+
+        # Get Scheduler Status
+        scheduler_status = get_scheduler_status()
+
+        # Calculate some summary statistics
+        total_events = len(events)
+        total_alarms = len(alarms)
+        total_alarms_sent = sum(a.get("total_recipients", 0) for a in alarms)
+        successful_sends = sum(a.get("successful_sends", 0) for a in alarms)
+        failed_sends = sum(a.get("failed_sends", 0) for a in alarms)
+
+        success_rate = 0
+        if total_alarms_sent > 0:
+            success_rate = round((successful_sends / total_alarms_sent) * 100, 1)
+
+        return templates.TemplateResponse(
+            "admin_dashboard.html",
+            {
+                "request": request,
+                "events": events,
+                "alarms": alarms,
+                "users": users,
+                "scheduler_status": scheduler_status,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_users": total_users,
+                    "total_pages": total_pages,
+                    "has_previous": page > 1,
+                    "has_next": page < total_pages,
+                    "previous_page": page - 1,
+                    "next_page": page + 1
+                },
+                "stats": {
+                    "total_events": total_events,
+                    "total_alarms": total_alarms,
+                    "total_alarms_sent": total_alarms_sent,
+                    "success_rate": success_rate,
+                    "failed_sends": failed_sends
+                }
             }
-        }
-    )
+        )
+    except Exception as e:
+        logger.exception("Admin dashboard rendering failed")
+        raise HTTPException(status_code=500, detail="Admin dashboard failed") from e
 
 def _task_done_callback(task_key: str):
     def callback(task: asyncio.Task):
@@ -273,4 +310,3 @@ async def trigger_test_alarm_for_user(
         _background_tasks[task_key] = task
         task.add_done_callback(_task_done_callback(task_key))
     return {"message": "Scheduled"}
-
