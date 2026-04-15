@@ -21,9 +21,6 @@ class Settings(BaseSettings):
     # --- TMAP API Configuration ---
     TMAP_APP_KEY: str = ""
 
-    # Gemini API 설정 (버스 통제 알림용)
-    GEMINI_API_KEY: str = ""
-
     # Works AI (BizRouter) 설정
     WORKS_AI_API_KEY: Optional[str] = None
     WORKS_AI_BASE_URL: str = "https://api.bizrouter.ai/v1"
