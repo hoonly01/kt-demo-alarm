@@ -95,7 +95,8 @@ jobs:
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
-          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_EVENT_API_KEY: ${{ secrets.KAKAO_EVENT_API_KEY }}
+          KAKAO_LOCATION_API_KEY: ${{ secrets.KAKAO_LOCATION_API_KEY }}
           BOT_ID: ${{ secrets.BOT_ID }}
           API_KEY: ${{ secrets.API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -124,7 +125,8 @@ jobs:
           # Create .env on runner (printf prevents shell injection from special chars in secret values)
           # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
           printf '%s\n' \
-            "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" \
+            "KAKAO_EVENT_API_KEY=${KAKAO_EVENT_API_KEY}" \
+            "KAKAO_LOCATION_API_KEY=${KAKAO_LOCATION_API_KEY}" \
             "BOT_ID=${BOT_ID}" \
             "API_KEY=${API_KEY}" \
             "GEMINI_API_KEY=${GEMINI_API_KEY}" \
