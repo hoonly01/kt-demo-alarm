@@ -8,8 +8,6 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-      - DEBUG=false
-      - LOG_LEVEL=INFO
       - DATABASE_PATH=/app/data/kt_demo_alarm.db
     volumes:
       - ./data:/app/data

@@ -107,6 +107,7 @@ jobs:
           FAVORITE_ZONE_SAVE_BLOCK_ID: ${{ secrets.FAVORITE_ZONE_SAVE_BLOCK_ID }}
           ROUTE_SETUP_BLOCK_ID: ${{ secrets.ROUTE_SETUP_BLOCK_ID }}
           ROUTE_DELETE_BLOCK_ID: ${{ secrets.ROUTE_DELETE_BLOCK_ID }}
+          WORKS_AI_API_KEY: ${{ secrets.WORKS_AI_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -114,7 +115,14 @@ jobs:
           echo "$EC2_SSH_KEY" > ec2-key.pem
           chmod 600 ec2-key.pem
 
+          # PUBLIC_DOMAIN 설정 확인
+          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
+            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
+            exit 1
+          fi
+
           # Create .env on runner (printf prevents shell injection from special chars in secret values)
+          # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
           printf '%s\n' \
             "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" \
             "BOT_ID=${BOT_ID}" \
@@ -126,13 +134,8 @@ jobs:
             "FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}" \
             "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
             "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
-            "DEBUG=false" \
-            "LOG_LEVEL=INFO" \
-            "DATABASE_PATH=/app/data/kt_demo_alarm.db" \
-            "CRAWLING_HOUR=7" \
-            "CRAWLING_MINUTE=00" \
-            "ROUTE_CHECK_HOUR=8" \
-            "ROUTE_CHECK_MINUTE=00" \
+            "RENDER_EXTERNAL_URL=https://${PUBLIC_DOMAIN}" \
+            "WORKS_AI_API_KEY=${WORKS_AI_API_KEY}" \
             "ADMIN_USER=${ADMIN_USER}" \
             "ADMIN_PASS=${ADMIN_PASS}" \
             > .env
@@ -145,12 +148,6 @@ jobs:
           scp -o StrictHostKeyChecking=no -i ec2-key.pem \
             docker-compose.yml .env \
             ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
-
-          # PUBLIC_DOMAIN 설정 확인
-          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
-            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
-            exit 1
-          fi
 
           # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
           # /tmp 대신 예측 불가능한 임시 파일 사용
@@ -237,7 +234,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Checking public health endpoint..."
-          for i in {1..10}; do
+          for i in {1..24}; do
             if curl -fsS https://${PUBLIC_DOMAIN}/ > /dev/null 2>&1; then
               echo "✅ Application is reachable: https://${PUBLIC_DOMAIN}/"
               exit 0
