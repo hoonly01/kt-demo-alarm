@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-집회 데이터 크롤링 서비스 - 버전 3: 개선된 지오코딩 및 SPATIC 처리
+집회 데이터 크롤링 서비스 - 버전 4.1: DB 스키마 완벽 호환 및 오류 수정
 
 SMPA(서울경찰청) + SPATIC 양쪽 소스에서 집회 정보를 수집하고,
 Kakao API로 지오코딩을 수행하여 events 테이블에 동기화합니다.
 
-[수정사항]
-1. 지오코딩 실패 시 NULL 값 반환 (기본 좌표 미사용)
-2. PLACE_NAME_REPLACE_MAP에 '효자PB' 매핑 추가
-3. SPATIC 테이블에서 장소 필터링 강화 및 진단 로깅 추가
-4. 특수문자 제거 강화로 '舊)효자PB' 형식 처리 개선
-5. pdfminer 실패 시 자동으로 pdfplumber로 폴백합니다.
+[수정사항 v4.1]
+1. ✅ NOT NULL 제약 준수: 지오코딩 실패 시 행 전체 건너뜀 (continue 추가)
+2. ✅ NULL 값 사전 검증: DB 저장 전 위도/경도 재검증
+3. ✅ INSERT 오류 상세 로깅: IntegrityError/OperationalError 구분
+4. ✅ SPATIC 테이블 디버깅: 헤더 정보 로깅
+5. ✅ PDF 폴백 지원 (pdfplumber)
 """
 
 import re
@@ -19,6 +19,7 @@ import time
 import pathlib
 import logging
 import asyncio
+import sqlite3
 from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Tuple, Optional
@@ -32,18 +33,15 @@ from pdfminer.high_level import extract_text
 from pdfminer.layout import LAParams
 from playwright.sync_api import sync_playwright
 
-# pdfplumber는 선택적 (폴백용)
 try:
     import pdfplumber
-
     PDFPLUMBER_AVAILABLE = True
 except ImportError:
     PDFPLUMBER_AVAILABLE = False
 
-# 로거 설정
 logger = logging.getLogger(__name__)
 
-# ------------------------------- 상수/설정 ------------------------------------
+# 상수/설정
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
 if not pathlib.Path(DATABASE_PATH).is_absolute():
     DB_ABS_PATH = BASE_DIR / DATABASE_PATH
@@ -51,41 +49,33 @@ else:
     DB_ABS_PATH = pathlib.Path(DATABASE_PATH)
 DATA_DIR = DB_ABS_PATH.parent
 
-# Kakao API URLs
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 KAKAO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 
-# SPATIC URLs
 SPATIC_BASE_URL = "https://www.spatic.go.kr"
 SPATIC_LIST_URL = f"{SPATIC_BASE_URL}/spatic/main/assem.do"
 SPATIC_DETAIL_FMT = f"{SPATIC_BASE_URL}/spatic/assem/getInfoView.do?mgrSeq={{mgrSeq}}"
 
-# SMPA URLs
 SMPA_BASE_URL = "https://www.smpa.go.kr"
 SMPA_LIST_URL = f"{SMPA_BASE_URL}/user/nd54882.do"
 
-# HTTP Headers
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 }
 
-# 서울 중심 좌표
 DEFAULT_SEOUL_LAT = 37.5665
 DEFAULT_SEOUL_LON = 126.9780
 
-# Kakao API 설정
 KAKAO_API_TIMEOUT = 5
 KAKAO_RATE_LIMIT_DELAY = 0.1
 MAX_GEOCODING_RETRIES = 2
 GEOCODING_RETRY_DELAY = 1
 
-# PDF 처리
 PDF_EXTRACTION_TIMEOUT = 30
 
 
-# --------------------------- 공통 유틸리티 ---------------------------
+# 공통 유틸리티
 def ensure_dir(p: pathlib.Path) -> None:
-    """디렉토리 생성"""
     try:
         p.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -93,12 +83,10 @@ def ensure_dir(p: pathlib.Path) -> None:
 
 
 def clean_text(t: str) -> str:
-    """텍스트 공백 정규화"""
     return re.sub(r"\s+", " ", t or "").strip()
 
 
 def parse_date_any(s: str) -> Optional[Tuple[str, str, str]]:
-    """다양한 날짜 형식에서 (YYYY, MM, DD) 추출"""
     s = clean_text(s)
     m = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", s)
     if m:
@@ -107,7 +95,6 @@ def parse_date_any(s: str) -> Optional[Tuple[str, str, str]]:
 
 
 def time_range_to_tuple(s: str) -> Optional[Tuple[str, str]]:
-    """시간 범위 문자열을 (시작, 종료) 튜플로 변환"""
     if not s:
         return None
     s = clean_text(s).replace("∼", "~").replace("〜", "~").replace("–", "-")
@@ -118,7 +105,6 @@ def time_range_to_tuple(s: str) -> Optional[Tuple[str, str]]:
 
 
 def is_valid_place(place: str) -> bool:
-    """유효한 장소인지 검증"""
     place = place.strip()
 
     if len(place) < 2 or place.isdigit():
@@ -141,7 +127,6 @@ def is_valid_place(place: str) -> bool:
 
 
 def split_places(s: str) -> List[str]:
-    """장소 텍스트를 개별 장소로 분리"""
     s = clean_text(s).replace("\n", " / ")
     s = re.sub(r'[①-⑨]', ' / ', s)
     parts = re.split(r"\s*(?:→|↔|⟷|⇒|~|/|,|▶|⇄|↔|内|內|※)\s*", s)
@@ -159,15 +144,7 @@ def split_places(s: str) -> List[str]:
     return list(OrderedDict.fromkeys(filtered))
 
 
-# --------------------------- PDF 추출 유틸리티 ---------------------------
 def extract_pdf_text_with_fallback(pdf_path: pathlib.Path) -> Optional[str]:
-    """
-    PDF에서 텍스트 추출 (pdfminer → pdfplumber 폴백)
-
-    Returns:
-        추출된 텍스트 또는 None
-    """
-    # ✅ 진단 1: PDFminer 시도
     try:
         logger.info(f"[PDF] pdfminer 텍스트 추출 시도...")
         laparams = LAParams(line_margin=0.2, word_margin=0.1)
@@ -175,14 +152,12 @@ def extract_pdf_text_with_fallback(pdf_path: pathlib.Path) -> Optional[str]:
 
         if text and len(text.strip()) >= 10:
             logger.info(f"[PDF] pdfminer 추출 성공 (길이: {len(text)} 글자)")
-            logger.debug(f"[PDF] 샘플 (첫 300글자):\n{text[:300]}")
             return text
         else:
             logger.warning(f"[PDF] pdfminer 추출 결과 불충분 (길이: {len(text) if text else 0})")
     except Exception as e:
         logger.warning(f"[PDF] pdfminer 추출 실패: {e}")
 
-    # ✅ 진단 2: pdfplumber 폴백
     if PDFPLUMBER_AVAILABLE:
         try:
             logger.info(f"[PDF] pdfplumber 텍스트 추출 시도 (폴백)...")
@@ -196,7 +171,6 @@ def extract_pdf_text_with_fallback(pdf_path: pathlib.Path) -> Optional[str]:
 
             if text and len(text.strip()) >= 10:
                 logger.info(f"[PDF] pdfplumber 추출 성공 (길이: {len(text)} 글자)")
-                logger.debug(f"[PDF] 샘플 (첫 300글자):\n{text[:300]}")
                 return text
             else:
                 logger.warning(f"[PDF] pdfplumber 추출 결과 불충분 (길이: {len(text)})")
@@ -208,11 +182,10 @@ def extract_pdf_text_with_fallback(pdf_path: pathlib.Path) -> Optional[str]:
     return None
 
 
-# --------------------------- 지오코딩 (Kakao) ---------------------------
 PLACE_NAME_REPLACE_MAP = {
     "효자파출소": "청운파출소",
     "효자치안센터": "청운파출소",
-    "효자PB": "효자동",  # ✅ 수정 1: 효자PB 매핑 추가
+    "효자PB": "효자동",
     "남대문서": "남대문경찰서",
     "파이낸스": "서울파이낸스센터",
     "의사당역": "국회의사당역",
@@ -222,11 +195,8 @@ PLACE_NAME_REPLACE_MAP = {
 
 
 def normalize_place_name_for_kakao(place: str) -> str:
-    """Kakao API 쿼리용 장소명 정규화"""
     t = place.strip()
-
     t = re.sub(r'[舊新\(\)（）]', '', t)
-
     t = t.replace("구)", "").replace("(구)", "")
     t = re.sub(r'\d+(\.\d+)?km', '', t)
     t = re.sub(r'[<\[\(].*?[>\]\)]', '', t)
@@ -249,7 +219,6 @@ def _kakao_api_call(
         api_key: str,
         attempt: int = 1
 ) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    """Kakao API 호출"""
     headers = {"Authorization": f"KakaoAK {api_key}"}
     try:
         r = session.get(
@@ -288,7 +257,6 @@ def _kakao_api_call(
 
 def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[
     Optional[float], Optional[float], Optional[str]]:
-    """Kakao API를 사용한 다중 쿼리 지오코딩"""
     if not api_key or not api_key.strip():
         logger.error("[Kakao] API Key가 설정되지 않았습니다.")
         return None, None, None
@@ -332,7 +300,6 @@ def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[
     return None, None, None
 
 
-# --------------------------- 서비스 클래스 ---------------------------
 class CrawlingService:
     """크롤링 서비스 클래스"""
 
@@ -342,11 +309,10 @@ class CrawlingService:
         logger.info("🔄 [스케줄러] 집회 정보 크롤링을 시작합니다.")
         ensure_dir(DATA_DIR)
 
-        # pdfplumber 사용 가능 상태 로그
         if PDFPLUMBER_AVAILABLE:
             logger.info("ℹ️ [PDF] pdfplumber가 사용 가능합니다 (폴백 지원)")
         else:
-            logger.warning("⚠️ [PDF] pdfplumber가 설치되지 않았습니다. pdfminer 추출 실패 시 처리 불가능")
+            logger.warning("⚠️ [PDF] pdfplumber가 설치되지 않았습니다.")
 
         if not settings.KAKAO_REST_API_KEY or not settings.KAKAO_REST_API_KEY.strip():
             error_msg = "❌ KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다."
@@ -384,13 +350,22 @@ class CrawlingService:
                 logger.info(f"📍 [정제] 총 {len(data)}건의 데이터 지오코딩 진행 중...")
 
                 final_list = []
-                geocoding_failed_count = 0
+                geocoding_skipped_count = 0
 
                 for row in data:
                     places = row.get("장소_원본", [])
                     for place in places:
                         lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_REST_API_KEY)
 
+                        # ✅ 핵심 수정 1: 지오코딩 실패 시 행 건너뜀 (NOT NULL 제약 준수)
+                        if lat is None or lon is None:
+                            geocoding_skipped_count += 1
+                            logger.warning(
+                                f"[정제] {place} 지오코딩 실패 - 해당 장소 건너뜀 (DB NOT NULL 제약)"
+                            )
+                            continue  # ← 이 줄이 핵심! 이 행을 건너뜀
+                        
+                        # 지오코딩 성공한 경우만 여기 도달
                         new_row = {k: v for k, v in row.items() if k != "장소_원본"}
                         new_row.update({
                             "장소": place,
@@ -399,23 +374,15 @@ class CrawlingService:
                             "지번주소": addr
                         })
 
-                        # ✅ 수정 1: 지오코딩 실패 시 NULL 값 반환 (기본 좌표 미사용)
-                        if lat is None or lon is None:
-                            geocoding_failed_count += 1
-                            logger.warning(
-                                f"[정제] {place} 지오코딩 실패 - NULL 값 저장"
-                            )
-                            new_row["위도"] = None
-                            new_row["경도"] = None
-
                         final_list.append(new_row)
                         time.sleep(KAKAO_RATE_LIMIT_DELAY)
 
-                if geocoding_failed_count > 0:
+                if geocoding_skipped_count > 0:
                     logger.warning(
-                        f"⚠️  [정제] {geocoding_failed_count}건의 장소 지오코딩 실패"
+                        f"⚠️  [정제] {geocoding_skipped_count}건의 장소 지오코딩 실패로 건너뜀"
                     )
 
+                logger.info(f"📍 [정제] 지오코딩 완료! {len(final_list)}건이 DB 저장 대기 중...")
                 inserted_count = cls._sync_to_database(final_list)
 
                 logger.info(f"✅ [완료] 크롤링 및 DB 저장이 완료되었습니다. (저장된 데이터: {inserted_count}건)")
@@ -426,7 +393,7 @@ class CrawlingService:
                     "message": "집회 데이터 크롤링 및 동기화 완료",
                     "total_crawled": len(final_list),
                     "inserted_count": inserted_count,
-                    "geocoding_failed": geocoding_failed_count
+                    "geocoding_skipped": geocoding_skipped_count
                 }
 
             except Exception as e:
@@ -525,13 +492,20 @@ class CrawlingService:
             rows = []
             Y, M, D = target['date'].split('-')
 
-            # ✅ 수정 3: SPATIC 테이블 처리 강화 및 진단 로깅
+            # ✅ SPATIC 테이블 구조 디버깅
+            try:
+                headers = [th.get_text().strip() for th in tb.find_all("th")]
+                if headers:
+                    logger.debug(f"[SPATIC] 테이블 헤더: {headers}")
+            except Exception:
+                pass
+
             for tr in tb.find_all("tr")[1:]:
                 tds = tr.find_all("td")
                 if len(tds) < 3:
+                    logger.debug(f"[SPATIC] 행 건너뜀 (컬럼 부족: {len(tds)} < 3)")
                     continue
 
-                # 시간과 장소 셀 분리
                 time_cell = tds[1].get_text() if len(tds) > 1 else ""
                 place_cell = tds[2].get_text() if len(tds) > 2 else ""
 
@@ -542,14 +516,10 @@ class CrawlingService:
                     logger.debug(f"[SPATIC] 시간 파싱 실패: {time_cell}")
                     continue
 
-                # split_places에서 '→' 구분자와 괄호 정보 처리
                 places = split_places(place_cell)
-
-                # 유효한 장소만 필터링
                 valid_places = [p for p in places if is_valid_place(p)]
 
-                logger.debug(f"[SPATIC] 원본 장소 리스트: {places}")
-                logger.debug(f"[SPATIC] 필터링된 장소 리스트: {valid_places}")
+                logger.debug(f"[SPATIC] 원본 장소: {places} → 필터링: {valid_places}")
 
                 if not valid_places:
                     logger.debug(f"[SPATIC] 유효한 장소 없음: {place_cell[:100]}")
@@ -561,7 +531,7 @@ class CrawlingService:
                     "일": D,
                     "start_time": t_range[0],
                     "end_time": t_range[1],
-                    "장소_원본": valid_places,  # ✅ 필터링된 장소만 저장
+                    "장소_원본": valid_places,
                     "인원": "",
                     "비고": "SPATIC",
                     "title": None,
@@ -577,19 +547,11 @@ class CrawlingService:
 
     @classmethod
     def _scrape_smpa(cls, session: requests.Session) -> List[Dict]:
-        """
-        SMPA(서울경찰청)에서 집회 데이터 수집
-
-        ✅ pdfplumber 폴백 지원 버전:
-        - pdfminer 실패 시 자동으로 pdfplumber 시도
-        - 각 추출 단계별 진단 로깅
-        - 유효한 장소만 필터링
-        """
+        """SMPA(서울경찰청)에서 집회 데이터 수집"""
         logger.info("[SMPA] PDF 수집 시작...")
         today_str = datetime.now().strftime("%y%m%d")
 
         try:
-            # 1. 목록 페이지에서 오늘자 게시글 찾기
             r = session.get(SMPA_LIST_URL, timeout=10)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
@@ -606,12 +568,10 @@ class CrawlingService:
                 logger.warning("[SMPA] 오늘 날짜의 게시글을 찾을 수 없습니다.")
                 return []
 
-            # 2. 뷰 페이지 접속
             r = session.get(target_view, timeout=10)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
 
-            # 3. PDF 다운로드 링크 찾기
             pdf_url = None
             for a in soup.find_all("a"):
                 if ".pdf" in a.get_text().lower():
@@ -624,7 +584,6 @@ class CrawlingService:
                 logger.warning("[SMPA] PDF 다운로드 링크를 찾을 수 없습니다.")
                 return []
 
-            # 4. PDF 다운로드
             logger.info(f"[SMPA] PDF 다운로드 시작: {pdf_url}")
             pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
 
@@ -636,7 +595,6 @@ class CrawlingService:
 
             logger.info(f"[SMPA] PDF 다운로드 완료: {pdf_path} (크기: {pdf_path.stat().st_size} bytes)")
 
-            # 5. PDF 텍스트 추출 (폴백 지원)
             try:
                 text = extract_pdf_text_with_fallback(pdf_path)
 
@@ -653,14 +611,10 @@ class CrawlingService:
                 except Exception as e:
                     logger.warning(f"[SMPA] PDF 파일 삭제 실패: {e}")
 
-            # 6. 텍스트에서 집회 정보 파싱
             pattern = re.compile(r'(?P<start>\d{1,2}:\d{2})\s*~\s*(?P<end>\d{1,2}:\d{2})')
             matches = list(pattern.finditer(text))
 
             logger.info(f"[SMPA] 정규식 매칭 결과: {len(matches)}개 시간대 발견")
-            if matches:
-                for idx, m in enumerate(matches[:3]):
-                    logger.debug(f"[SMPA] Match {idx}: '{m.group()}' at position {m.start()}-{m.end()}")
 
             if not matches:
                 logger.warning("[SMPA] PDF에서 시간 정보를 찾을 수 없습니다.")
@@ -680,11 +634,9 @@ class CrawlingService:
                 place_text = chunk[:head_m.start()] if head_m else chunk
                 places = split_places(place_text)
 
-                # 유효한 장소로 필터링
                 valid_places = [p for p in places if is_valid_place(p)]
 
-                logger.debug(f"[SMPA] 청크 {i} - 원본 장소: {places}")
-                logger.debug(f"[SMPA] 청크 {i} - 필터링된 장소: {valid_places}")
+                logger.debug(f"[SMPA] 청크 {i} - 원본: {places} → 필터링: {valid_places}")
 
                 if not valid_places:
                     logger.debug(f"[SMPA] {i}번째 청크에서 유효한 장소 추출 실패")
@@ -712,7 +664,13 @@ class CrawlingService:
 
     @classmethod
     def _sync_to_database(cls, data_list: List[Dict]) -> int:
-        """크롤링된 집회 정보를 데이터베이스에 저장"""
+        """크롤링된 집회 정보를 데이터베이스에 저장
+        
+        ✅ v4.1 개선사항:
+        - NOT NULL 제약 준수 (사전 검증)
+        - IntegrityError/OperationalError 구분 처리
+        - 상세한 오류 로깅
+        """
         insert_data = []
         skipped_count = 0
 
@@ -737,9 +695,15 @@ class CrawlingService:
             lon = r.get('경도')
             addr = r.get('지번주소')
 
+            # ✅ 핵심 수정 2: NOT NULL 제약 사전 검증
             if start_date is None:
                 skipped_count += 1
-                logger.warning(f"[DB] 필수 값 누락으로 삽입 스킵 - 장소: {place_name}, 시작시간: {st_time}")
+                logger.warning(f"[DB] 필수 값 누락 - 장소: {place_name}, 시작시간: {st_time}")
+                continue
+
+            if lat is None or lon is None:
+                skipped_count += 1
+                logger.warning(f"[DB] NOT NULL 제약 위반 - 위도/경도 NULL - 장소: {place_name}")
                 continue
 
             insert_data.append((
@@ -763,6 +727,8 @@ class CrawlingService:
             logger.warning("[DB] 삽입할 데이터가 없습니다.")
             return 0
 
+        logger.info(f"[DB] {len(insert_data)}건의 데이터 삽입 시도 중...")
+
         try:
             with get_db_connection() as conn:
                 cur = conn.cursor()
@@ -772,25 +738,53 @@ class CrawlingService:
                         CREATE UNIQUE INDEX IF NOT EXISTS idx_events_location_date
                         ON events(location_name, start_date)
                     """)
-                except Exception:
-                    pass
+                    logger.debug("[DB] UNIQUE INDEX 생성/확인 완료")
+                except sqlite3.OperationalError as e:
+                    logger.debug(f"[DB] INDEX 이미 존재: {e}")
+                except Exception as e:
+                    logger.warning(f"[DB] INDEX 생성 중 예기치 않은 오류: {e}")
 
-                cur.executemany("""
-                    INSERT OR IGNORE INTO events (
-                        title, description, location_name, location_address,
-                        latitude, longitude, start_date, end_date,
-                        category, severity_level, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, insert_data)
+                # ✅ 핵심 수정 3: 향상된 예외 처리
+                try:
+                    cur.executemany("""
+                        INSERT OR IGNORE INTO events (
+                            title, description, location_name, location_address,
+                            latitude, longitude, start_date, end_date,
+                            category, severity_level, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, insert_data)
 
-                inserted_count = cur.rowcount
-                conn.commit()
+                    inserted_count = cur.rowcount
+                    conn.commit()
 
-                logger.info(f"✅ [DB] 데이터베이스에 {len(insert_data)}건 중 {inserted_count}건의 이벤트 데이터가 저장되었습니다.")
-                return inserted_count
+                    logger.info(f"✅ [DB] {len(insert_data)}건 중 {inserted_count}건의 이벤트 저장 완료")
+
+                    if inserted_count < len(insert_data):
+                        ignored_count = len(insert_data) - inserted_count
+                        logger.warning(f"[DB] {ignored_count}건의 중복 데이터 무시됨 (INSERT OR IGNORE)")
+
+                    return inserted_count
+
+                except sqlite3.IntegrityError as e:
+                    logger.error(f"❌ [DB] 무결성 제약 오류: {e}")
+                    logger.error(f"[DB] 삽입 시도 샘플: {insert_data[0] if insert_data else 'None'}")
+                    conn.rollback()
+                    return 0
+
+                except sqlite3.OperationalError as e:
+                    logger.error(f"❌ [DB] 운영 오�� (테이블/컬럼 확인 필요): {e}")
+                    logger.error(f"[DB] INSERT 쿼리가 events 테이블과 일치하는지 확인하세요")
+                    conn.rollback()
+                    return 0
+
+                except Exception as e:
+                    logger.error(f"❌ [DB] 예기치 않은 오류: {type(e).__name__}: {e}")
+                    logger.debug(f"[DB] 상세 오류: ", exc_info=True)
+                    conn.rollback()
+                    return 0
 
         except Exception as e:
-            logger.error(f"❌ [DB] SQLite3 저장 중 오류: {e}", exc_info=True)
+            logger.error(f"❌ [DB] 데이터베이스 연결 실패: {e}", exc_info=True)
             return 0
 
 
