@@ -178,8 +178,8 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # Remove only dangling image layers to keep deploy cleanup cheap.
-            docker image prune -f || true
+            # Remove all unused images before loading the new release image.
+            docker image prune -af || true
 
             echo "=== Disk usage (after prune) ==="
             df -h
