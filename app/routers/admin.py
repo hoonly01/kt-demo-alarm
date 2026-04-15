@@ -242,7 +242,7 @@ async def dashboard(
         )
     except Exception as e:
         logger.exception("Admin dashboard rendering failed")
-        raise HTTPException(status_code=500, detail=f"Admin dashboard failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Admin dashboard failed") from e
 
 def _task_done_callback(task_key: str):
     def callback(task: asyncio.Task):
