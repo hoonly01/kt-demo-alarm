@@ -66,6 +66,7 @@ class UserService:
         """
         try:
             cursor = db.cursor()
+            now = datetime.now()
             
             if not plusfriend_key:
                 # plusfriend_key가 없는 경우 기존 레거시 로직(bot_user_key 기준) 사용
@@ -75,19 +76,49 @@ class UserService:
 
             # plusfriend_key로 조회 (primary identifier)
             cursor.execute(
-                "SELECT id, open_id FROM users WHERE plusfriend_user_key = ?",
+                "SELECT id, open_id, bot_user_key FROM users WHERE plusfriend_user_key = ?",
                 (plusfriend_key,)
             )
-            existing = cursor.fetchone()
+            existing_plusfriend = cursor.fetchone()
 
-            if existing:
-                # 기존 사용자 업데이트
+            # plusfriend 미연동 레거시 사용자를 bot_user_key로 조회
+            cursor.execute(
+                "SELECT id, plusfriend_user_key, open_id FROM users WHERE bot_user_key = ?",
+                (bot_user_key,)
+            )
+            existing_bot = cursor.fetchone()
+
+            if existing_plusfriend:
+                # plusfriend_key로 이미 연결된 기존 사용자 업데이트
                 logger.debug(f"✅ 기존 사용자 발견: plusfriend={plusfriend_key}")
                 cursor.execute("""
                     UPDATE users
-                    SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1
+                    SET last_message_at = ?, message_count = message_count + 1, active = 1
                     WHERE plusfriend_user_key = ?
-                """, (bot_user_key, datetime.now(), plusfriend_key))
+                """, (now, plusfriend_key))
+
+                if existing_plusfriend[2] != bot_user_key:
+                    if existing_bot and existing_bot[0] != existing_plusfriend[0]:
+                        logger.warning(
+                            "bot_user_key(%s)와 plusfriend_key(%s)가 서로 다른 사용자 행에 연결되어 있습니다. "
+                            "기존 plusfriend 매핑은 유지하고 활동 시간만 갱신합니다.",
+                            bot_user_key,
+                            plusfriend_key,
+                        )
+                    else:
+                        cursor.execute("""
+                            UPDATE users
+                            SET bot_user_key = ?
+                            WHERE plusfriend_user_key = ?
+                        """, (bot_user_key, plusfriend_key))
+            elif existing_bot:
+                # 기존 bot_user_key 사용자에 plusfriend_key 연결
+                logger.info(f"✅ 기존 bot_user_key 사용자에 plusfriend 연결: {bot_user_key} → {plusfriend_key}")
+                cursor.execute("""
+                    UPDATE users
+                    SET plusfriend_user_key = ?, last_message_at = ?, message_count = message_count + 1, active = 1
+                    WHERE bot_user_key = ?
+                """, (plusfriend_key, now, bot_user_key))
             else:
                 # 웹훅 사용자 찾기 시도 (open_id만 있는 경우)
                 cursor.execute("""
@@ -103,16 +134,16 @@ class UserService:
                     logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan[1]} → plusfriend={plusfriend_key}")
                     cursor.execute("""
                         UPDATE users
-                        SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?
+                        SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?, active = 1
                         WHERE id = ?
-                    """, (bot_user_key, plusfriend_key, datetime.now(), orphan[0]))
+                    """, (bot_user_key, plusfriend_key, now, orphan[0]))
                 else:
                     # 완전 신규 사용자
                     logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
                     cursor.execute("""
                         INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
                         VALUES (?, ?, ?, ?, 1, 1)
-                    """, (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
+                    """, (bot_user_key, plusfriend_key, now, now))
             
             db.commit()
             
