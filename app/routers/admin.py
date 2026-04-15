@@ -2,6 +2,7 @@ import os
 import secrets
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Set
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
@@ -177,6 +178,37 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
         """, (limit, offset))
         return cursor.fetchall()
 
+def _format_user_created_at(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 1_000_000_000_000:
+            timestamp /= 1000.0
+        try:
+            return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+        except (OverflowError, OSError, ValueError):
+            return str(value)[:10]
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    for parser in (datetime.fromisoformat,):
+        try:
+            return parser(text.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    if text.isdigit():
+        return _format_user_created_at(int(text))
+
+    return text[:10]
+
 @router.get("/dashboard")
 async def dashboard(
     request: Request, 
@@ -208,6 +240,9 @@ async def dashboard(
         total_alarms_sent = sum(a.get("total_recipients", 0) for a in alarms)
         successful_sends = sum(a.get("successful_sends", 0) for a in alarms)
         failed_sends = sum(a.get("failed_sends", 0) for a in alarms)
+
+        for user in users:
+            user["created_at_display"] = _format_user_created_at(user.get("created_at"))
 
         success_rate = 0
         if total_alarms_sent > 0:
