@@ -74,6 +74,8 @@ class NotificationService:
         """
         if not settings.BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
+        if not settings.KAKAO_EVENT_API_KEY:
+            return {"success": False, "error": "KAKAO_EVENT_API_KEY가 설정되지 않았습니다"}
 
         try:
             event_api_request = EventAPIRequest(
