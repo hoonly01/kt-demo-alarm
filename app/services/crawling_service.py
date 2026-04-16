@@ -213,7 +213,7 @@ def normalize_place_name_for_kakao(place: str) -> str:
 
 def extract_bracket_location(place: str) -> Optional[str]:
     """
-    ✅ v4.2 신규 함수: <동이름> 형태에서 ��역명 추출
+    ✅ v4.2 신규 함수: <동이름> 형태에서 동 이름 추출
     
     정규화 전에 호출되어 < > 괄호 정보를 보존한다.
     이후 지오코딩 폴백 시 사용된다.
