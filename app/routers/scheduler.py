@@ -1,7 +1,8 @@
 """스케줄러 관련 라우터"""
 from fastapi import APIRouter, HTTPException
 import logging
-
+from app.services.crawling_service import CrawlingService
+from app.services.event_service import EventService
 from app.utils.scheduler_utils import get_scheduler_status
 
 logger = logging.getLogger(__name__)
@@ -47,3 +48,30 @@ async def manual_schedule_test():
     except Exception as e:
         logger.error(f"수동 스케줄 테스트 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"테스트 실행 실패: {str(e)}")
+
+@router.post("/crawl-events")
+async def crawl_events():
+    """
+    ✅ v4.2: 집회 데이터 크롤링 수동 트리거
+    
+    SMPA + SPATIC에서 데이터를 크롤링하고 지오코딩을 수행합니다.
+    
+    Returns:
+        dict: 크롤링 결과 (성공 여부, 저장된 데이터 수 등)
+    """
+    logger.info("🔄 [API] 크롤링 엔드포인트 호출됨")
+    
+    try:
+        # 크롤링 서비스 실행
+        result = await CrawlingService.crawl_and_sync_events()
+        
+        logger.info(f"✅ [API] 크롤링 완료: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ [API] 크롤링 실패: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "total_crawled": 0
+        }
