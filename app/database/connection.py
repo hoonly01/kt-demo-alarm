@@ -8,6 +8,31 @@ from app.database.models import USERS_TABLE_SCHEMA, EVENTS_TABLE_SCHEMA, ALARM_T
 logger = logging.getLogger(__name__)
 DATABASE_PATH = settings.DATABASE_PATH
 
+USER_MIGRATION_COLUMNS = [
+    "id",
+    "bot_user_key",
+    "open_id",
+    "plusfriend_user_key",
+    "first_message_at",
+    "last_message_at",
+    "message_count",
+    "location",
+    "active",
+    "is_alarm_on",
+    "departure_name",
+    "departure_address",
+    "departure_x",
+    "departure_y",
+    "arrival_name",
+    "arrival_address",
+    "arrival_x",
+    "arrival_y",
+    "route_updated_at",
+    "marked_bus",
+    "language",
+    "favorite_zone",
+]
+
 
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수 (FastAPI 용)"""
@@ -77,6 +102,7 @@ def init_db():
         if bot_col and bot_col[3] == 1:  # notnull=1 이면 마이그레이션 필요
             logger.info("🔄 bot_user_key NOT NULL 제약 제거 마이그레이션 시작")
             cursor.execute("PRAGMA foreign_keys=OFF")
+            existing_columns = {column[1] for column in columns}
             cursor.execute('''
                 CREATE TABLE users_migration_tmp (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,7 +129,16 @@ def init_db():
                     favorite_zone INTEGER
                 )
             ''')
-            cursor.execute("INSERT INTO users_migration_tmp SELECT * FROM users")
+            migration_columns = [
+                column_name for column_name in USER_MIGRATION_COLUMNS
+                if column_name in existing_columns
+            ]
+            cursor.execute(
+                f"""
+                INSERT INTO users_migration_tmp ({', '.join(migration_columns)})
+                SELECT {', '.join(migration_columns)} FROM users
+                """
+            )
             cursor.execute("DROP TABLE users")
             cursor.execute("ALTER TABLE users_migration_tmp RENAME TO users")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_open_id ON users(open_id)")
