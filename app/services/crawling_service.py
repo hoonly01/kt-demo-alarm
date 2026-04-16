@@ -428,7 +428,7 @@ class CrawlingService:
                     places = row.get("장소_원본", [])
                     for place in places:
                         # ✅ v4.2: geocode_kakao()에서 자동으로 Fallback 로직 처리됨
-                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_REST_API_KEY)
+                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_LOCATION_API_KEY)
 
                         # ✅ NOT NULL 제약 준수: 지오코딩 실패 시 행 건너뜀
                         if lat is None or lon is None:
