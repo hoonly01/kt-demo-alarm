@@ -55,7 +55,7 @@ async def kakao_chat_fallback(request: KakaoRequest):
                     # 웹훅 사용자 연결
                     cursor.execute(
                         "UPDATE users SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ? WHERE id = ?",
-                        (bot_user_key, plusfriend_key, datetime.now(), orphan[0])
+                        (bot_user_key, plusfriend_key, datetime.now(), orphan["id"])
                     )
                     db.commit()
                     logger.info(f"✅ 웹훅 사용자 연결: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
@@ -130,7 +130,7 @@ async def kakao_channel_webhook(request: Request):
 
                 if existing_user:
                     # 이미 존재 → active만 업데이트
-                    plusfriend_key = existing_user[1]
+                    plusfriend_key = existing_user["plusfriend_user_key"]
                     if plusfriend_key:
                         # plusfriend_key로 업데이트 (더 안정적)
                         cursor.execute("UPDATE users SET active = 1 WHERE plusfriend_user_key = ?", (plusfriend_key,))
@@ -150,7 +150,7 @@ async def kakao_channel_webhook(request: Request):
                 logger.info(f"❌ 채널 차단: open_id={open_id}")
 
                 if existing_user:
-                    plusfriend_key = existing_user[1]
+                    plusfriend_key = existing_user["plusfriend_user_key"]
                     if plusfriend_key:
                         cursor.execute("UPDATE users SET active = 0 WHERE plusfriend_user_key = ?", (plusfriend_key,))
                     else:
