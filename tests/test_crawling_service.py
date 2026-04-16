@@ -63,6 +63,52 @@ class TestNormalizePlaceName:
         assert "남쪽" not in result
         assert "방면" not in result
 
+    def test_korean_bracket_removal(self):
+        """v4.3: 【】 괄호 내용 전체 제거"""
+        result = normalize_place_name_for_kakao("【 사후 집회 】더샘")
+        assert "사후" not in result
+        assert "집회" not in result
+        assert "더샘" in result
+
+    def test_round_bracket_content_removal(self):
+        """v4.3: () 괄호 내용 전체 제거"""
+        result = normalize_place_name_for_kakao("광화문광장(집회 불허)")
+        assert "집회" not in result
+        assert "불허" not in result
+        assert "광화문광장" in result
+
+    def test_square_bracket_content_removal(self):
+        """v4.3: [] 괄호 내용 전체 제거"""
+        result = normalize_place_name_for_kakao("서울원아이파크[18시~20시]")
+        assert "18시" not in result
+        assert "20시" not in result
+        assert "서울원아이파크" in result
+
+    def test_frequency_removal(self):
+        """v4.3: X회 진행 제거"""
+        result = normalize_place_name_for_kakao("스타벅스(2회 진행)")
+        assert "2회" not in result
+        assert "진행" not in result
+        assert "스타벅스" in result
+
+    def test_lane_count_removal(self):
+        """v4.3: X개차로 제거"""
+        result = normalize_place_name_for_kakao("더샘(2km, 1개차로)")
+        assert "개차로" not in result
+        assert "더샘" in result
+
+    def test_hour_count_removal(self):
+        """v4.3: X개시간 제거"""
+        result = normalize_place_name_for_kakao("광화문광장(3개시간)")
+        assert "개시간" not in result
+        assert "광화문광장" in result
+
+    def test_angle_bracket_content_removal(self):
+        """v4.3: <동이름> 제거"""
+        result = normalize_place_name_for_kakao("서울원아이파크<상봉동>")
+        assert "상봉동" not in result
+        assert "서울원아이파크" in result
+
 
 # Note: _merge_and_deduplicate logic was merged into _run_sync_pipeline.
 
