@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-집회 데이터 크롤링 서비스 - 버전 4.1: DB 스키마 완벽 호환 및 오류 수정
+집회 데이터 크롤링 서비스 - 버전 4.2: SMPA PDF 지오코딩 Fallback 로직 추가
 
 SMPA(서울경찰청) + SPATIC 양쪽 소스에서 집회 정보를 수집하고,
 Kakao API로 지오코딩을 수행하여 events 테이블에 동기화합니다.
 
-[수정사항 v4.1]
-1. ✅ NOT NULL 제약 준수: 지오코딩 실패 시 행 전체 건너뜀 (continue 추가)
-2. ✅ NULL 값 사전 검증: DB 저장 전 위도/경도 재검증
-3. ✅ INSERT 오류 상세 로깅: IntegrityError/OperationalError 구분
-4. ✅ SPATIC 테이블 디버깅: 헤더 정보 로깅
-5. ✅ PDF 폴백 지원 (pdfplumber)
+[수정사항 v4.2]
+1. ✅ extract_bracket_location() 함수 추가: <동이름> 형식 정보 추출 및 재사용성 확보
+2. ✅ geocode_kakao() 2단계 Fallback: 정규화된 검색 실패 시 <동이름> 정보로 대체 검색
+3. ✅ 로깅 강화: Phase 1/2 구분으로 운영 모니터링 용이
+4. ✅ 기존 호환성 유지: 함수 시그니처 미변경으로 다른 부분 영향 없음
 """
 
 import re
@@ -212,6 +211,39 @@ def normalize_place_name_for_kakao(place: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def extract_bracket_location(place: str) -> Optional[str]:
+    """
+    ✅ v4.2 신규 함수: <동이름> 형태에서 동 이름 추출
+    
+    정규화 전에 호출되어 < > 괄호 정보를 보존한다.
+    이후 지오코딩 폴백 시 사용된다.
+    
+    예시:
+    - "더샘퍼스트월드 공사현장 1G 앞<상봉동>" → "상봉동"
+    - "장충동2가 186-210 앞<장충동2가>" → "장충동2가"
+    - "서울원아이파크 1G 좌측 인도<월계동>" → "월계동"
+    - "괄호 없는 장소" → None
+    
+    Args:
+        place (str): 원본 장소명
+    
+    Returns:
+        Optional[str]: 추출된 동 이름 또는 None
+    """
+    if not place:
+        return None
+    
+    # < > 괄호 내용 추출
+    m = re.search(r'<([^>]+)>', place)
+    if not m:
+        return None
+    
+    bracket_content = m.group(1).strip()
+    
+    # 2글자 이상만 유효함
+    return bracket_content if len(bracket_content) >= 2 else None
+
+
 def _kakao_api_call(
         session: requests.Session,
         url: str,
@@ -255,48 +287,88 @@ def _kakao_api_call(
     return None, None, None
 
 
-def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[
-    Optional[float], Optional[float], Optional[str]]:
+def geocode_kakao(session: requests.Session, place: str, api_key: str) -> Tuple[Optional[float], Optional[float], Optional[str]]:
+    """
+    ✅ v4.2 개선: 2단계 Fallback 지오코딩
+    
+    Phase 1: 정규화된 장소명으로 상세 검색 시도
+    Phase 2: 정규화 실패 또는 검색 실패 시 <동이름> 정보로 대체 검색
+    
+    Args:
+        session (requests.Session): HTTP 세션
+        place (str): 원본 장소명 (예: "더샘 <상봉동>")
+        api_key (str): Kakao API Key
+    
+    Returns:
+        Tuple[Optional[float], Optional[float], Optional[str]]: (위도, 경도, 주소)
+    """
     if not api_key or not api_key.strip():
         logger.error("[Kakao] API Key가 설정되지 않았습니다.")
         return None, None, None
 
+    # ✅ STEP 1: Fallback 동 정보 사전 추출 (정규화 전에 수행)
+    fallback_dong = extract_bracket_location(place)
+
+    # STEP 2: 기존 정규화 로직 (수정 없음)
     clean_name = normalize_place_name_for_kakao(place)
+    
     if not clean_name or len(clean_name) < 2:
         logger.debug(f"[Kakao] 정규화 실패 (너무 짧음): {place}")
-        return None, None, None
+        # 정규화 실패해도 fallback_dong이 있으면 계속 진행
+        if not fallback_dong:
+            return None, None, None
+    
+    # STEP 3: Phase 1용 쿼리 생성 (clean_name이 유효한 경우만)
+    queries = []
+    if clean_name and len(clean_name) >= 2:
+        queries = [
+            f"서울 {clean_name}",
+            clean_name,
+        ]
 
-    queries = [
-        f"서울 {clean_name}",
-        clean_name,
-    ]
+        tokens = clean_name.split()
+        if len(tokens) > 1:
+            queries.append(f"서울 {tokens[-1]}")
+            queries.append(f"서울 {tokens[0]}")
 
-    tokens = clean_name.split()
-    if len(tokens) > 1:
-        queries.append(f"서울 {tokens[-1]}")
-        queries.append(f"서울 {tokens[0]}")
-
-    if not clean_name.endswith("역") and len(clean_name) <= 5:
-        queries.append(f"서울 {clean_name}역")
+        if not clean_name.endswith("역") and len(clean_name) <= 5:
+            queries.append(f"서울 {clean_name}역")
 
     queries = list(OrderedDict.fromkeys(queries))
-    logger.debug(f"[Kakao] 지오코딩 시도: {place} - 쿼리: {queries[:2]}")
+    
+    # ✅ PHASE 1: 상세 검색 시도
+    if queries:
+        logger.debug(f"[Kakao] 📌 Phase 1 상세 검색 시도: {place} - 쿼리: {queries[:2]}")
+        
+        for query in queries:
+            if len(query.replace("서울", "").strip()) < 2:
+                continue
 
-    for query in queries:
-        if len(query.replace("서울", "").strip()) < 2:
-            continue
+            lat, lon, addr = _kakao_api_call(session, KAKAO_KEYWORD_URL, query, api_key)
+            if lat and lon:
+                return lat, lon, addr
 
-        lat, lon, addr = _kakao_api_call(session, KAKAO_KEYWORD_URL, query, api_key)
+            lat, lon, addr = _kakao_api_call(session, KAKAO_ADDRESS_URL, query, api_key)
+            if lat and lon:
+                return lat, lon, addr
+
+            time.sleep(KAKAO_RATE_LIMIT_DELAY)
+
+    # ✅ PHASE 2: Fallback 검색 (상세 검색 전부 실패한 경우)
+    if fallback_dong:
+        fallback_query = f"서울 {fallback_dong}"
+        logger.info(
+            f"💡 [Kakao] Phase 1 전부 실패 → Phase 2 Fallback 검색 시도: "
+            f"{fallback_query} (원본: {place})"
+        )
+        lat, lon, addr = _kakao_api_call(session, KAKAO_KEYWORD_URL, fallback_query, api_key)
         if lat and lon:
+            logger.info(f"📍 [Kakao] ✅ Phase 2 성공 (동 단위): {addr} ({lat}, {lon})")
             return lat, lon, addr
-
-        lat, lon, addr = _kakao_api_call(session, KAKAO_ADDRESS_URL, query, api_key)
-        if lat and lon:
-            return lat, lon, addr
-
         time.sleep(KAKAO_RATE_LIMIT_DELAY)
 
-    logger.warning(f"[Kakao] 지오코딩 실패: {place}")
+    # ✅ PHASE 3: 최종 실패
+    logger.warning(f"[Kakao] ❌ 모든 폴백 소진. 지오코딩 실패: {place}")
     return None, None, None
 
 
@@ -355,15 +427,16 @@ class CrawlingService:
                 for row in data:
                     places = row.get("장소_원본", [])
                     for place in places:
-                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_LOCATION_API_KEY)
+                        # ✅ v4.2: geocode_kakao()에서 자동으로 Fallback 로직 처리됨
+                        lat, lon, addr = geocode_kakao(session, place, settings.KAKAO_REST_API_KEY)
 
-                        # ✅ 핵심 수정 1: 지오코딩 실패 시 행 건너뜀 (NOT NULL 제약 준수)
+                        # ✅ NOT NULL 제약 준수: 지오코딩 실패 시 행 건너뜀
                         if lat is None or lon is None:
                             geocoding_skipped_count += 1
                             logger.warning(
-                                f"[정제] {place} 지오코딩 실패 - 해당 장소 건너뜀 (DB NOT NULL 제약)"
+                                f"[정제] {place} 지오코딩 완전 실패 - 해당 장소 건너뜀 (DB NOT NULL 제약)"
                             )
-                            continue  # ← 이 줄이 핵심! 이 행을 건너뜀
+                            continue
                         
                         # 지오코딩 성공한 경우만 여기 도달
                         new_row = {k: v for k, v in row.items() if k != "장소_원본"}
@@ -492,7 +565,6 @@ class CrawlingService:
             rows = []
             Y, M, D = target['date'].split('-')
 
-            # ✅ SPATIC 테이블 구조 디버깅
             try:
                 headers = [th.get_text().strip() for th in tb.find_all("th")]
                 if headers:
@@ -666,7 +738,7 @@ class CrawlingService:
     def _sync_to_database(cls, data_list: List[Dict]) -> int:
         """크롤링된 집회 정보를 데이터베이스에 저장
         
-        ✅ v4.1 개선사항:
+        ✅ v4.2 개선사항:
         - NOT NULL 제약 준수 (사전 검증)
         - IntegrityError/OperationalError 구분 처리
         - 상세한 오류 로깅
@@ -695,7 +767,7 @@ class CrawlingService:
             lon = r.get('경도')
             addr = r.get('지번주소')
 
-            # ✅ 핵심 수정 2: NOT NULL 제약 사전 검증
+            # ✅ NOT NULL 제약 사전 검증
             if start_date is None:
                 skipped_count += 1
                 logger.warning(f"[DB] 필수 값 누락 - 장소: {place_name}, 시작시간: {st_time}")
@@ -744,7 +816,6 @@ class CrawlingService:
                 except Exception as e:
                     logger.warning(f"[DB] INDEX 생성 중 예기치 않은 오류: {e}")
 
-                # ✅ 핵심 수정 3: 향상된 예외 처리
                 try:
                     cur.executemany("""
                         INSERT OR IGNORE INTO events (
@@ -772,7 +843,7 @@ class CrawlingService:
                     return 0
 
                 except sqlite3.OperationalError as e:
-                    logger.error(f"❌ [DB] 운영 오�� (테이블/컬럼 확인 필요): {e}")
+                    logger.error(f"❌ [DB] 운영 오류 (테이블/컬럼 확인 필요): {e}")
                     logger.error(f"[DB] INSERT 쿼리가 events 테이블과 일치하는지 확인하세요")
                     conn.rollback()
                     return 0
