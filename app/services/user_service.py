@@ -13,6 +13,14 @@ class UserService:
     """사용자 관리 비즈니스 로직"""
 
     @staticmethod
+    def _row_value(row: Any, key: str, index: int) -> Any:
+        if row is None:
+            return None
+        if isinstance(row, sqlite3.Row):
+            return row[key]
+        return row[index]
+
+    @staticmethod
     def save_or_update_user(bot_user_key: str, db: sqlite3.Connection, message: str = "") -> None:
         """
         사용자 정보를 DB에 저장하거나 업데이트
@@ -97,8 +105,12 @@ class UserService:
                     WHERE plusfriend_user_key = ?
                 """, (now, plusfriend_key))
 
-                if existing_plusfriend[2] != bot_user_key:
-                    if existing_bot and existing_bot[0] != existing_plusfriend[0]:
+                existing_plusfriend_bot_user_key = UserService._row_value(existing_plusfriend, "bot_user_key", 2)
+                existing_plusfriend_id = UserService._row_value(existing_plusfriend, "id", 0)
+                existing_bot_id = UserService._row_value(existing_bot, "id", 0)
+
+                if existing_plusfriend_bot_user_key != bot_user_key:
+                    if existing_bot and existing_bot_id != existing_plusfriend_id:
                         logger.warning(
                             "bot_user_key(%s)와 plusfriend_key(%s)가 서로 다른 사용자 행에 연결되어 있습니다. "
                             "기존 plusfriend 매핑은 유지하고 활동 시간만 갱신합니다.",
@@ -131,12 +143,14 @@ class UserService:
 
                 if orphan:
                     # 웹훅 사용자 연결 (Orphan Matching)
-                    logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan[1]} → plusfriend={plusfriend_key}")
+                    orphan_open_id = UserService._row_value(orphan, "open_id", 1)
+                    orphan_id = UserService._row_value(orphan, "id", 0)
+                    logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan_open_id} → plusfriend={plusfriend_key}")
                     cursor.execute("""
                         UPDATE users
                         SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?, active = 1
                         WHERE id = ?
-                    """, (bot_user_key, plusfriend_key, now, orphan[0]))
+                    """, (bot_user_key, plusfriend_key, now, orphan_id))
                 else:
                     # 완전 신규 사용자
                     logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
@@ -550,23 +564,28 @@ class UserService:
                 return None
                 
             # 경로 정보가 없으면 None 반환
-            if not all([user_data[2], user_data[3], user_data[6], user_data[7]]):
+            if not all([
+                user_data["departure_x"],
+                user_data["departure_y"],
+                user_data["arrival_x"],
+                user_data["arrival_y"],
+            ]):
                 return None
             
             return {
                 "departure": {
-                    "name": user_data[0],
-                    "address": user_data[1],
-                    "x": user_data[2],
-                    "y": user_data[3]
+                    "name": user_data["departure_name"],
+                    "address": user_data["departure_address"],
+                    "x": user_data["departure_x"],
+                    "y": user_data["departure_y"]
                 },
                 "arrival": {
-                    "name": user_data[4],
-                    "address": user_data[5],
-                    "x": user_data[6],
-                    "y": user_data[7]
+                    "name": user_data["arrival_name"],
+                    "address": user_data["arrival_address"],
+                    "x": user_data["arrival_x"],
+                    "y": user_data["arrival_y"]
                 },
-                "updated_at": user_data[8]
+                "updated_at": user_data["route_updated_at"]
             }
             
         except Exception as e:
