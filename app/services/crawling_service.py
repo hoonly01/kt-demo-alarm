@@ -386,8 +386,8 @@ class CrawlingService:
         else:
             logger.warning("⚠️ [PDF] pdfplumber가 설치되지 않았습니다.")
 
-        if not settings.KAKAO_REST_API_KEY or not settings.KAKAO_REST_API_KEY.strip():
-            error_msg = "❌ KAKAO_REST_API_KEY 환경변수가 설정되지 않았습니다."
+        if not settings.KAKAO_LOCATION_API_KEY or not settings.KAKAO_LOCATION_API_KEY.strip():
+            error_msg = "❌ KAKAO_LOCATION_API_KEY 환경변수가 설정되지 않았습니다."
             logger.error(error_msg)
             return {
                 "success": False,

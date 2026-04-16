@@ -95,7 +95,8 @@ jobs:
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
-          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_EVENT_API_KEY: ${{ secrets.KAKAO_EVENT_API_KEY }}
+          KAKAO_LOCATION_API_KEY: ${{ secrets.KAKAO_LOCATION_API_KEY }}
           BOT_ID: ${{ secrets.BOT_ID }}
           API_KEY: ${{ secrets.API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -124,7 +125,8 @@ jobs:
           # Create .env on runner (printf prevents shell injection from special chars in secret values)
           # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
           printf '%s\n' \
-            "KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY}" \
+            "KAKAO_EVENT_API_KEY=${KAKAO_EVENT_API_KEY}" \
+            "KAKAO_LOCATION_API_KEY=${KAKAO_LOCATION_API_KEY}" \
             "BOT_ID=${BOT_ID}" \
             "API_KEY=${API_KEY}" \
             "GEMINI_API_KEY=${GEMINI_API_KEY}" \
@@ -176,8 +178,8 @@ jobs:
             # Stop old stack (ignore if not running)
             docker compose down || true
 
-            # Remove all unused images (stack is down, so old app image is safe to remove)
-            docker image prune -a -f || true
+            # Remove all unused images before loading the new release image.
+            docker image prune -af || true
 
             echo "=== Disk usage (after prune) ==="
             df -h
@@ -205,14 +207,25 @@ jobs:
               chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache || true
 
             echo "Waiting for service health..."
+            service_healthy=0
             for i in {1..60}; do
               if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
                 echo "✅ Service is healthy on localhost:8000"
+                service_healthy=1
                 break
               fi
               echo "Attempt $i: not ready yet..."
               sleep 5
             done
+
+            if [ "$service_healthy" -ne 1 ]; then
+              echo "❌ Service did not become healthy on localhost:8000 within 300 seconds"
+              echo "docker compose ps:"
+              docker compose ps
+              echo "Recent logs:"
+              docker compose logs --tail=100
+              exit 1
+            fi
 
             echo "docker compose ps:"
             docker compose ps

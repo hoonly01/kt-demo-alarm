@@ -74,6 +74,8 @@ class NotificationService:
         """
         if not settings.BOT_ID:
             return {"success": False, "error": "BOT_ID가 설정되지 않았습니다"}
+        if not settings.KAKAO_EVENT_API_KEY:
+            return {"success": False, "error": "KAKAO_EVENT_API_KEY가 설정되지 않았습니다"}
 
         try:
             event_api_request = EventAPIRequest(
@@ -91,7 +93,7 @@ class NotificationService:
             url = f"https://bot-api.kakao.com/v2/bots/{settings.BOT_ID}/talk"
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"KakaoAK {settings.KAKAO_REST_API_KEY}",
+                "Authorization": f"KakaoAK {settings.KAKAO_EVENT_API_KEY}",
             }
 
             # 클라이언트 컨텍스트 관리
