@@ -195,11 +195,25 @@ PLACE_NAME_REPLACE_MAP = {
 
 def normalize_place_name_for_kakao(place: str) -> str:
     t = place.strip()
-    t = re.sub(r'[舊新\(\)（）]', '', t)
+
+    # STEP 1: 괄호 타입별 내용 전체 제거
+    t = re.sub(r'\([^)]*\)', '', t)      # (내용) 제거
+    t = re.sub(r'（[^）]*）', '', t)    # （내용） 제거
+    t = re.sub(r'\[[^\]]*\]', '', t)    # [내용] 제거
+    t = re.sub(r'【[^】]*】', '', t)    # 【내용】 제거
+    t = re.sub(r'\{[^}]*\}', '', t)     # {내용} 제거
+
+    # STEP 2: 특수 문자 제거 (기존 로직)
+    t = re.sub(r'[舊新]', '', t)
     t = t.replace("구)", "").replace("(구)", "")
-    t = re.sub(r'\d+(\.\d+)?km', '', t)
-    t = re.sub(r'[<\[\(].*?[>\]\)]', '', t)
-    t = re.sub(r'\(.*$', '', t)
+
+    # STEP 3: 거리/개수/횟수 정보 제거
+    t = re.sub(r'\d+(\.\d+)?\s*km', '', t)         # 2km, 2.5km
+    t = re.sub(r'\d+\s*개(?:차로|시간)', '', t)     # 1개차로, 2개시간
+    t = re.sub(r'\d+\s*회\s*진행', '', t)           # 2회 진행
+
+    # STEP 4: 앵글 브래킷 내용 제거 (<동이름>은 extract_bracket_location()에서 처리됨)
+    t = re.sub(r'<[^>]*>', '', t)
 
     for old, new in PLACE_NAME_REPLACE_MAP.items():
         if old in t and new not in t:
