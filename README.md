@@ -1,6 +1,3 @@
-> 2025 KT디지털인재장학생 지역사회 문제해결 프로젝트 동료평가상 수상작 🏆  
-> 🔗 Link: [카카오톡 채널 추가하기](https://pf.kakao.com/_gmJNn)  
-
 # 종로구 집회 알리미
 
 <div align="center">
@@ -16,9 +13,12 @@
 
 KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 집회 알리미 서비스의 개발 저장소입니다.
 
+
+
 ### 📰 KTx종로구청 2026년 협력사업 선정
 > [**종로구, 시위·집회 알림톡 서비스 연내 상용화 추진** | 연합뉴스](https://www.yna.co.kr/view/AKR20260212070500004)  
-> [**시위·집회 정보, 미리 알려준다” 종로구·KT 상용화 착수** | 종로구청](https://www.jongno.go.kr/mayor/bbs/selectBoardArticle.do?bbsId=BBSMSTR_000000001618&menuNo=388338&menuId=388338&nttId=250457)
+> [**시위·집회 정보, 미리 알려준다” 종로구·KT 상용화 착수** | 종로구청](https://www.jongno.go.kr/mayor/bbs/selectBoardArticle.do?bbsId=BBSMSTR_000000001618&menuNo=388338&menuId=388338&nttId=250457)  
+> 🔗 Link: [카카오톡 채널 추가하기](https://pf.kakao.com/_gmJNn)
 
 <br />
 
