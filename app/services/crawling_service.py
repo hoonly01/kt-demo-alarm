@@ -27,10 +27,21 @@ from app.database.connection import get_db_connection, DATABASE_PATH
 from app.config.settings import settings
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 from bs4 import BeautifulSoup
 from pdfminer.high_level import extract_text
 from pdfminer.layout import LAParams
 from playwright.sync_api import sync_playwright
+
+
+class LegacyTLSAdapter(HTTPAdapter):
+    """SMPA 등 구형 TLS 설정을 사용하는 서버와의 호환성을 위한 어댑터"""
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+        kwargs["ssl_context"] = ctx
+        super().init_poolmanager(*args, **kwargs)
 
 try:
     import pdfplumber
@@ -60,6 +71,13 @@ SMPA_LIST_URL = f"{SMPA_BASE_URL}/user/nd54882.do"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+}
+
+SMPA_HEADERS = {
+    **HEADERS,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.smpa.go.kr/",
 }
 
 DEFAULT_SEOUL_LAT = 37.5665
@@ -416,6 +434,7 @@ class CrawlingService:
         """실제 크롤링이 진행되는 동기 파이프라인"""
         with requests.Session() as session:
             session.headers.update(HEADERS)
+            session.mount("https://www.smpa.go.kr", LegacyTLSAdapter())
 
             try:
                 logger.info("📡 [수집] SPATIC 및 SMPA에서 데이터 수집 중...")
@@ -638,8 +657,19 @@ class CrawlingService:
         today_str = datetime.now().strftime("%y%m%d")
 
         try:
-            r = session.get(SMPA_LIST_URL, timeout=10)
-            r.raise_for_status()
+            last_exc: Optional[Exception] = None
+            for attempt in range(3):
+                try:
+                    r = session.get(SMPA_LIST_URL, headers=SMPA_HEADERS, timeout=10)
+                    r.raise_for_status()
+                    break
+                except Exception as e:
+                    last_exc = e
+                    if attempt < 2:
+                        logger.warning(f"[SMPA] 목록 요청 실패 (시도 {attempt + 1}/3): {e}. 2초 후 재시도...")
+                        time.sleep(2)
+            else:
+                raise last_exc  # type: ignore[misc]
             soup = BeautifulSoup(r.text, "html.parser")
 
             target_view = None
@@ -654,7 +684,7 @@ class CrawlingService:
                 logger.warning("[SMPA] 오늘 날짜의 게시글을 찾을 수 없습니다.")
                 return []
 
-            r = session.get(target_view, timeout=10)
+            r = session.get(target_view, headers=SMPA_HEADERS, timeout=10)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
 
@@ -673,7 +703,7 @@ class CrawlingService:
             logger.info(f"[SMPA] PDF 다운로드 시작: {pdf_url}")
             pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
 
-            r = session.get(pdf_url, timeout=10)
+            r = session.get(pdf_url, headers=SMPA_HEADERS, timeout=10)
             r.raise_for_status()
 
             with open(pdf_path, "wb") as f:
