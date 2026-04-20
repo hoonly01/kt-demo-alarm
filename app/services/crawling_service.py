@@ -657,7 +657,7 @@ class CrawlingService:
         today_str = datetime.now().strftime("%y%m%d")
 
         try:
-            last_exc: Exception = Exception("SMPA 요청 실패")
+            last_exc: Optional[Exception] = None
             for attempt in range(3):
                 try:
                     r = session.get(SMPA_LIST_URL, headers=SMPA_HEADERS, timeout=10)
@@ -669,7 +669,7 @@ class CrawlingService:
                         logger.warning(f"[SMPA] 목록 요청 실패 (시도 {attempt + 1}/3): {e}. 2초 후 재시도...")
                         time.sleep(2)
             else:
-                raise last_exc
+                raise last_exc  # type: ignore[misc]
             soup = BeautifulSoup(r.text, "html.parser")
 
             target_view = None
