@@ -203,30 +203,6 @@ async def auto_check_all_routes(
     }
 
 
-@router.post("/crawl-and-sync")
-async def crawl_and_sync_events(api_key: str = Depends(verify_api_key)):
-    """SMPA 집회 데이터 크롤링 및 동기화"""
-    try:
-        from app.services.crawling_service import CrawlingService
-        result = await CrawlingService.crawl_and_sync_events()
-        
-        if result["success"]:
-            return {
-                "message": result["message"],
-                "total_crawled": result["total_crawled"],
-                "status": "completed"
-            }
-        else:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"크롤링 실패: {result['error']}"
-            )
-        
-    except Exception as e:
-        logger.error(f"크롤링 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"크롤링 실패: {str(e)}")
-
-
 @router.post("/upcoming-protests")
 async def get_upcoming_protests(
     request: dict,
