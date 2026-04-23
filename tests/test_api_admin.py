@@ -127,6 +127,7 @@ def test_trigger_crawling_authorized_with_api_key(test_client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
+    mock_crawl.assert_called_once()
 
 def test_trigger_bus_notice_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
@@ -154,6 +155,7 @@ def test_trigger_bus_notice_authorized_with_api_key(test_client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
+    mock_refresh.assert_called_once()
 
 def test_trigger_bus_notice_rejects_invalid_api_key(test_client, monkeypatch):
     monkeypatch.setattr(settings, "API_KEY", "test-api-key")
@@ -184,12 +186,11 @@ def test_trigger_test_alarm_for_user_authorized_with_api_key(test_client, monkey
 
     mock_route_check = AsyncMock()
 
-    with monkeypatch.context() as m:
-        m.setattr("app.services.event_service.EventService.check_route_events", mock_route_check)
-        response = test_client.post(
-            "/admin/trigger-test-alarm-for-user?user_id=12345",
-            headers={"X-API-Key": "test-api-key"},
-        )
+    monkeypatch.setattr("app.services.event_service.EventService.check_route_events", mock_route_check)
+    response = test_client.post(
+        "/admin/trigger-test-alarm-for-user?user_id=12345",
+        headers={"X-API-Key": "test-api-key"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
