@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     # --- Scheduling ---
     CRAWLING_HOUR: int = 7
     CRAWLING_MINUTE: int = 0
-    ROUTE_CHECK_HOUR: int = 7
-    ROUTE_CHECK_MINUTE: int = 30
+    ROUTE_CHECK_HOUR: int = 13
+    ROUTE_CHECK_MINUTE: int = 0
     ZONE_CHECK_HOUR: int = 13
     ZONE_CHECK_MINUTE: int = 0
 
