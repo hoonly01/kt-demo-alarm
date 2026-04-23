@@ -28,13 +28,14 @@ router = APIRouter(
 )
 
 security = HTTPBasic(auto_error=False)
+admin_credentials = Depends(security)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
 
 # Task registry and lock to prevent duplicate runs and race conditions
 _background_tasks: Dict[str, asyncio.Task] = {}
 _task_lock = asyncio.Lock()
 
-def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+def verify_admin(credentials: HTTPBasicCredentials | None = admin_credentials):
     # Using environment variables for admin credentials.
     # These must be configured via environment (.env, deployment config).
     admin_user = settings.ADMIN_USER
@@ -67,7 +68,7 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
 def verify_admin_action(
     request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(security),
+    credentials: HTTPBasicCredentials | None = admin_credentials,
 ):
     """Allow admin UI Basic Auth or API-key based operational trigger calls."""
     x_api_key = request.headers.get("x-api-key")

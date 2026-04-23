@@ -87,7 +87,7 @@ def test_scheduler_status(test_client):
     assert "jobs" in data["scheduler"]
 
 
-def test_startup_does_not_initialize_bus_notice(monkeypatch):
+def test_startup_does_not_initialize_bus_notice(test_db, monkeypatch):
     """Server startup should not crawl TOPIS bus notices."""
     from main import app
 
@@ -104,17 +104,8 @@ def test_startup_does_not_initialize_bus_notice(monkeypatch):
     mock_initialize.assert_not_called()
 
 
-def test_removed_manual_crawling_endpoints_return_404(test_client, monkeypatch):
+def test_removed_manual_crawling_endpoints_return_404(test_client):
     """Manual crawling should be consolidated under /admin/trigger-*."""
-    monkeypatch.setattr(
-        "app.services.crawling_service.CrawlingService.crawl_and_sync_events",
-        AsyncMock(return_value={"success": True}),
-    )
-    monkeypatch.setattr(
-        "app.services.event_service.EventService.scheduled_route_check",
-        AsyncMock(return_value={"success": True}),
-    )
-
     assert test_client.post("/bus/refresh").status_code == 404
     assert test_client.post("/scheduler/crawl-events").status_code == 404
     assert test_client.post("/scheduler/manual-test").status_code == 404
