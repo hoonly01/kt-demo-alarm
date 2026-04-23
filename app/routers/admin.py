@@ -27,18 +27,26 @@ router = APIRouter(
     tags=["admin"]
 )
 
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
+admin_credentials = Depends(security)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
 
 # Task registry and lock to prevent duplicate runs and race conditions
 _background_tasks: Dict[str, asyncio.Task] = {}
 _task_lock = asyncio.Lock()
 
-def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+def verify_admin(credentials: HTTPBasicCredentials | None = admin_credentials):
     # Using environment variables for admin credentials.
     # These must be configured via environment (.env, deployment config).
     admin_user = settings.ADMIN_USER
     admin_pass = settings.ADMIN_PASS
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Basic"},
+        )
     
     # Fail fast if admin credentials are not configured
     if not admin_user or not admin_user.strip() or not admin_pass or not admin_pass.strip():
@@ -57,6 +65,29 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
+
+def verify_admin_action(
+    request: Request,
+    credentials: HTTPBasicCredentials | None = admin_credentials,
+):
+    """Allow admin UI Basic Auth or API-key based operational trigger calls."""
+    x_api_key = request.headers.get("x-api-key")
+    if x_api_key is not None:
+        if not settings.API_KEY:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Server Authorization not configured",
+            )
+        if not secrets.compare_digest(x_api_key, settings.API_KEY):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API Key",
+            )
+        return "api-key"
+
+    username = verify_admin(credentials)
+    verify_csrf_origin(request)
+    return username
 
 def verify_csrf_origin(request: Request):
     """
@@ -293,8 +324,7 @@ def _task_done_callback(task_key: str):
 
 @router.post("/trigger-crawling")
 async def trigger_crawling(
-    _username: str = Depends(verify_admin),
-    _csrf: None = Depends(verify_csrf_origin)
+    _auth: str = Depends(verify_admin_action),
 ):
     """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
     task_key = "trigger-crawling"
@@ -309,8 +339,7 @@ async def trigger_crawling(
 
 @router.post("/trigger-bus-notice")
 async def trigger_bus_notice(
-    _username: str = Depends(verify_admin),
-    _csrf: None = Depends(verify_csrf_origin)
+    _auth: str = Depends(verify_admin_action),
 ):
     """수동으로 TOPIS 버스 우회 공지 크롤링을 트리거합니다."""
     task_key = "trigger-bus-notice"
@@ -326,8 +355,7 @@ async def trigger_bus_notice(
 @router.post("/trigger-test-alarm-for-user")
 async def trigger_test_alarm_for_user(
     user_id: str = Query(..., description="Target user ID to test"), 
-    _username: str = Depends(verify_admin),
-    _csrf: None = Depends(verify_csrf_origin)
+    _auth: str = Depends(verify_admin_action),
 ):
     """수동으로 특정 사용자의 경로 점검 및 알림 발송 로직을 테스트합니다."""
     task_key = f"test-alarm-{user_id}"
