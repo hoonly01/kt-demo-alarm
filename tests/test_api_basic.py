@@ -1,6 +1,7 @@
 """Test basic API functionality"""
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock
 
 
 def test_root_endpoint(test_client):
@@ -84,3 +85,31 @@ def test_scheduler_status(test_client):
     assert "scheduler" in data
     assert "status" in data["scheduler"]
     assert "jobs" in data["scheduler"]
+
+
+def test_startup_does_not_initialize_bus_notice(test_db, monkeypatch):
+    """Server startup should not crawl TOPIS bus notices."""
+    from main import app
+
+    mock_initialize = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.bus_notice_service.BusNoticeService.initialize",
+        mock_initialize,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    mock_initialize.assert_not_called()
+
+
+def test_removed_manual_crawling_endpoints_return_404(test_client):
+    """Manual crawling should be consolidated under /admin/trigger-*."""
+    assert test_client.post("/bus/refresh").status_code == 404
+    assert test_client.post("/scheduler/crawl-events").status_code == 404
+    assert test_client.post("/scheduler/manual-test").status_code == 404
+    assert test_client.post(
+        "/events/crawl-and-sync",
+        headers={"X-API-Key": "test-api-key"},
+    ).status_code == 404

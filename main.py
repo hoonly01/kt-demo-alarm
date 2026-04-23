@@ -5,7 +5,6 @@ KT Demo Alarm API - Main Application
 Router-Service-Repository 패턴을 적용한 깔끔한 아키텍처
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -29,32 +28,6 @@ from app.models.responses import HealthCheckResponse
 # 로깅 설정
 setup_logging()
 logger = logging.getLogger(__name__)
-
-
-def _log_bus_notice_init_result(task: asyncio.Task) -> None:
-    """백그라운드 초기화 태스크 종료 상태를 기록한다."""
-    if task.cancelled():
-        logger.info("🛑 BusNoticeService 초기화 태스크가 취소되었습니다.")
-        return
-
-    exc = task.exception()
-    if exc:
-        logger.error(
-            "❌ BusNoticeService 백그라운드 초기화 실패",
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
-        return
-
-    result = task.result()
-    if result == "success" or getattr(BusNoticeService, "crawler", None) is not None:
-        logger.info("✅ BusNoticeService 백그라운드 초기화 완료")
-        return
-
-    if result == "skipped":
-        logger.info("⏭️ BusNoticeService 백그라운드 초기화 스킵: WORKS_AI_API_KEY 미설정")
-        return
-
-    logger.error("❌ BusNoticeService 백그라운드 초기화 실패: 초기화 결과가 유효하지 않습니다.")
 
 
 @asynccontextmanager
@@ -84,24 +57,10 @@ async def lifespan(app: FastAPI):
         f"{settings.ZONE_CHECK_HOUR:02d}:{settings.ZONE_CHECK_MINUTE:02d} 구역체크"
     )
 
-    # 버스 알림 초기화는 백그라운드로 넘겨서 헬스체크를 즉시 받을 수 있게 한다.
-    app.state.bus_notice_init_task = asyncio.create_task(BusNoticeService.initialize())
-    app.state.bus_notice_init_task.add_done_callback(_log_bus_notice_init_result)
-    
     yield
 
     # 애플리케이션 종료 시 실행
     logger.info("🛑 KT Demo Alarm API 종료")
-
-    bus_notice_init_task = getattr(app.state, "bus_notice_init_task", None)
-    if bus_notice_init_task and not bus_notice_init_task.done():
-        bus_notice_init_task.cancel()
-        try:
-            await bus_notice_init_task
-        except asyncio.CancelledError:
-            logger.info("🛑 종료 중 BusNoticeService 초기화 태스크를 정리했습니다.")
-        except Exception:
-            logger.exception("종료 중 BusNoticeService 초기화 태스크 정리 과정에서 예외가 발생했습니다.")
 
     shutdown_scheduler()
 
