@@ -288,7 +288,7 @@ class TestFavoriteZoneSaveViaClientExtra:
                 assert "1구역" in text
 
     def test_save_unset_zone_via_client_extra(self, clean_test_db):
-        """block+extra 방식: clientExtra.zone='삭제' 으로 관심장소 해제"""
+        """block+extra 방식: clientExtra.zone='삭제' 으로 관심장소 알림 미발송 안내"""
         payload = self._make_payload("삭제")
 
         with patch("app.services.user_service.UserService.sync_kakao_user"):
@@ -299,7 +299,7 @@ class TestFavoriteZoneSaveViaClientExtra:
 
                 assert response.status_code == 200
                 text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
-                assert "해제" in text
+                assert text == "🔕 기존 관심장소 정보가 삭제되어 관심장소 알림이 발송되지 않습니다."
 
     def test_client_extra_takes_priority_over_params_zone(self, clean_test_db):
         """clientExtra.zone이 params.zone보다 우선 적용"""
@@ -324,4 +324,3 @@ class TestFavoriteZoneSaveViaClientExtra:
 
                 text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
                 assert "1구역" in text
-
