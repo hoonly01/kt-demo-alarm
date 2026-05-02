@@ -111,7 +111,7 @@ class TestFavoriteZoneSave:
                 assert call_args[0][1] == 1  # zone value
 
     def test_save_zone_unset(self, clean_test_db, zone_save_payload):
-        """미설정 선택 시 삭제 확인 메시지 반환"""
+        """삭제 선택 시 관심장소 알림 미발송 안내 메시지 반환"""
         zone_save_payload["action"]["params"]["zone"] = "삭제"
 
         with patch("app.services.user_service.UserService.sync_kakao_user"):
@@ -123,7 +123,7 @@ class TestFavoriteZoneSave:
                 assert response.status_code == 200
                 data = response.json()
                 text = data["template"]["outputs"][0]["simpleText"]["text"]
-                assert "해제" in text
+                assert text == "🔕 기존 관심장소 정보가 삭제되어 관심장소 알림이 발송되지 않습니다."
 
                 # update_favorite_zone이 zone=None으로 호출됐는지 확인
                 mock_update.assert_called_once()
