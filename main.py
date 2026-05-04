@@ -29,6 +29,9 @@ from app.models.responses import HealthCheckResponse
 setup_logging()
 logger = logging.getLogger(__name__)
 
+MOCK_CALLBACK_PATH = "/mock_callback"
+CALLBACK_OUTPUT_SEPARATOR = "═" * 50
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -117,22 +120,21 @@ def read_root():
         status="healthy"
     )
 
-@app.post("/mock_callback")
-async def mock_callback_receiver(request: Request):
-    """콜백 결과를 터미널에 예쁘게 출력해주는 테스트용 엔드포인트"""
-    import json
-    try:
-        body = await request.json()
-        print("\n" + "═"*50)
-        print("📢 [실전 시뮬레이션 결과] - 카톡 유저가 받게 될 메시지")
-        print("═"*50)
-        print(json.dumps(body, indent=2, ensure_ascii=False))
-        print("═"*50 + "\n")
-    except Exception as e:
-        print(f"콜백 수신 중 오류: {e}")
-    return {"status": "ok"}
-
-
+if settings.ENABLE_MOCK_CALLBACK:
+    @app.post(MOCK_CALLBACK_PATH)
+    async def mock_callback_receiver(request: Request):
+        """콜백 결과를 터미널에 예쁘게 출력해주는 테스트용 엔드포인트"""
+        import json
+        try:
+            body = await request.json()
+            print("\n" + CALLBACK_OUTPUT_SEPARATOR)
+            print("📢 [실전 시뮬레이션 결과] - 카톡 유저가 받게 될 메시지")
+            print(CALLBACK_OUTPUT_SEPARATOR)
+            print(json.dumps(body, indent=2, ensure_ascii=False))
+            print(CALLBACK_OUTPUT_SEPARATOR + "\n")
+        except Exception as e:
+            print(f"콜백 수신 중 오류: {e}")
+        return {"status": "ok"}
 
 
 # 애플리케이션 진입점
