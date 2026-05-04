@@ -6,12 +6,16 @@ from app.config.settings import settings
 from app.database.models import USERS_TABLE_SCHEMA, EVENTS_TABLE_SCHEMA, ALARM_TASKS_TABLE_SCHEMA
 
 logger = logging.getLogger(__name__)
-DATABASE_PATH = settings.DATABASE_PATH
+
+
+def get_database_path() -> str:
+    """현재 설정의 데이터베이스 경로를 반환한다."""
+    return settings.DATABASE_PATH
 
 
 def get_db():
     """데이터베이스 연결을 위한 의존성 주입 함수 (FastAPI 용)"""
-    db = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    db = sqlite3.connect(get_database_path(), check_same_thread=False)
     db.row_factory = sqlite3.Row
     try:
         yield db
@@ -22,7 +26,7 @@ def get_db():
 @contextmanager
 def get_db_connection():
     """컨텍스트 매니저를 사용한 DB 연결 (일반 함수용)"""
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(get_database_path(), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -32,7 +36,7 @@ def get_db_connection():
 
 def init_db():
     """데이터베이스 초기화 - 중앙집중식 스키마 사용"""
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn = sqlite3.connect(get_database_path(), check_same_thread=False)
     cursor = conn.cursor()
 
     # Users 테이블 생성 (통합 스키마 사용)
