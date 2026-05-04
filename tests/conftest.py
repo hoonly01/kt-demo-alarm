@@ -4,7 +4,7 @@ import os
 import sqlite3
 import tempfile
 from fastapi.testclient import TestClient
-from app.database.connection import init_db, DATABASE_PATH
+from app.database.connection import init_db
 
 
 @pytest.fixture(scope="session")
@@ -19,12 +19,6 @@ def test_db():
     # Patch settings
     with patch("app.config.settings.settings.DATABASE_PATH", test_db_path), \
          patch("app.config.settings.settings.API_KEY", "test-api-key"):
-        
-        # Also need to patch the variable in connection module if it was already imported
-        import app.database.connection as db_module
-        original_db_path = db_module.DATABASE_PATH
-        db_module.DATABASE_PATH = test_db_path
-        
         # Initialize test database
         init_db()
         
@@ -35,9 +29,6 @@ def test_db():
             os.remove(test_db_path)
         except FileNotFoundError:
             pass
-        
-        # Restore original database path (although patch handles settings, module var needs manual restore)
-        db_module.DATABASE_PATH = original_db_path
 
 
 @pytest.fixture(scope="function")
