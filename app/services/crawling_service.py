@@ -23,7 +23,7 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Tuple, Optional
 
-from app.database.connection import get_db_connection, DATABASE_PATH
+from app.database.connection import get_db_connection, get_database_path
 from app.config.settings import settings
 
 import requests
@@ -53,11 +53,19 @@ logger = logging.getLogger(__name__)
 
 # 상수/설정
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent.parent
-if not pathlib.Path(DATABASE_PATH).is_absolute():
-    DB_ABS_PATH = BASE_DIR / DATABASE_PATH
-else:
-    DB_ABS_PATH = pathlib.Path(DATABASE_PATH)
-DATA_DIR = DB_ABS_PATH.parent
+
+
+def get_db_abs_path() -> pathlib.Path:
+    """현재 설정 기준 DB 절대 경로를 반환한다."""
+    database_path = pathlib.Path(get_database_path())
+    if database_path.is_absolute():
+        return database_path
+    return BASE_DIR / database_path
+
+
+def get_data_dir() -> pathlib.Path:
+    """현재 DB 경로 기준 데이터 디렉터리를 반환한다."""
+    return get_db_abs_path().parent
 
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 KAKAO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
@@ -411,7 +419,7 @@ class CrawlingService:
     async def crawl_and_sync_events(cls) -> Dict:
         """스케줄러 진입점"""
         logger.info("🔄 [스케줄러] 집회 정보 크롤링을 시작합니다.")
-        ensure_dir(DATA_DIR)
+        ensure_dir(get_data_dir())
 
         if PDFPLUMBER_AVAILABLE:
             logger.info("ℹ️ [PDF] pdfplumber가 사용 가능합니다 (폴백 지원)")
@@ -701,7 +709,7 @@ class CrawlingService:
                 return []
 
             logger.info(f"[SMPA] PDF 다운로드 시작: {pdf_url}")
-            pdf_path = DATA_DIR / f"smpa_{today_str}.pdf"
+            pdf_path = get_data_dir() / f"smpa_{today_str}.pdf"
 
             r = session.get(pdf_url, headers=SMPA_HEADERS, timeout=10)
             r.raise_for_status()
