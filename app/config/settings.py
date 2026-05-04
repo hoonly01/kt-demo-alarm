@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     ADMIN_USER: Optional[str] = None
     ADMIN_PASS: Optional[str] = None
 
+    # --- Development/Test Utilities ---
+    ENABLE_MOCK_CALLBACK: bool = False
+
     # --- Server ---
     APP_NAME: str = "KT Demo Alarm API"
     APP_VERSION: str = "1.0.0"

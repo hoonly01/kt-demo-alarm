@@ -1,7 +1,14 @@
 """Test basic API functionality"""
-import pytest
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_root_endpoint(test_client):
@@ -113,3 +120,68 @@ def test_removed_manual_crawling_endpoints_return_404(test_client):
         "/events/crawl-and-sync",
         headers={"X-API-Key": "test-api-key"},
     ).status_code == 404
+
+
+def test_mock_callback_not_registered_by_default(test_client):
+    """Test-only callback receiver must not be exposed unless explicitly enabled."""
+    response = test_client.post("/mock_callback", json={"message": "hello"})
+
+    assert response.status_code == 404
+
+
+def test_mock_callback_hidden_from_openapi_by_default(test_client):
+    """Default OpenAPI schema must not advertise the test-only callback receiver."""
+    response = test_client.get("/openapi.json")
+
+    assert response.status_code == 200
+    assert "/mock_callback" not in response.json()["paths"]
+
+
+def test_mock_callback_registered_when_explicitly_enabled():
+    """Explicit opt-in should preserve the local callback simulation endpoint."""
+    script = """
+import json
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+valid_response = client.post("/mock_callback", json={"message": "hello"})
+invalid_response = client.post(
+    "/mock_callback",
+    content="not-json",
+    headers={"content-type": "application/json"},
+)
+openapi_response = client.get("/openapi.json")
+
+print("RESULT:" + json.dumps({
+    "valid_status": valid_response.status_code,
+    "valid_body": valid_response.json(),
+    "invalid_status": invalid_response.status_code,
+    "invalid_body": invalid_response.json(),
+    "openapi_has_mock_callback": "/mock_callback" in openapi_response.json()["paths"],
+}, ensure_ascii=False))
+"""
+    env = os.environ.copy()
+    env["ENABLE_MOCK_CALLBACK"] = "true"
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result_line = next(
+        line for line in reversed(completed.stdout.splitlines())
+        if line.startswith("RESULT:")
+    )
+    result = json.loads(result_line.removeprefix("RESULT:"))
+
+    assert result == {
+        "valid_status": 200,
+        "valid_body": {"status": "ok"},
+        "invalid_status": 200,
+        "invalid_body": {"status": "ok"},
+        "openapi_has_mock_callback": True,
+    }
