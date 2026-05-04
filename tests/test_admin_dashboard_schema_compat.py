@@ -143,13 +143,7 @@ def test_init_db_preserves_user_column_mapping_during_not_null_migration(monkeyp
         conn.close()
 
         monkeypatch.setattr("app.config.settings.settings.DATABASE_PATH", db_path)
-        import app.database.connection as db_module
-        original_db_path = db_module.DATABASE_PATH
-        db_module.DATABASE_PATH = db_path
-        try:
-            init_db()
-        finally:
-            db_module.DATABASE_PATH = original_db_path
+        init_db()
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
