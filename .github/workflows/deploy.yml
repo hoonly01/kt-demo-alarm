@@ -27,10 +27,25 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install
+        run: |
+          PYTHON_VERSION="$(tr -d '[:space:]' < .python-version)"
+          uv python install "$PYTHON_VERSION"
 
       - name: Install dependencies
         run: uv sync --locked --dev
+
+      - name: Verify Python version
+        run: |
+          export PYTHON_VERSION="$(tr -d '[:space:]' < .python-version)"
+          uv run python -c '
+          import os
+          import sys
+
+          expected = os.environ["PYTHON_VERSION"]
+          actual = f"{sys.version_info.major}.{sys.version_info.minor}"
+          if actual != expected:
+              raise SystemExit(f"Python {actual} does not match .python-version {expected}")
+          '
 
       - name: Cache Playwright Browsers
         uses: actions/cache@v4
