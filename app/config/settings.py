@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     ATTACHMENT_FOLDER: str = "topis_attachments"
 
     # --- Scheduling ---
-    CRAWLING_HOUR: int = 7
+    CRAWLING_HOUR: int = 8
     CRAWLING_MINUTE: int = 0
     ROUTE_CHECK_HOUR: int = 13
     ROUTE_CHECK_MINUTE: int = 0
