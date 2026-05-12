@@ -6,6 +6,7 @@ import logging
 
 from app.models.user import UserPreferences, InitialSetupRequest
 from app.database.connection import get_db
+from app.repositories.user_read_repository import UserReadRepository
 from app.services.user_service import UserService
 from app.services.auth_service import verify_api_key
 
@@ -20,18 +21,8 @@ async def get_users(
 ):
     """등록된 사용자 목록 조회 (경로 정보 포함)"""
     try:
-        cursor = db.cursor()
-        cursor.execute('''
-            SELECT bot_user_key, first_message_at, last_message_at, message_count, 
-                   location, active, departure_name, departure_address, 
-                   departure_x, departure_y, arrival_name, arrival_address, 
-                   arrival_x, arrival_y, route_updated_at, marked_bus, language
-            FROM users 
-            ORDER BY last_message_at DESC
-        ''')
-        
         users = []
-        for row in cursor.fetchall():
+        for row in UserReadRepository.list_users_with_route_info(db):
             user_data = {
                 "bot_user_key": row["bot_user_key"],
                 "first_message_at": row["first_message_at"],

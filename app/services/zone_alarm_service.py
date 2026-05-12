@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Any
 
 from app.database.connection import get_db_connection
+from app.repositories.zone_alarm_read_repository import ZoneAlarmReadRepository
 from app.utils.geo_utils import haversine_distance, FAVORITE_ZONES
 from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
@@ -29,32 +30,12 @@ class ZoneAlarmService:
             AlarmStatusService.update_alarm_task_status(task_id, "processing")
 
             with get_db_connection() as db:
-                cursor = db.cursor()
-
                 # 1. favorite_zone이 설정된 활성 사용자 조회
-                cursor.execute('''
-                    SELECT plusfriend_user_key, favorite_zone
-                    FROM users
-                    WHERE active = 1
-                      AND is_alarm_on = 1
-                      AND favorite_zone IS NOT NULL
-                      AND plusfriend_user_key IS NOT NULL
-                ''')
-                users = cursor.fetchall()
+                users = ZoneAlarmReadRepository.list_zone_users(db)
                 logger.info(f"구역 설정된 사용자 {len(users)}명 확인 중...")
 
                 # 2. 활성 집회 전체 조회
-                cursor.execute('''
-                    SELECT id, title, location_name, location_address,
-                           latitude, longitude, start_date, category, severity_level
-                    FROM events
-                    WHERE status = 'active'
-                      AND latitude IS NOT NULL
-                      AND longitude IS NOT NULL
-                      AND start_date > datetime('now', '+9 hours')
-                    ORDER BY start_date
-                ''')
-                events = cursor.fetchall()
+                events = ZoneAlarmReadRepository.list_active_future_events(db)
 
                 if not events:
                     logger.info("활성 집회 없음 — 구역 알람 발송 생략")

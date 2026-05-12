@@ -5,7 +5,7 @@ from typing import List, Optional
 import logging
 import asyncio
 
-from app.models.event import EventCreate, EventResponse, RouteEventCheck
+from app.models.event import EventCreate, EventResponse
 from app.database.connection import get_db
 from app.services.event_service import EventService
 from app.services.auth_service import verify_api_key
@@ -23,21 +23,8 @@ async def create_event(
     """새로운 집회/이벤트 생성"""
     result = EventService.create_event(event_data, db)
     
-    if result["success"]:
-        # 생성된 이벤트 조회
-        cursor = db.cursor()
-        cursor.execute("SELECT * FROM events WHERE id = ?", (result["event_id"],))
-        row = cursor.fetchone()
-        
-        if row:
-            return EventResponse(
-                id=row["id"], title=row["title"], description=row["description"],
-                location_name=row["location_name"], location_address=row["location_address"],
-                latitude=row["latitude"], longitude=row["longitude"],
-                start_date=row["start_date"], end_date=row["end_date"], category=row["category"],
-                severity_level=row["severity_level"], status=row["status"],
-                created_at=row["created_at"], updated_at=row["updated_at"]
-            )
+    if result["success"] and result.get("event"):
+        return result["event"]
     
     raise HTTPException(status_code=400, detail=result.get("error", "이벤트 생성에 실패했습니다"))
 
@@ -136,22 +123,8 @@ async def auto_check_all_routes(
     모든 사용자의 경로를 확인하고 집회 발견 시 자동 알림 전송
     (관리자용 또는 수동 트리거)
     """
-    cursor = db.cursor()
-
     # 경로 등록된 활성 사용자 조회 (plusfriend_user_key 우선)
-    cursor.execute('''
-        SELECT COALESCE(plusfriend_user_key, bot_user_key) as user_id
-        FROM users
-        WHERE active = 1
-        AND is_alarm_on = 1
-        AND departure_x IS NOT NULL
-        AND departure_y IS NOT NULL
-        AND arrival_x IS NOT NULL
-        AND arrival_y IS NOT NULL
-        AND (plusfriend_user_key IS NOT NULL OR bot_user_key IS NOT NULL)
-    ''')
-    
-    users = cursor.fetchall()
+    users = EventService.list_auto_check_route_user_ids(db)
     
     # 병렬 처리를 위한 태스크 생성
     async def process_user(user_id: str):

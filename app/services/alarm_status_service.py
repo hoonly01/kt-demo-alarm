@@ -1,14 +1,16 @@
 """알림 상태 추적 서비스"""
 import json
-import sqlite3
 import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import logging
 
 from app.database.connection import get_db_connection
+from app.repositories.alarm_task_repository import AlarmTaskRepository
 
 logger = logging.getLogger(__name__)
+
+COMPLETED_ALARM_TASK_STATUSES = frozenset({"completed", "failed", "partial"})
 
 
 class AlarmStatusService:
@@ -36,22 +38,14 @@ class AlarmStatusService:
         task_id = str(uuid.uuid4())
         
         with get_db_connection() as db:
-            cursor = db.cursor()
-            cursor.execute(
-                """
-                INSERT INTO alarm_tasks 
-                (task_id, alarm_type, status, total_recipients, event_id, request_data, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    task_id,
-                    alarm_type,
-                    "pending",
-                    total_recipients,
-                    event_id,
-                    json.dumps(request_data) if request_data else None,
-                    datetime.now().isoformat()
-                )
+            AlarmTaskRepository.create_task(
+                db,
+                task_id=task_id,
+                alarm_type=alarm_type,
+                total_recipients=total_recipients,
+                event_id=event_id,
+                request_data=json.dumps(request_data) if request_data else None,
+                created_at=datetime.now().isoformat(),
             )
             db.commit()
         
@@ -82,42 +76,21 @@ class AlarmStatusService:
         """
         try:
             with get_db_connection() as db:
-                cursor = db.cursor()
-                
-                # 기본 업데이트 쿼리 구성
-                update_fields = ["status = ?", "updated_at = ?"]
-                update_values = [status, datetime.now().isoformat()]
-                
-                # 선택적 필드 추가
-                if successful_sends is not None:
-                    update_fields.append("successful_sends = ?")
-                    update_values.append(successful_sends)
-                
-                if failed_sends is not None:
-                    update_fields.append("failed_sends = ?")
-                    update_values.append(failed_sends)
-                
-                if error_messages is not None:
-                    update_fields.append("error_messages = ?")
-                    update_values.append(json.dumps(error_messages))
-
-                if total_recipients is not None:
-                    update_fields.append("total_recipients = ?")
-                    update_values.append(total_recipients)
-                
-                # 완료 상태인 경우 완료 시간 추가
-                if status in ["completed", "failed", "partial"]:
-                    update_fields.append("completed_at = ?")
-                    update_values.append(datetime.now().isoformat())
-                
-                # 쿼리 실행
-                query = f"UPDATE alarm_tasks SET {', '.join(update_fields)} WHERE task_id = ?"
-                update_values.append(task_id)
-                
-                cursor.execute(query, update_values)
+                now = datetime.now().isoformat()
+                updated_count = AlarmTaskRepository.update_status(
+                    db,
+                    task_id=task_id,
+                    status=status,
+                    updated_at=now,
+                    successful_sends=successful_sends,
+                    failed_sends=failed_sends,
+                    error_messages=json.dumps(error_messages) if error_messages is not None else None,
+                    total_recipients=total_recipients,
+                    completed_at=now if status in COMPLETED_ALARM_TASK_STATUSES else None,
+                )
                 db.commit()
                 
-                if cursor.rowcount == 0:
+                if updated_count == 0:
                     logger.warning(f"알림 작업 ID {task_id}를 찾을 수 없음")
                     return False
                 
@@ -141,27 +114,9 @@ class AlarmStatusService:
         """
         try:
             with get_db_connection() as db:
-                cursor = db.cursor()
-                cursor.execute(
-                    """
-                    SELECT 
-                        task_id, alarm_type, status, total_recipients,
-                        successful_sends, failed_sends, event_id,
-                        request_data, error_messages,
-                        created_at, updated_at, completed_at
-                    FROM alarm_tasks 
-                    WHERE task_id = ?
-                    """,
-                    (task_id,)
-                )
-                
-                row = cursor.fetchone()
-                if not row:
+                result = AlarmTaskRepository.get_status(db, task_id)
+                if not result:
                     return None
-                
-                # 결과를 dict로 변환
-                columns = [desc[0] for desc in cursor.description]
-                result = dict(zip(columns, row))
                 
                 # JSON 필드 파싱
                 if result['request_data']:
@@ -204,35 +159,14 @@ class AlarmStatusService:
         """
         try:
             with get_db_connection() as db:
-                cursor = db.cursor()
-                cursor.execute(
-                    """
-                    SELECT 
-                        task_id, alarm_type, status, total_recipients,
-                        successful_sends, failed_sends, event_id,
-                        created_at, updated_at, completed_at
-                    FROM alarm_tasks 
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,)
-                )
-                
-                rows = cursor.fetchall()
-                columns = [desc[0] for desc in cursor.description]
-                
-                results = []
-                for row in rows:
-                    task_data = dict(zip(columns, row))
-                    
+                results = AlarmTaskRepository.list_recent(db, limit)
+                for task_data in results:
                     # 진행률 계산
                     if task_data['total_recipients'] > 0:
                         success_rate = (task_data['successful_sends'] or 0) / task_data['total_recipients']
                         task_data['success_rate'] = round(success_rate * 100, 2)
                     else:
                         task_data['success_rate'] = 0.0
-                    
-                    results.append(task_data)
                 
                 return results
                 
@@ -258,16 +192,11 @@ class AlarmStatusService:
             cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
             
             with get_db_connection() as db:
-                cursor = db.cursor()
-                cursor.execute(
-                    """
-                    DELETE FROM alarm_tasks 
-                    WHERE created_at < ?
-                    """,
-                    (cutoff_date,)
+                deleted_count = AlarmTaskRepository.delete_older_than(
+                    db,
+                    cutoff_date=cutoff_date,
                 )
                 db.commit()
-                deleted_count = cursor.rowcount
                 
                 logger.info(f"오래된 알림 작업 {deleted_count}개 정리 완료 ({days}일 이전, {cutoff_date} 기준)")
                 return deleted_count
