@@ -25,6 +25,10 @@ from typing import List, Dict, Tuple, Optional
 
 from app.database.connection import get_db_connection, get_database_path
 from app.config.settings import settings
+from app.repositories.event_bulk_import_repository import (
+    EventBulkImportRepository,
+    EventBulkImportRow,
+)
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -795,7 +799,7 @@ class CrawlingService:
         - IntegrityError/OperationalError 구분 처리
         - 상세한 오류 로깅
         """
-        insert_data = []
+        insert_data: List[EventBulkImportRow] = []
         skipped_count = 0
 
         for r in data_list:
@@ -855,13 +859,8 @@ class CrawlingService:
 
         try:
             with get_db_connection() as conn:
-                cur = conn.cursor()
-
                 try:
-                    cur.execute("""
-                        CREATE UNIQUE INDEX IF NOT EXISTS idx_events_location_date
-                        ON events(location_name, start_date)
-                    """)
+                    EventBulkImportRepository.ensure_location_date_unique_index(conn)
                     logger.debug("[DB] UNIQUE INDEX 생성/확인 완료")
                 except sqlite3.OperationalError as e:
                     logger.debug(f"[DB] INDEX 이미 존재: {e}")
@@ -869,15 +868,7 @@ class CrawlingService:
                     logger.warning(f"[DB] INDEX 생성 중 예기치 않은 오류: {e}")
 
                 try:
-                    cur.executemany("""
-                        INSERT OR IGNORE INTO events (
-                            title, description, location_name, location_address,
-                            latitude, longitude, start_date, end_date,
-                            category, severity_level, status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, insert_data)
-
-                    inserted_count = cur.rowcount
+                    inserted_count = EventBulkImportRepository.insert_or_ignore_events(conn, insert_data)
                     conn.commit()
 
                     logger.info(f"✅ [DB] {len(insert_data)}건 중 {inserted_count}건의 이벤트 저장 완료")

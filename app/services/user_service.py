@@ -4,6 +4,12 @@ import sqlite3
 from datetime import datetime
 from typing import Optional, Dict, Any
 from app.models.user import UserPreferences, InitialSetupRequest
+from app.repositories.user_identity_repository import UserIdentityRepository
+from app.repositories.user_preference_repository import UserPreferenceRepository
+from app.repositories.user_profile_repository import UserProfileRepository
+from app.repositories.user_read_repository import UserReadRepository
+from app.repositories.user_route_repository import UserRouteRepository
+from app.repositories.user_settings_repository import UserSettingsRepository
 from app.utils.geo_utils import get_location_info
 
 logger = logging.getLogger(__name__)
@@ -11,14 +17,6 @@ logger = logging.getLogger(__name__)
 
 class UserService:
     """사용자 관리 비즈니스 로직"""
-
-    @staticmethod
-    def _row_value(row: Any, key: str, index: int) -> Any:
-        if row is None:
-            return None
-        if isinstance(row, sqlite3.Row):
-            return row[key]
-        return row[index]
 
     @staticmethod
     def save_or_update_user(bot_user_key: str, db: sqlite3.Connection, message: str = "") -> None:
@@ -31,27 +29,26 @@ class UserService:
             message: 메시지 (로깅용)
         """
         try:
-            cursor = db.cursor()
             now = datetime.now()
             
             # 기존 사용자 확인
-            cursor.execute('SELECT * FROM users WHERE bot_user_key = ?', (bot_user_key,))
-            user = cursor.fetchone()
+            user = UserIdentityRepository.find_by_bot_user_key(db, bot_user_key)
             
             if user:
                 # 기존 사용자 업데이트
-                cursor.execute('''
-                    UPDATE users 
-                    SET last_message_at = ?, message_count = message_count + 1 
-                    WHERE bot_user_key = ?
-                ''', (now, bot_user_key))
+                UserIdentityRepository.increment_bot_user_message(
+                    db,
+                    bot_user_key=bot_user_key,
+                    now=now,
+                )
                 logger.info(f"사용자 업데이트: {bot_user_key}")
             else:
                 # 새 사용자 생성
-                cursor.execute('''
-                    INSERT INTO users (bot_user_key, first_message_at, last_message_at, message_count)
-                    VALUES (?, ?, ?, 1)
-                ''', (bot_user_key, now, now))
+                UserIdentityRepository.insert_bot_user(
+                    db,
+                    bot_user_key=bot_user_key,
+                    now=now,
+                )
                 logger.info(f"새 사용자 등록: {bot_user_key}")
             
             db.commit()
@@ -73,7 +70,6 @@ class UserService:
             db: 데이터베이스 연결
         """
         try:
-            cursor = db.cursor()
             now = datetime.now()
             
             if not plusfriend_key:
@@ -83,31 +79,23 @@ class UserService:
                 return
 
             # plusfriend_key로 조회 (primary identifier)
-            cursor.execute(
-                "SELECT id, open_id, bot_user_key FROM users WHERE plusfriend_user_key = ?",
-                (plusfriend_key,)
-            )
-            existing_plusfriend = cursor.fetchone()
+            existing_plusfriend = UserIdentityRepository.find_by_plusfriend_key(db, plusfriend_key)
 
             # plusfriend 미연동 레거시 사용자를 bot_user_key로 조회
-            cursor.execute(
-                "SELECT id, plusfriend_user_key, open_id FROM users WHERE bot_user_key = ?",
-                (bot_user_key,)
-            )
-            existing_bot = cursor.fetchone()
+            existing_bot = UserIdentityRepository.find_by_bot_user_key(db, bot_user_key)
 
             if existing_plusfriend:
                 # plusfriend_key로 이미 연결된 기존 사용자 업데이트
                 logger.debug(f"✅ 기존 사용자 발견: plusfriend={plusfriend_key}")
-                cursor.execute("""
-                    UPDATE users
-                    SET last_message_at = ?, message_count = message_count + 1, active = 1
-                    WHERE plusfriend_user_key = ?
-                """, (now, plusfriend_key))
+                UserIdentityRepository.touch_plusfriend_user(
+                    db,
+                    plusfriend_key=plusfriend_key,
+                    now=now,
+                )
 
-                existing_plusfriend_bot_user_key = UserService._row_value(existing_plusfriend, "bot_user_key", 2)
-                existing_plusfriend_id = UserService._row_value(existing_plusfriend, "id", 0)
-                existing_bot_id = UserService._row_value(existing_bot, "id", 0)
+                existing_plusfriend_bot_user_key = existing_plusfriend["bot_user_key"]
+                existing_plusfriend_id = existing_plusfriend["id"]
+                existing_bot_id = existing_bot["id"] if existing_bot else None
 
                 if existing_plusfriend_bot_user_key != bot_user_key:
                     if existing_bot and existing_bot_id != existing_plusfriend_id:
@@ -118,46 +106,45 @@ class UserService:
                             plusfriend_key,
                         )
                     else:
-                        cursor.execute("""
-                            UPDATE users
-                            SET bot_user_key = ?
-                            WHERE plusfriend_user_key = ?
-                        """, (bot_user_key, plusfriend_key))
+                        UserIdentityRepository.set_bot_user_key_for_plusfriend(
+                            db,
+                            plusfriend_key=plusfriend_key,
+                            bot_user_key=bot_user_key,
+                        )
             elif existing_bot:
                 # 기존 bot_user_key 사용자에 plusfriend_key 연결
                 logger.info(f"✅ 기존 bot_user_key 사용자에 plusfriend 연결: {bot_user_key} → {plusfriend_key}")
-                cursor.execute("""
-                    UPDATE users
-                    SET plusfriend_user_key = ?, last_message_at = ?, message_count = message_count + 1, active = 1
-                    WHERE bot_user_key = ?
-                """, (plusfriend_key, now, bot_user_key))
+                UserIdentityRepository.link_plusfriend_to_bot(
+                    db,
+                    bot_user_key=bot_user_key,
+                    plusfriend_key=plusfriend_key,
+                    now=now,
+                )
             else:
                 # 웹훅 사용자 찾기 시도 (open_id만 있는 경우)
-                cursor.execute("""
-                    SELECT id, open_id FROM users
-                    WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL
-                    ORDER BY first_message_at ASC, id ASC
-                    LIMIT 1
-                """)
-                orphan = cursor.fetchone()
+                orphan = UserIdentityRepository.find_oldest_unlinked_user(db)
 
                 if orphan:
                     # 웹훅 사용자 연결 (Orphan Matching)
-                    orphan_open_id = UserService._row_value(orphan, "open_id", 1)
-                    orphan_id = UserService._row_value(orphan, "id", 0)
+                    orphan_open_id = orphan["open_id"]
+                    orphan_id = orphan["id"]
                     logger.info(f"✅ 웹훅 사용자 연결: open_id={orphan_open_id} → plusfriend={plusfriend_key}")
-                    cursor.execute("""
-                        UPDATE users
-                        SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ?, active = 1
-                        WHERE id = ?
-                    """, (bot_user_key, plusfriend_key, now, orphan_id))
+                    UserIdentityRepository.link_orphan_identity(
+                        db,
+                        user_id=orphan_id,
+                        bot_user_key=bot_user_key,
+                        plusfriend_key=plusfriend_key,
+                        now=now,
+                    )
                 else:
                     # 완전 신규 사용자
                     logger.info(f"✅ 신규 사용자 생성: plusfriend={plusfriend_key}")
-                    cursor.execute("""
-                        INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
-                        VALUES (?, ?, ?, ?, 1, 1)
-                    """, (bot_user_key, plusfriend_key, now, now))
+                    UserIdentityRepository.insert_kakao_identity(
+                        db,
+                        bot_user_key=bot_user_key,
+                        plusfriend_key=plusfriend_key,
+                        now=now,
+                    )
             
             db.commit()
             
@@ -197,22 +184,13 @@ class UserService:
             Dict: 처리 결과
         """
         try:
-            cursor = db.cursor()
+            updated_count = UserSettingsRepository.update_alarm_setting(
+                db,
+                user_id=user_id,
+                is_alarm_on=is_alarm_on,
+            )
             
-            # 1. plusfriend_user_key로 우선 업데이트 시도
-            cursor.execute('''
-                UPDATE users SET is_alarm_on = ?
-                WHERE plusfriend_user_key = ?
-            ''', (is_alarm_on, user_id))
-            
-            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
-            if cursor.rowcount == 0:
-                cursor.execute('''
-                    UPDATE users SET is_alarm_on = ?
-                    WHERE bot_user_key = ?
-                ''', (is_alarm_on, user_id))
-            
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"알람 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
                 
@@ -239,22 +217,13 @@ class UserService:
             Dict: 처리 결과
         """
         try:
-            cursor = db.cursor()
+            updated_count = UserSettingsRepository.update_favorite_zone(
+                db,
+                user_id=user_id,
+                zone=zone,
+            )
 
-            # 1. plusfriend_user_key로 우선 업데이트 시도
-            cursor.execute('''
-                UPDATE users SET favorite_zone = ?
-                WHERE plusfriend_user_key = ?
-            ''', (zone, user_id))
-
-            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
-            if cursor.rowcount == 0:
-                cursor.execute('''
-                    UPDATE users SET favorite_zone = ?
-                    WHERE bot_user_key = ?
-                ''', (zone, user_id))
-
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"관심장소 설정 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
@@ -281,8 +250,6 @@ class UserService:
             db: 데이터베이스 연결
         """
         try:
-            cursor = db.cursor()
-
             # 1. 지오코딩
             departure_info = await get_location_info(departure)
             if not departure_info:
@@ -293,22 +260,15 @@ class UserService:
                 return {"success": False, "error": "도착지를 찾을 수 없습니다"}
 
             # 2. 경로 정보만 업데이트
-            cursor.execute('''
-                UPDATE users SET
-                    departure_name = ?, departure_address = ?, departure_x = ?, departure_y = ?,
-                    arrival_name = ?, arrival_address = ?, arrival_x = ?, arrival_y = ?,
-                    route_updated_at = ?
-                WHERE plusfriend_user_key = ?
-            ''', (
-                departure_info["name"], departure_info["address"],
-                departure_info["x"], departure_info["y"],
-                arrival_info["name"], arrival_info["address"],
-                arrival_info["x"], arrival_info["y"],
-                datetime.now(),
-                user_id
-            ))
+            updated_count = UserRouteRepository.update_route(
+                db,
+                user_id=user_id,
+                departure_info=departure_info,
+                arrival_info=arrival_info,
+                now=datetime.now(),
+            )
 
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"경로 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
@@ -337,24 +297,13 @@ class UserService:
             db: 데이터베이스 연결
         """
         try:
-            cursor = db.cursor()
-            clear_sql = '''
-                UPDATE users SET
-                    departure_name = NULL, departure_address = NULL,
-                    departure_x = NULL, departure_y = NULL,
-                    arrival_name = NULL, arrival_address = NULL,
-                    arrival_x = NULL, arrival_y = NULL,
-                    route_updated_at = ?
-                WHERE {} = ?
-            '''
-            # 1. plusfriend_user_key로 우선 업데이트 시도
-            cursor.execute(clear_sql.format("plusfriend_user_key"), (datetime.now(), user_id))
+            updated_count = UserRouteRepository.clear_route(
+                db,
+                user_id=user_id,
+                now=datetime.now(),
+            )
 
-            # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
-            if cursor.rowcount == 0:
-                cursor.execute(clear_sql.format("bot_user_key"), (datetime.now(), user_id))
-
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
@@ -374,34 +323,14 @@ class UserService:
         - 없으면 bot_user_key로 fallback
         """
         try:
-            cursor = db.cursor()
+            updated_count = UserSettingsRepository.update_marked_bus(
+                db,
+                user_id=user_id,
+                marked_bus=marked_bus,
+                now=datetime.now(),
+            )
 
-            # 1. plusfriend_user_key 기준 업데이트
-            cursor.execute('''
-                UPDATE users SET
-                    marked_bus = ?,
-                    last_message_at = ?
-                WHERE plusfriend_user_key = ?
-            ''', (
-                marked_bus,
-                datetime.now(),
-                user_id
-            ))
-
-            # 2. 업데이트 안 됐으면 bot_user_key로 fallback
-            if cursor.rowcount == 0:
-                cursor.execute('''
-                    UPDATE users SET
-                        marked_bus = ?,
-                        last_message_at = ?
-                    WHERE bot_user_key = ?
-                ''', (
-                    marked_bus,
-                    datetime.now(),
-                    user_id
-                ))
-
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"marked_bus 업데이트 대상 사용자를 찾을 수 없음: {user_id}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
@@ -424,8 +353,6 @@ class UserService:
             db: 데이터베이스 연결
         """
         try:
-            cursor = db.cursor()
-
             # 1. 지오코딩 (경로 정보가 있는 경우)
             dep_info = None
             arr_info = None
@@ -440,37 +367,22 @@ class UserService:
                 if not arr_info:
                     return {"success": False, "error": "도착지를 찾을 수 없습니다"}
 
-            # 2. 전체 필드 업데이트 쿼리 구성
+            # 2. 전체 필드 업데이트
             # 주의: 값이 없는 필드는 NULL로 하거나, 기존 값을 유지해야 하는데
             # Initial Setup의 목적상 입력된 값으로 덮어쓰는 것이 일반적임.
             # 하지만 여기선 입력된 값만 업데이트하도록 동적 쿼리 사용 권장, 
             # 단순화를 위해 모두 업데이트 (None이면 NULL 처리될 수 있음에 유의)
+            updated_count = UserProfileRepository.update_profile(
+                db,
+                plusfriend_user_key=user_setup.bot_user_key,
+                departure_info=dep_info,
+                arrival_info=arr_info,
+                marked_bus=user_setup.marked_bus,
+                language=user_setup.language,
+                now=datetime.now(),
+            )
             
-            update_query = "UPDATE users SET route_updated_at = ?"
-            params = [datetime.now()]
-            
-            if dep_info:
-                update_query += ", departure_name=?, departure_address=?, departure_x=?, departure_y=?"
-                params.extend([dep_info["name"], dep_info["address"], dep_info["x"], dep_info["y"]])
-                
-            if arr_info:
-                update_query += ", arrival_name=?, arrival_address=?, arrival_x=?, arrival_y=?"
-                params.extend([arr_info["name"], arr_info["address"], arr_info["x"], arr_info["y"]])
-                
-            if user_setup.marked_bus:
-                update_query += ", marked_bus=?"
-                params.append(user_setup.marked_bus)
-                
-            if user_setup.language:
-                update_query += ", language=?"
-                params.append(user_setup.language)
-                
-            update_query += " WHERE plusfriend_user_key = ?"
-            params.append(user_setup.bot_user_key)
-            
-            cursor.execute(update_query, params)
-            
-            if cursor.rowcount == 0:
+            if updated_count == 0:
                 logger.warning(f"프로필 업데이트 대상 사용자를 찾을 수 없음: {user_setup.bot_user_key}")
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
 
@@ -504,31 +416,18 @@ class UserService:
             Dict: 처리 결과
         """
         try:
-            cursor = db.cursor()
-            
             # 기존 사용자 확인
-            cursor.execute("SELECT id FROM users WHERE bot_user_key = ?", (user_id,))
-            user = cursor.fetchone()
-            
-            if not user:
+            if not UserPreferenceRepository.exists_by_bot_user_key(db, user_id):
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
             
             # 설정 업데이트
-            update_fields = []
-            update_values = []
-            
-            if preferences.marked_bus:
-                update_fields.append("marked_bus = ?")
-                update_values.append(preferences.marked_bus)
-            
-            if preferences.language:
-                update_fields.append("language = ?") 
-                update_values.append(preferences.language)
-            
-            if update_fields:
-                update_values.append(user_id)
-                query = f"UPDATE users SET {', '.join(update_fields)} WHERE bot_user_key = ?"
-                cursor.execute(query, update_values)
+            updated_count = UserPreferenceRepository.update_preferences(
+                db,
+                user_id=user_id,
+                marked_bus=preferences.marked_bus,
+                language=preferences.language,
+            )
+            if updated_count:
                 db.commit()
             
             logger.info(f"사용자 설정 업데이트 완료: {user_id}")
@@ -551,15 +450,7 @@ class UserService:
             Optional[Dict]: 사용자 경로 정보 또는 None
         """
         try:
-            cursor = db.cursor()
-            cursor.execute('''
-                SELECT departure_name, departure_address, departure_x, departure_y,
-                       arrival_name, arrival_address, arrival_x, arrival_y,
-                       route_updated_at
-                FROM users WHERE bot_user_key = ?
-            ''', (user_id,))
-            
-            user_data = cursor.fetchone()
+            user_data = UserReadRepository.get_route_info_by_bot_user_key(db, user_id)
             if not user_data:
                 return None
                 
@@ -605,24 +496,7 @@ class UserService:
             Optional[Dict]: 사용자 정보 또는 None
         """
         try:
-            cursor = db.cursor()
-            
-            SELECT_FIELDS = '''
-                SELECT 
-                    is_alarm_on, favorite_zone, marked_bus, 
-                    departure_name, arrival_name,
-                    plusfriend_user_key, bot_user_key
-                FROM users 
-            '''
-
-            # 1단계: plusfriend_user_key로 조회 (우선)
-            cursor.execute(SELECT_FIELDS + 'WHERE plusfriend_user_key = ? LIMIT 1', (user_id,))
-            row = cursor.fetchone()
-
-            # 2단계: 없으면 bot_user_key로 조회 (fallback)
-            if not row:
-                cursor.execute(SELECT_FIELDS + 'WHERE bot_user_key = ? LIMIT 1', (user_id,))
-                row = cursor.fetchone()
+            row = UserReadRepository.get_user_info(db, user_id)
             if not row:
                 return None
                 

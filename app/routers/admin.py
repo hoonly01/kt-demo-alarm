@@ -3,7 +3,7 @@ import secrets
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.database.connection import get_db_connection
 from app.config.settings import settings
+from app.repositories.admin_dashboard_read_repository import AdminDashboardReadRepository
 import math
 
 from app.utils.scheduler_utils import get_scheduler_status
@@ -122,92 +123,24 @@ def verify_csrf_origin(request: Request):
         raise HTTPException(status_code=403, detail="Forbidden: CSRF/Origin mismatch")
 
 def fetch_recent_events() -> List[Dict[str, Any]]:
-    # Synchronous DB query
     with get_db_connection() as conn:
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, title, location_name, severity_level, start_date, created_at, status 
-            FROM events 
-            ORDER BY id DESC 
-            LIMIT 100
-        """)
-        return cursor.fetchall()
+        return AdminDashboardReadRepository.list_recent_events(conn)
 
 def fetch_recent_alarms() -> List[Dict[str, Any]]:
-    # Synchronous DB query
     with get_db_connection() as conn:
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT task_id, alarm_type, status, total_recipients, successful_sends, failed_sends, created_at
-            FROM alarm_tasks 
-            ORDER BY created_at DESC 
-            LIMIT 100
-        """)
-        return cursor.fetchall()
-
-# Helper for sqlite row to dict
-def dict_factory(cursor, row):
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
+        return AdminDashboardReadRepository.list_recent_alarms(conn)
 
 def get_total_users() -> int:
     with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM users")
-        result = cursor.fetchone()
-        return result[0] if result else 0
-
-def _get_table_columns(cursor, table_name: str) -> Set[str]:
-    cursor.execute(f"PRAGMA table_info({table_name})")
-    columns = set()
-    for row in cursor.fetchall():
-        if isinstance(row, dict):
-            columns.add(row["name"])
-        else:
-            columns.add(row[1])
-    return columns
+        return AdminDashboardReadRepository.count_users(conn)
 
 def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
     with get_db_connection() as conn:
-        conn.row_factory = dict_factory
-        cursor = conn.cursor()
-
-        user_columns = _get_table_columns(cursor, "users")
-        select_fields = [
-            "id",
-            "bot_user_key",
-            "active",
-            "departure_name",
-            "arrival_name",
-            "marked_bus",
-            "first_message_at as created_at",
-            "message_count",
-        ]
-
-        optional_fields = {
-            "plusfriend_user_key": "plusfriend_user_key",
-            "open_id": "open_id",
-            "is_alarm_on": "is_alarm_on",
-            "favorite_zone": "COALESCE(favorite_zone, 0) as favorite_zone",
-        }
-
-        for column_name, sql in optional_fields.items():
-            if column_name in user_columns:
-                select_fields.append(sql)
-            else:
-                select_fields.append(f"NULL as {column_name}" if column_name != "favorite_zone" else "0 as favorite_zone")
-
-        cursor.execute(f"""
-            SELECT {', '.join(select_fields)}
-            FROM users
-            ORDER BY id DESC
-            LIMIT ? OFFSET ?
-        """, (limit, offset))
-        return cursor.fetchall()
+        return AdminDashboardReadRepository.list_paginated_users(
+            conn,
+            limit=limit,
+            offset=offset,
+        )
 
 def _format_user_created_at(value: Any) -> str:
     if value in (None, ""):

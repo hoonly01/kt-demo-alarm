@@ -1,12 +1,14 @@
 """이벤트/집회 관리 서비스"""
-import asyncio
 import logging
 import sqlite3
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
-from app.utils.geo_utils import haversine_distance, get_route_coordinates, is_event_near_route_accurate, is_point_near_route
+from app.utils.geo_utils import get_route_coordinates, is_event_near_route_accurate, is_point_near_route
 from app.database.connection import get_db_connection
+from app.repositories.event_repository import EventRepository
+from app.repositories.route_event_query_repository import RouteEventQueryRepository
+from app.repositories.user_route_read_repository import UserRouteReadRepository
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,25 @@ logger = logging.getLogger(__name__)
 
 class EventService:
     """이벤트/집회 관리 비즈니스 로직"""
+
+    @staticmethod
+    def _event_response_from_row(row: Dict[str, Any]) -> EventResponse:
+        return EventResponse(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            location_name=row["location_name"],
+            location_address=row["location_address"],
+            latitude=row["latitude"],
+            longitude=row["longitude"],
+            start_date=row["start_date"],
+            end_date=row["end_date"],
+            category=row["category"],
+            severity_level=row["severity_level"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     @staticmethod
     def create_event(event_data: EventCreate, db: sqlite3.Connection) -> Dict[str, Any]:
@@ -28,31 +49,29 @@ class EventService:
             Dict: 생성 결과
         """
         try:
-            cursor = db.cursor()
-            cursor.execute('''
-                INSERT INTO events (title, description, location_name, location_address,
-                                  latitude, longitude, start_date, end_date, category, 
-                                  severity_level, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                event_data.title,
-                event_data.description,
-                event_data.location_name,
-                event_data.location_address,
-                event_data.latitude,
-                event_data.longitude,
-                event_data.start_date,
-                event_data.end_date,
-                event_data.category,
-                event_data.severity_level,
-                'active'  # 기본값으로 'active' 설정
-            ))
-            
-            event_id = cursor.lastrowid
+            event_id = EventRepository.create_event(
+                db,
+                title=event_data.title,
+                description=event_data.description,
+                location_name=event_data.location_name,
+                location_address=event_data.location_address,
+                latitude=event_data.latitude,
+                longitude=event_data.longitude,
+                start_date=event_data.start_date,
+                end_date=event_data.end_date,
+                category=event_data.category,
+                severity_level=event_data.severity_level,
+                status="active",
+            )
             db.commit()
+            event_row = EventRepository.get_by_id(db, event_id)
             
             logger.info(f"새 집회 생성 완료: {event_id} - {event_data.title}")
-            return {"success": True, "event_id": event_id}
+            return {
+                "success": True,
+                "event_id": event_id,
+                "event": EventService._event_response_from_row(event_row) if event_row else None,
+            }
             
         except Exception as e:
             logger.error(f"집회 생성 실패: {str(e)}")
@@ -78,54 +97,13 @@ class EventService:
             List[EventResponse]: 집회 목록
         """
         try:
-            cursor = db.cursor()
-            
-            # 쿼리 조건 구성
-            where_conditions = []
-            params = []
-            
-            if category:
-                where_conditions.append("category = ?")
-                params.append(category)
-            
-            if status:
-                where_conditions.append("status = ?")
-                params.append(status)
-            
-            where_clause = " WHERE " + " AND ".join(where_conditions) if where_conditions else ""
-            
-            query = f'''
-                SELECT id, title, description, location_name, location_address,
-                       latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
-                FROM events{where_clause}
-                ORDER BY start_date DESC
-                LIMIT ?
-            '''
-            
-            params.append(limit)
-            cursor.execute(query, params)
-            
-            events = []
-            for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
-
-            return events
+            rows = EventRepository.list_events(
+                db,
+                category=category,
+                status=status,
+                limit=limit,
+            )
+            return [EventService._event_response_from_row(row) for row in rows]
 
         except Exception as e:
             logger.error(f"집회 목록 조회 실패: {str(e)}")
@@ -149,16 +127,8 @@ class EventService:
             RouteEventCheck: 경로 확인 결과
         """
         try:
-            cursor = db.cursor()
-
             # 사용자 경로 정보 조회 (plusfriend_user_key 우선 조회)
-            cursor.execute('''
-                SELECT departure_name, departure_address, departure_x, departure_y,
-                       arrival_name, arrival_address, arrival_x, arrival_y
-                FROM users WHERE plusfriend_user_key = ? OR bot_user_key = ?
-            ''', (user_id, user_id))
-            
-            user_row = cursor.fetchone()
+            user_row = UserRouteReadRepository.get_route_for_user(db, user_id)
             if not user_row or any(user_row[k] is None for k in ("departure_x", "departure_y", "arrival_x", "arrival_y")):
                 return RouteEventCheck(
                     user_id=user_id,
@@ -169,14 +139,7 @@ class EventService:
 
             dep_lon, dep_lat, arr_lon, arr_lat = user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]
             
-            # 활성 집회 목록 조회
-            cursor.execute('''
-                SELECT * FROM events 
-                WHERE status = 'active' AND start_date > datetime('now', '+9 hours')
-                ORDER BY start_date
-            ''')
-            
-            events_rows = cursor.fetchall()
+            events_rows = RouteEventQueryRepository.list_active_future_events(db)
             route_events = []
             
             # 카카오 Mobility API로 실제 경로 좌표 가져오기
@@ -273,20 +236,7 @@ class EventService:
 
             with get_db_connection() as db:
                 # 활성 사용자 조회 (plusfriend_user_key 필수!)
-                cursor = db.cursor()
-                cursor.execute('''
-                    SELECT plusfriend_user_key, departure_name, arrival_name
-                    FROM users
-                    WHERE active = 1
-                      AND is_alarm_on = 1
-                      AND plusfriend_user_key IS NOT NULL
-                      AND departure_x IS NOT NULL
-                      AND departure_y IS NOT NULL
-                      AND arrival_x IS NOT NULL
-                      AND arrival_y IS NOT NULL
-                ''')
-
-                users = cursor.fetchall()
+                users = UserRouteReadRepository.list_scheduled_route_users(db)
 
                 logger.info(f"경로 등록된 사용자 {len(users)}명 확인 중...")
 
@@ -379,6 +329,11 @@ class EventService:
             }
 
     @staticmethod
+    def list_auto_check_route_user_ids(db: sqlite3.Connection) -> List[Dict[str, Any]]:
+        """수동 전체 경로 확인 대상 사용자 ID를 조회한다."""
+        return UserRouteReadRepository.list_auto_check_route_user_ids(db)
+
+    @staticmethod
     def get_upcoming_events(
         limit: int = 5,
         db: sqlite3.Connection = None
@@ -395,7 +350,6 @@ class EventService:
         """
         try:
             from zoneinfo import ZoneInfo
-            cursor = db.cursor()
             
             # KST 현재 시간
             now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -405,36 +359,8 @@ class EventService:
             # 여기서는 datetime 객체를 파라미터로 넘김 (adapter가 처리)
             # 또는 문자열로 변환하여 비교: now_kst.strftime("%Y-%m-%d %H:%M:%S")
             
-            cursor.execute('''
-                SELECT id, title, description, location_name, location_address,
-                       latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
-                FROM events
-                WHERE status = 'active' AND start_date >= ?
-                ORDER BY start_date ASC
-                LIMIT ?
-            ''', (now_str, limit))
-            
-            events = []
-            for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
-
-            return events
+            rows = EventRepository.list_upcoming(db, now=now_str, limit=limit)
+            return [EventService._event_response_from_row(row) for row in rows]
 
         except Exception as e:
             logger.error(f"다가오는 집회 목록 조회 실패: {str(e)}")
@@ -455,43 +381,17 @@ class EventService:
         """
         try:
             from zoneinfo import ZoneInfo
-            cursor = db.cursor()
             
             # KST 오늘 날짜 문자열 (YYYY-MM-DD)
             today_kst_str = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
             
             jongno_pattern = '%종로%'
-            cursor.execute('''
-                SELECT id, title, description, location_name, location_address,
-                       latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
-                FROM events
-                WHERE status = 'active'
-                  AND date(start_date) = ?
-                  AND (location_name LIKE ? OR location_address LIKE ?)
-                ORDER BY start_date ASC
-            ''', (today_kst_str, jongno_pattern, jongno_pattern))
-            
-            events = []
-            for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
-
-            return events
+            rows = EventRepository.list_today_by_location_pattern(
+                db,
+                today=today_kst_str,
+                location_pattern=jongno_pattern,
+            )
+            return [EventService._event_response_from_row(row) for row in rows]
 
         except Exception as e:
             logger.error(f"오늘 집회 목록 조회 실패: {str(e)}")
