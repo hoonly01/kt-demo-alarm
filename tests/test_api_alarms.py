@@ -23,7 +23,10 @@ def test_send_alarms_separates_id_types(test_client, clean_test_db):
         conn.close()
 
     with patch('app.routers.alarms.NotificationService.send_bulk_alarm', new_callable=AsyncMock) as mock_send_bulk:
-        mock_send_bulk.return_value = {"success": True, "total_users": 1, "total_sent": 1, "total_failed": 0}
+        mock_send_bulk.side_effect = [
+            {"success": True, "total_users": 2, "total_sent": 1, "total_failed": 1},
+            {"success": True, "total_users": 1, "total_sent": 0, "total_failed": 1},
+        ]
         
         response = test_client.post(
             "/alarms/send-to-all?event_name=test_event",
@@ -32,6 +35,9 @@ def test_send_alarms_separates_id_types(test_client, clean_test_db):
         )
         
         assert response.status_code == 200
+        assert response.json()["total_users"] == 3
+        assert response.json()["sent"] == 1
+        assert response.json()["failed"] == 2
         
         # ID 타입별로 2번 호출되어야 합니다 (plusfriend 대상자 그룹 1번, bot_user 대상자 그룹 1번)
         assert mock_send_bulk.call_count == 2
