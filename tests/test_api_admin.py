@@ -1,4 +1,3 @@
-import os
 import pytest
 from unittest.mock import AsyncMock
 from app.config.settings import settings
@@ -24,6 +23,7 @@ def test_admin_dashboard_invalid_credentials(test_client, monkeypatch):
     response = test_client.get("/admin/dashboard", auth=("admin", "wrongpassword"))
     assert response.status_code == 401
 
+@pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_valid_credentials(test_client, monkeypatch):
     """올바른 인증 정보로 접근 시 200 OK와 HTML을 반환해야 함"""
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
@@ -60,6 +60,7 @@ def test_admin_dashboard_empty_or_whitespace_env_vars(test_client, monkeypatch, 
     assert response.status_code == 500
     assert response.json() == {"detail": "Admin credentials are not configured on the server"}
 
+@pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_pagination(test_client, monkeypatch):
     """Pagination 파라미터가 유효하게 작동하는지 검증"""
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
@@ -166,6 +167,37 @@ def test_trigger_bus_notice_rejects_invalid_api_key(test_client, monkeypatch):
     )
 
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/admin/trigger-route-check",
+    "/admin/trigger-zone-check",
+    "/admin/trigger-test-alarm-for-user?user_id=12345",
+])
+def test_new_trigger_endpoints_reject_missing_credentials(test_client, monkeypatch, endpoint):
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+
+    response = test_client.post(endpoint)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/admin/trigger-route-check",
+    "/admin/trigger-zone-check",
+    "/admin/trigger-test-alarm-for-user?user_id=12345",
+])
+def test_new_trigger_endpoints_reject_invalid_api_key(test_client, monkeypatch, endpoint):
+    monkeypatch.setattr(settings, "API_KEY", "test-api-key")
+
+    response = test_client.post(
+        endpoint,
+        headers={"X-API-Key": "wrong-key"},
+    )
+
+    assert response.status_code == 401
+
 
 def test_trigger_route_check_authorized_with_api_key(test_client, monkeypatch):
     monkeypatch.setattr(settings, "API_KEY", "test-api-key")
