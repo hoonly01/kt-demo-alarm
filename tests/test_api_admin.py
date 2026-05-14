@@ -167,6 +167,36 @@ def test_trigger_bus_notice_rejects_invalid_api_key(test_client, monkeypatch):
 
     assert response.status_code == 401
 
+def test_trigger_route_check_authorized_with_api_key(test_client, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEY", "test-api-key")
+
+    mock_route_check = AsyncMock()
+
+    monkeypatch.setattr("app.services.event_service.EventService.scheduled_route_check", mock_route_check)
+    response = test_client.post(
+        "/admin/trigger-route-check",
+        headers={"X-API-Key": "test-api-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "Scheduled"}
+    mock_route_check.assert_called_once()
+
+def test_trigger_zone_check_authorized_with_api_key(test_client, monkeypatch):
+    monkeypatch.setattr(settings, "API_KEY", "test-api-key")
+
+    mock_zone_check = AsyncMock()
+
+    monkeypatch.setattr("app.services.zone_alarm_service.ZoneAlarmService.scheduled_zone_check", mock_zone_check)
+    response = test_client.post(
+        "/admin/trigger-zone-check",
+        headers={"X-API-Key": "test-api-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "Scheduled"}
+    mock_zone_check.assert_called_once()
+
 def test_trigger_test_alarm_for_user_authorized(test_client, monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_USER", "admin")
     monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
