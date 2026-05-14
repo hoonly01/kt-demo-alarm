@@ -144,7 +144,7 @@ async def save_user_info(request: dict, background_tasks: BackgroundTasks):
                             f"📍 도착지: {arrival}\n\n"
                             "✅ 출발지와 도착지가 정상적으로 등록되었습니다.\n"
                             "📢 매일 아침, 등록하신 경로에 예정된 집회 정보를 안내해드립니다.\n"
-                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [🚗 이동 경로 등록하기] 버튼을 눌러주세요."
+                            "🔄 경로를 변경하고 싶으실 땐, 언제든 [이동경로등록]을 눌러주세요."
                         )
                     }
                 }
