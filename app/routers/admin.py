@@ -17,6 +17,7 @@ from app.utils.scheduler_utils import get_scheduler_status
 from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
 from app.services.crawling_service import CrawlingService
+from app.services.zone_alarm_service import ZoneAlarmService
 
 from urllib.parse import urlparse
 
@@ -348,6 +349,36 @@ async def trigger_bus_notice(
             return {"message": "Task already in progress"}
             
         task = asyncio.create_task(BusNoticeService.refresh())
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
+
+@router.post("/trigger-route-check")
+async def trigger_route_check(
+    _auth: str = Depends(verify_admin_action),
+):
+    """수동으로 전체 사용자 경로 집회 알림 체크를 트리거합니다."""
+    task_key = "trigger-route-check"
+    async with _task_lock:
+        if task_key in _background_tasks and not _background_tasks[task_key].done():
+            return {"message": "Task already in progress"}
+
+        task = asyncio.create_task(EventService.scheduled_route_check())
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
+
+@router.post("/trigger-zone-check")
+async def trigger_zone_check(
+    _auth: str = Depends(verify_admin_action),
+):
+    """수동으로 관심구역 집회 알림 체크를 트리거합니다."""
+    task_key = "trigger-zone-check"
+    async with _task_lock:
+        if task_key in _background_tasks and not _background_tasks[task_key].done():
+            return {"message": "Task already in progress"}
+
+        task = asyncio.create_task(ZoneAlarmService.scheduled_zone_check())
         _background_tasks[task_key] = task
         task.add_done_callback(_task_done_callback(task_key))
     return {"message": "Scheduled"}
