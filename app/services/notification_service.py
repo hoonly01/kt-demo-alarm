@@ -3,6 +3,7 @@ import asyncio
 import logging
 import httpx
 import json
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
 from app.models.kakao import EventAPIRequest, Event, EventUser
@@ -15,16 +16,49 @@ class NotificationService:
     """알림 전송 비즈니스 로직"""
 
     @staticmethod
-    def _format_event_block(event: Dict[str, Any]) -> str:
-        """단일 집회 정보를 이모지 블록으로 포맷팅"""
-        severity_level = event.get("severity_level", 1)
-        severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+    def _format_event_time(value: Any) -> str:
+        """집회 일시 표시용 HH:MM 포맷 변환"""
+        if value is None:
+            return "미정"
+
+        if isinstance(value, datetime):
+            return value.strftime("%H:%M")
+
+        value_text = str(value).strip()
+        if not value_text:
+            return "미정"
+
+        try:
+            return datetime.fromisoformat(value_text).strftime("%H:%M")
+        except ValueError:
+            return value_text[:5] if len(value_text) >= 5 else value_text
+
+    @staticmethod
+    def _format_event_time_range(event: Dict[str, Any]) -> str:
+        """집회 시작/종료 일시 범위 포맷팅"""
+        start_time = NotificationService._format_event_time(event.get("start_date"))
+        end_time = NotificationService._format_event_time(event.get("end_date"))
+        return f"{start_time} ~ {end_time}"
+
+    @staticmethod
+    def _format_event_block(index: int, event: Dict[str, Any]) -> str:
+        """단일 집회 정보를 사용자 알림용 번호 블록으로 포맷팅"""
+        description = str(event.get("description") or "").strip() or "미상"
         return (
-            f"{severity_emoji} {event['title']}\n"
-            f"📍 {event['location']}\n"
-            f"⏰ {event['start_date']}\n"
-            f"🏷️ {event.get('category', '일반')}"
+            f"{index}.\n"
+            f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
+            f"집회 장소 : {event['location']}\n"
+            f"신고 인원 : {description}"
         )
+
+    @staticmethod
+    def _format_event_collection_message(header: str, events: List[Dict[str, Any]]) -> str:
+        """여러 집회 정보를 공통 번호형 템플릿으로 포맷팅"""
+        blocks = [
+            NotificationService._format_event_block(index, event)
+            for index, event in enumerate(events, start=1)
+        ]
+        return f"{header}\n\n" + "\n\n".join(blocks)
 
     @staticmethod
     def _format_event_message(events: List[Dict[str, Any]]) -> str:
@@ -37,8 +71,10 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        blocks = [NotificationService._format_event_block(e) for e in events]
-        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(blocks)
+        return NotificationService._format_event_collection_message(
+            "경로상 감지된 집회 안내입니다.",
+            events,
+        )
 
     @staticmethod
     def _format_zone_message(zone_name: str, events: List[Dict[str, Any]]) -> str:
@@ -52,8 +88,10 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        blocks = [NotificationService._format_event_block(e) for e in events]
-        return f"설정하신 {zone_name}에 집회가 감지되었습니다.\n\n" + "\n\n".join(blocks)
+        return NotificationService._format_event_collection_message(
+            f"설정하신 {zone_name}의 집회 안내입니다.",
+            events,
+        )
 
     @staticmethod
     async def send_individual_alarm(
