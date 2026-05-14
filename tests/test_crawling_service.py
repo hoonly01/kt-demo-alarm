@@ -137,5 +137,36 @@ class TestCrawlSpaticEvents:
             assert len(result) == 1
 
 
+def test_sync_to_database_preserves_bulk_import_idempotency(clean_test_db):
+    event_row = {
+        "년": "2026",
+        "월": "05",
+        "일": "12",
+        "start_time": "10:00",
+        "end_time": "12:00",
+        "장소": "광화문",
+        "인원": "1200",
+        "위도": 37.571,
+        "경도": 126.976,
+        "지번주소": "서울 종로구 세종대로",
+        "title": "광화문 집회",
+        "description": "집회 설명",
+    }
+
+    first_count = CrawlingService._sync_to_database([event_row, {**event_row, "title": "중복 집회"}])
+    second_count = CrawlingService._sync_to_database([{**event_row, "title": "중복 재시도"}])
+
+    from app.database.connection import get_db_connection
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, location_name, start_date, severity_level FROM events")
+        rows = [tuple(row) for row in cursor.fetchall()]
+
+    assert first_count == 1
+    assert second_count == 0
+    assert rows == [("광화문 집회", "광화문", "2026-05-12 10:00:00", 3)]
+
+
 # Note: _fetch_list_playwright logic was merged into CrawlingService._scrape_spatic.
 # Specific playwright parsing tests should be updated to test _scrape_spatic if needed.

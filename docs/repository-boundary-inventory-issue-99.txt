@@ -1,0 +1,247 @@
+# Issue #99 Repository Boundary Inventory and Roadmap
+
+## 1. Decision
+
+Issue #99 / PR 0 is an impact-assessment and roadmap artifact only.
+
+It does **not** introduce `app/repositories`, move SQL, change service behavior, change API contracts, change DB schema, add an ORM, or change tests to force a pass.
+
+## 2. Source of truth
+
+| Artifact | Path |
+|---|---|
+| Deep-interview spec | `.omx/specs/deep-interview-issue-99-repository-pr-units.md` |
+| Consensus PRD | `.omx/plans/prd-issue-99-repository-boundary.md` |
+| Test spec | `.omx/plans/test-spec-issue-99-repository-boundary.md` |
+| Ralph context | `.omx/context/issue-99-ralph-pr0-20260505T095536Z.md` |
+
+## 3. Scan command
+
+Broad first-pass command used for this inventory:
+
+```bash
+rg -n "execute\(|executemany\(|sqlite3\.connect|get_db_connection|Depends\(get_db\)" app tests --glob '*.py'
+```
+
+Classification rule:
+
+- Production persistence hits are assigned to a domain/boundary and a future PR bucket.
+- Test hits are classified as setup/assertion coverage, not production repository candidates.
+- Import/dependency hits are retained when they explain connection ownership.
+
+## 4. Current architecture mismatch
+
+| Claim / fact | Evidence | Assessment |
+|---|---|---|
+| App description claims Router-Service-Repository | `main.py:5`, `main.py:86` | Documentation/API description implies a repository layer. |
+| No repository package exists | current tree has no `app/repositories` path | Actual persistence code is not separated into repositories. |
+| DB connection boundary is centralized | `app/database/connection.py:16-23`, `app/database/connection.py:27-34` | `get_db()` and `get_db_connection()` create/close SQLite connections but do not own domain SQL. |
+| Schema/bootstrap is centralized | `app/database/connection.py:39-70` | Keep schema creation/migration-like compatibility in DB module, not a domain repository. |
+
+## 5. Inventory taxonomy
+
+| Field | Values used |
+|---|---|
+| Layer | `database`, `service`, `router`, `test` |
+| Domain | `users`, `events`, `alarm_tasks`, `zone_alarm`, `crawling`, `admin_dashboard`, `cross_domain`, `database_schema` |
+| Operation | `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `DDL/PRAGMA`, `connection`, `test_setup`, `test_assertion` |
+| Transaction owner | `request-scoped Depends(get_db)`, `service-owned get_db_connection`, `router-owned get_db_connection`, `background task`, `test fixture`, `schema init` |
+| Risk | `low`, `medium`, `high` |
+| Proposed PR bucket | `PR 0`, `PR 1`, `PR 2a`, `PR 2b`, `PR 3`, `PR 4a`, `PR 4b`, `PR 4c`, `PR 5`, `Admin/read-model`, `Crawling`, `Keep database module`, `Test coverage` |
+
+## 6. Production inventory
+
+### 6.1 Database boundary
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| DB-1 | `app/database/connection.py:16-23`, `:27-34` | database | cross_domain | connection | FastAPI dependency / context manager | Keep in DB connection module | low | `tests/test_database_connection_settings.py:26-48`, `tests/test_database.py:79-81` | Keep database module |
+| DB-2 | `app/database/connection.py:39-70` | database | database_schema | DDL/PRAGMA/schema compatibility | schema init | Keep in DB connection module; do not move to domain repository | medium | `tests/test_database.py:9-71`, `tests/test_admin_dashboard_schema_compat.py:10-89` | Keep database module |
+
+### 6.2 Alarm task persistence
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| ALARM-TASK-1 | `app/services/alarm_status_service.py:38-57` | service | alarm_tasks | INSERT | service-owned `get_db_connection`; service commits at `:56` | `AlarmTaskRepository.create_task(conn, ...)` accepting connection | low | `tests/test_alarm_status_service.py:8-24` | PR 1 |
+| ALARM-TASK-2 | `app/services/alarm_status_service.py:84-129` | service | alarm_tasks | dynamic UPDATE | service-owned `get_db_connection`; service commits at `:118`; boolean error contract at `:120-129` | `AlarmTaskRepository.update_status(conn, ...)` preserving rowcount semantics | low-medium | `tests/test_alarm_status_service.py:47-76` | PR 1 |
+| ALARM-TASK-3 | `app/services/alarm_status_service.py:143-153`, `:206-214` | service | alarm_tasks | SELECT | service-owned `get_db_connection` | `AlarmTaskRepository.get_status/list_recent(conn, ...)` | low | `tests/test_alarm_status_service.py:78-126` | PR 1 |
+| ALARM-TASK-4 | `app/services/alarm_status_service.py:260-270` | service | alarm_tasks | DELETE | service-owned `get_db_connection`; service commits | `AlarmTaskRepository.cleanup_old(conn, ...)` | low | `tests/test_alarm_status_service.py:128-182` | PR 1 |
+
+Verdict: `alarm_tasks` remains the safest first implementation candidate after PR 0 because the persistence surface is concentrated in one service and already has SQLite-backed tests.
+
+### 6.3 Event persistence and event reads
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| EVENT-1 | `app/services/event_service.py:32-52` | service | events | INSERT | request-scoped connection passed into service; service commits at `:52` | `EventRepository.create(conn, ...)`; preserve service commit timing | medium | `tests/test_api_basic.py:47`, `tests/test_database.py:44-54` | PR 2a |
+| EVENT-2 | `app/services/event_service.py:97-107` | service | events | SELECT list with dynamic WHERE | request-scoped connection passed into service | `EventRepository.list(conn, filters, limit)` | medium | `tests/test_api_basic.py:47` | PR 2a |
+| EVENT-3 | `app/services/event_service.py:155-177` | service | events + users | SELECT user route + active events | request-scoped connection passed into service | Split: `UserRouteReadRepository` + `EventRepository.list_active_future`; keep orchestration in service | high | `tests/test_route_setting.py`, route/event integration coverage should be added before extraction | PR 2b |
+| EVENT-4 | `app/services/event_service.py:274-285` | service | users | SELECT active route users for scheduled checks | background/service-owned `get_db_connection` | User-route read boundary before event scheduled extraction | high | scheduler/API smoke in `tests/test_api_basic.py:48`; add targeted route-check tests before extraction | PR 2b |
+| EVENT-5 | `app/services/event_service.py:408-415`, `:464-470` | service | events | SELECT upcoming/today events | request-scoped connection passed into service | `EventRepository.list_upcoming/list_today_jongno(conn, ...)` | medium | `tests/test_api_basic.py:47`, future event repository tests | PR 2a |
+| EVENT-6 | `app/routers/events.py:20-30` | router | events | SELECT created event after service create | request-scoped `Depends(get_db)` | Remove with PR 2a only after create returns enough data or repository/service contract is planned | medium | API event creation coverage should be added/confirmed | PR 2a router decision |
+| EVENT-7 | `app/routers/events.py:132-146` | router | users | SELECT route-check users | request-scoped `Depends(get_db)` | User-route read boundary; not event write repository | high | route-check/admin manual trigger coverage should be added/confirmed | PR 2b / PR 4c dependency |
+
+Verdict: split `events` into CRUD/list (`PR 2a`) and route-check/scheduled orchestration (`PR 2b`). `PR 2b` depends on a clear user-route read boundary.
+
+### 6.4 User persistence
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| USER-1 | `app/services/user_service.py:38-57` | service | users | SELECT / UPDATE / INSERT | request-scoped connection passed into service; service commits at `:57`; raises at `:59-61` | `UserIdentityRepository.save_or_update(conn, ...)` | high | `tests/test_user_service.py:6-31` | PR 4a |
+| USER-2 | `app/services/user_service.py:86-162` | service | users | SELECT / UPDATE / INSERT identity sync | request-scoped connection; service commits at `:162` | `UserIdentityRepository.sync_kakao(conn, ...)` or smaller query methods | high | `tests/test_user_service.py:34-94` | PR 4a |
+| USER-3 | `app/services/user_service.py:175-179`, `:203-213`, `:245-255` | service | users | UPDATE active/alarm/favorite-zone | request-scoped connection; service commits after branch checks | `UserSettingsRepository` | medium-high | `tests/test_alarm_setting.py`, `tests/test_favorite_zone.py` | PR 4b |
+| USER-4 | `app/services/user_service.py:296-305`, `:351-355` | service | users | UPDATE route / clear route | request-scoped connection; external geocoding before route persistence; service commits or returns error dict | `UserRouteRepository` | high | `tests/test_route_setting.py`; add repository persistence tests before extraction | PR 4c |
+| USER-5 | `app/services/user_service.py:471` | service | users | dynamic UPDATE profile setup route/profile fields | request-scoped connection; external geocoding precedes dynamic update; service commits or returns error dict | `UserProfileRepository` with explicit route/profile field mapping | high | `tests/test_user_initial_setup.py` plus new repository tests | PR 4c |
+| USER-6 | `app/services/user_service.py:555`, `:619-624` | service | users | SELECT route/info by plusfriend/bot key | request-scoped connection | `UserReadRepository`; prerequisite for event route-check | high | `tests/test_user_service.py`, route tests | PR 4c / PR 2b prerequisite |
+| USER-7 | `app/routers/users.py:18-30` | router | users | SELECT users list | request-scoped `Depends(get_db)` | User read repository or admin/read query depending endpoint purpose | medium-high | user/admin API tests should be confirmed/added | PR 4c / PR 5 router cleanup |
+| USER-8 | `app/routers/users.py:120-124`, `:354-358` | router/background | users | connection acquisition for service call | router-owned/background `get_db_connection` but SQL in service | Preserve call shape; repository should accept existing connection inside service | medium | route-setting tests | PR 4c / PR 5 transaction cleanup |
+| USER-9 | `app/routers/kakao.py:28-68`, `:118-157` | router | users | SELECT / UPDATE / INSERT identity and active state | router-owned `get_db_connection`; commits inside router | Move to `UserService`/identity repository after service contract is explicit | high | Kakao/webhook tests should be added or confirmed before extraction | PR 4a / PR 5 router cleanup |
+| USER-10 | `app/routers/alarms.py:97-108`, `:165-196` | router | users | SELECT alarm recipients / filtered recipients | request-scoped `Depends(get_db)` | `AlarmRecipientReadRepository` or `UserNotificationPreferenceRepository` | medium-high | `tests/test_api_alarms.py:7-69` | PR 3 or PR 4b |
+| USER-11 | `app/routers/kakao_skills.py:19`, `:76`, `:131`, `:260`, `:516`, `:685`, `:770` | router | users/events | DB dependency injection into service-heavy skills | request-scoped `Depends(get_db)` | Preserve until matching service repositories exist; classify endpoint by service call | medium | Kakao skill tests should be confirmed before cleanup | PR 5 domain-specific cleanup |
+| USER-12 | `app/routers/kakao_skills.py:346-359` | router | users | service-call connection for identity sync + route update | router-owned `get_db_connection`; `UserService.sync_kakao_user` and `UserService.update_user_route` perform persistence | Preserve endpoint response; later route/profile extraction must account for this connection owner | high | route-setting and Kakao skill route-save tests should be confirmed/added | PR 4a / PR 4c / PR 5 router cleanup |
+| USER-13 | `app/routers/kakao_skills.py:637-648` | router/background | users | service-call connection for identity sync + marked bus update | router-owned `get_db_connection` for sync and background-owned `get_db_connection` for `update_marked_bus` | Preserve background-task behavior; repository should accept provided connection through service | high | marked bus/Kakao skill tests should be confirmed/added | PR 4b / PR 5 router cleanup |
+| USER-14 | `app/services/user_service.py:380-393`, `:510`, `:531` | service | users | UPDATE marked bus / SELECT user / dynamic UPDATE preferences | request-scoped connection; service commits or returns error dict | `UserPreferenceRepository` / `UserSettingsRepository` | high | `tests/test_alarm_setting.py`, `tests/test_favorite_zone.py`, `tests/test_user_initial_setup.py`; add real SQLite preference tests before extraction | PR 4b |
+
+Verdict: `users` is high-value but too broad for first extraction. Split identity sync, settings/preferences, route/profile, and read/recipient queries.
+
+### 6.5 Zone alarm and notification-recipient reads
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| ZONE-1 | `app/services/zone_alarm_service.py:31-55` | service | zone_alarm + users + events | SELECT users by favorite zone; SELECT active events | service-owned `get_db_connection` | `ZoneAlarmReadRepository` or query service after alarm recipient/user read rules | medium | add targeted zone alarm tests if missing | PR 3 |
+| ALARM-RECIPIENT-1 | `app/routers/alarms.py:104-108`, `:173-196` | router | users | SELECT recipients | request-scoped `Depends(get_db)` | `AlarmRecipientReadRepository` | medium-high | `tests/test_api_alarms.py:7-69` | PR 3 |
+
+Verdict: place after `alarm_tasks` because it shares alarm workflows but reads `users` and may need a recipient read boundary.
+
+### 6.6 Crawling persistence
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| CRAWL-1 | `app/services/crawling_service.py:857-878` | service | crawling + events | CREATE UNIQUE INDEX / INSERT OR IGNORE events | service-owned `get_db_connection` inside crawler sync | Keep specialized until `EventRepository` conventions are stable; then consider bulk event import repository | medium-high | `tests/test_crawling_service.py`; `tests/test_database_connection_settings.py:26-48` | Crawling |
+
+Verdict: do not use crawling as first repository extraction. It has specialized idempotent import and index behavior.
+
+### 6.7 Admin dashboard read model
+
+| ID | File / lines | Layer | Domain | Operation | Current transaction owner | Candidate boundary | Risk | Existing tests | PR bucket |
+|---|---|---|---|---|---|---|---|---|---|
+| ADMIN-1 | `app/routers/admin.py:126-135` | router | admin_dashboard + events | SELECT recent events | router-owned `get_db_connection` | `AdminDashboardQueryService` / read repository | medium | `tests/test_api_admin.py`, `tests/test_admin_dashboard_schema_compat.py:10-89` | Admin/read-model |
+| ADMIN-2 | `app/routers/admin.py:139-148` | router | admin_dashboard + alarm_tasks | SELECT recent alarms | router-owned `get_db_connection` | `AdminDashboardQueryService` / read repository | medium | `tests/test_api_admin.py`, `tests/test_admin_dashboard_schema_compat.py:10-89` | Admin/read-model |
+| ADMIN-3 | `app/routers/admin.py:158-210` | router | admin_dashboard + users | SELECT count, PRAGMA columns, paginated users | router-owned `get_db_connection`; legacy optional-column compatibility | `AdminDashboardQueryService`; preserve optional column behavior | high | `tests/test_admin_dashboard_schema_compat.py:10-89` | Admin/read-model |
+| ADMIN-4 | `app/routers/admin.py:368-370` | router/background | admin_dashboard + events | connection for manual route check service call | background task `get_db_connection`; service owns SQL | Keep as orchestration until route-check repositories exist | medium | admin API tests | PR 2b / Admin/read-model |
+
+Verdict: admin dashboard is a read-model/query boundary, not a domain write repository.
+
+## 7. Test inventory
+
+| ID | File / lines | Layer | Domain | Operation | Purpose | Repository relevance |
+|---|---|---|---|---|---|---|
+| TEST-1 | `tests/conftest.py:37-43` | test | cross_domain | sqlite connect + DELETE setup | cleans `users`, `events`, `alarm_tasks` | Keep as fixture setup; not repository candidate |
+| TEST-2 | `tests/test_database.py:9-107` | test | database_schema | schema and FK insert/select checks | verifies DB init and table compatibility | Keep as schema/DB baseline |
+| TEST-3 | `tests/test_database_connection_settings.py:9-48` | test | database_schema | sqlite connect / get_db_connection / get_db | verifies settings-driven DB path | Protect connection boundary |
+| TEST-4 | `tests/test_alarm_status_service.py:8-182` | test | alarm_tasks | real SQLite persistence via service | validates create/update/list/cleanup success paths | Baseline for PR 1 |
+| TEST-5 | `tests/test_user_service.py:7-92` | test | users | real SQLite seed/assert | validates Kakao identity sync conflict behavior | Baseline for PR 4a |
+| TEST-6 | `tests/test_api_alarms.py:7-69` | test | users / alarm recipients | SQLite seed users for API | validates recipient ID separation and filtering | Baseline for PR 3 / PR 4b |
+| TEST-7 | `tests/test_admin_dashboard_schema_compat.py:18-150` | test | admin_dashboard | legacy SQLite schema/data setup and assertions | validates optional/legacy admin columns | Required for admin read-model track |
+| TEST-8 | `tests/test_api_admin.py` | test | admin_dashboard / external effects | API + mocked trigger side effects | verifies auth/admin flows; external calls may be mocked | Keep external-effect mocks separate from persistence assertions |
+| TEST-9 | `tests/test_alarm_setting.py:94-128`, `tests/test_favorite_zone.py`, `tests/test_route_setting.py`, `tests/test_user_initial_setup.py` | test | users | router response/service-interaction tests | validates response text and service invocation, but may mock persistence-facing `UserService` methods | Do not count as repository persistence coverage; pair with real SQLite tests such as `tests/test_user_service.py` for PR 4 |
+| TEST-10 | `tests/test_crawling_service.py`, `tests/test_database_connection_settings.py:26-48` | test | crawling/events | crawler normalization and DB path behavior | protects crawler import assumptions | Baseline for crawling track |
+
+## 8. Transaction-owner matrix
+
+| Caller | Evidence | Connection source | Commit owner | Rollback/error behavior | Repository method rule |
+|---|---|---|---|---|---|
+| Request-scoped router/service | `app/database/connection.py:16-23`, `app/routers/events.py:20`, `app/routers/alarms.py:97`, `app/routers/users.py:18` | `Depends(get_db)` yields one request connection | Existing router/service path may commit; dependency closes connection after yield | Errors propagate through endpoint/service contracts; no repository-level swallowing | Repository methods must accept the provided connection and must not open a global connection. |
+| Service-owned context manager | `app/services/alarm_status_service.py:38-57`, `:84-129`, `:143-153`, `:206-214`, `:260-270`; `app/database/connection.py:27-34` | `get_db_connection()` context manager | Service method commits inside the context manager when current behavior does | Preserve current boolean/None/dict error returns and logged exceptions such as `app/services/alarm_status_service.py:127-129` | Extract SQL and row mapping first; keep service-level success/error and commit timing stable. |
+| Background task/service call | `app/services/event_service.py:274-285`, `app/routers/admin.py:368-370`, `app/routers/users.py:354-358`, `app/routers/kakao_skills.py:644-648` | Background task opens `get_db_connection()` or receives service-call connection | Background function/service owns commit timing through invoked service | Preserve task failure logging/return behavior; do not hide background exceptions in repositories | Repository must be synchronous DB boundary only; it must not start background tasks or own scheduling. |
+| Router-owned persistence | `app/routers/kakao.py:28-68`, `:118-157`; `app/routers/alarms.py:104-108`, `:196`; `app/routers/users.py:24` | Router uses request DB or explicit `get_db_connection()` | Router/request path currently executes SQL and may commit | Preserve endpoint response and auth/error semantics before moving SQL | Move only after matching domain service/repository boundary exists; verify endpoint compatibility per domain. |
+| Schema initialization | `app/database/connection.py:39-70` | Connection module opens schema/compatibility connection | Init function owns DDL transaction behavior | Preserve migration/compatibility error visibility | Keep schema DDL outside domain repositories. |
+| Test fixture/setup/assertions | `tests/conftest.py:37-43`, `tests/test_database.py:9-107` | Direct test `sqlite3.connect` or test fixture DB path | Test fixture/setup owns cleanup and assertions | Test failures must remain visible; do not replace persistence assertions with mocks | Keep as real SQLite integration coverage, not production repository candidates. |
+
+## 9. Repository responsibility rules
+
+| Layer | Responsibility |
+|---|---|
+| Router | Request parsing, response shaping, dependency injection, endpoint compatibility. No direct SQL after matching service/repository boundary exists unless explicitly justified. |
+| Service | Business orchestration, validation, external API/notification/geocoding/crawling coordination, and current transaction/commit timing. |
+| Repository | SQL statements, parameter binding, row mapping, and focused query/update methods. Accept existing `sqlite3.Connection`. |
+| DB connection module | Connection creation, row factory, schema initialization, compatibility DDL. |
+| Read/query service | Cross-domain read models such as admin dashboard or recipient lists when domain repositories would be polluted. |
+| Tests | Real SQLite-backed persistence verification; external effects may be mocked only outside persistence assertions. |
+
+## 10. PR sequence
+
+| PR | Scope | Evidence / rationale | Required verification |
+|---:|---|---|---|
+| 0 | This artifact: inventory, taxonomy, responsibility rules, PR sequence, test matrix | All production and test scan rows above | `git diff --check`; changed-files audit; `uv run python -m pytest tests/ -v` |
+| 1 | `alarm_tasks` repository extraction | `app/services/alarm_status_service.py:38-270`; tests `tests/test_alarm_status_service.py:8-182` | `uv run python -m pytest tests/test_alarm_status_service.py tests/test_api_basic.py -v`; full tests |
+| 2a | `events` CRUD/list/upcoming/today repository | `app/services/event_service.py:32-52`, `:97-107`, `:408-415`, `:464-470` | event API/basic/database tests plus new repository tests; full tests |
+| 2b | route-check/scheduled event orchestration | `app/services/event_service.py:155-177`, `:274-285`; `app/routers/events.py:142-146` | route-setting/route-event integration tests; full tests |
+| 3 | alarm recipient / zone alarm read boundary | `app/routers/alarms.py:104-108`, `:173-196`; `app/services/zone_alarm_service.py:31-55` | `tests/test_api_alarms.py`; new zone alarm tests if needed; full tests |
+| 4a | user identity sync | `app/services/user_service.py:38-162`; `app/routers/kakao.py:28-68`, `:118-157` | `tests/test_user_service.py`; Kakao webhook tests if added; full tests |
+| 4b | user settings/preferences | `app/services/user_service.py:175-255`, `:380-393`, `:510-531`; inventory `USER-3`, `USER-13`, `USER-14` | alarm/favorite/preference tests plus real SQLite preference tests; full tests |
+| 4c | user route/profile/read boundary | `app/services/user_service.py:296-355`, `:471`, `:555`, `:619-624`; inventory `USER-4`, `USER-5`, `USER-6`, `USER-12` | route/profile tests plus real SQLite route/profile tests; full tests |
+| 5 | domain-by-domain router SQL/service-call cleanup | `app/routers/events.py:29`, `:142-146`; `app/routers/alarms.py:104-108`, `:196`; `app/routers/users.py:24`; `app/routers/kakao.py:28-68`, `:118-157`; `app/routers/kakao_skills.py:346-359`, `:637-648` | endpoint/API compatibility checks for each affected domain; full tests |
+| Admin/read-model | admin dashboard query service/read repository | `app/routers/admin.py:126-210`; legacy tests `tests/test_admin_dashboard_schema_compat.py:18-150` | `tests/test_admin_dashboard_schema_compat.py tests/test_api_admin.py -v`; full tests |
+| Crawling | event bulk import/idempotent sync boundary | `app/services/crawling_service.py:857-878` | crawler tests + DB settings tests; full tests |
+
+## 11. First implementation candidate
+
+Recommended first implementation after PR 0: `alarm_tasks`.
+
+| Candidate | Verdict | Reason |
+|---|---|---|
+| `alarm_tasks` | Recommended | SQL is concentrated in `app/services/alarm_status_service.py:38-270`; test coverage exists in `tests/test_alarm_status_service.py:8-182`. |
+| `events` | Second, split-aware | Event CRUD/list is reasonable, but route-check reads users at `app/services/event_service.py:155-177`. |
+| `users` | Defer and split | Largest SQL and identity/settings/route/profile surface: `app/services/user_service.py:38-624` plus router SQL in `app/routers/kakao.py`, `app/routers/alarms.py`, `app/routers/users.py`. |
+
+## 12. Future file layout proposal
+
+No files are created in PR 0. For later PRs:
+
+```text
+app/repositories/
+  __init__.py
+  alarm_task_repository.py
+  event_repository.py
+  user_identity_repository.py
+  user_settings_repository.py
+  user_route_repository.py
+  alarm_recipient_repository.py
+  zone_alarm_read_repository.py
+  admin_dashboard_query_service.py  # or read_repository naming, decided in admin track
+```
+
+Naming rule:
+
+- Use domain-specific repositories for write/query methods tied to one table/domain.
+- Use query service/read repository naming for cross-domain reads.
+- Keep transaction ownership in service/router orchestration until a later approved plan changes it.
+
+## 13. Verification contract
+
+PR 0 must pass:
+
+```bash
+git diff --check
+uv run python -m pytest tests/ -v
+```
+
+Changed-files gate:
+
+- Allowed: `.omx/context/*`, `.omx/plans/*`, `.omx/state/*` lifecycle files.
+- Not allowed for PR 0 without separate explicit scope: production `.py`, schema definitions, dependency files, API contract files, test weakening.
+
+Mock policy correction:
+
+- Tests that mock persistence-facing service methods, for example `tests/test_alarm_setting.py:94-128`, are router response/service-interaction checks, not repository persistence checks.
+- Repository persistence coverage must come from real SQLite tests such as `tests/test_user_service.py`, `tests/test_alarm_status_service.py`, and `tests/test_database.py`.
+
+## 14. Follow-up execution note
+
+If execution continues after this PR 0 artifact:
+
+1. Start with `alarm_tasks` repository extraction.
+2. Preserve current `AlarmStatusService` public behavior and error/boolean contracts.
+3. Add repository integration tests before moving SQL.
+4. Run targeted alarm task tests and the full test suite.

@@ -10,6 +10,7 @@ from app.models.responses import (
     BulkAlarmSendResponse, FilteredAlarmSendResponse, CleanupResponse, ErrorResponse
 )
 from app.database.connection import get_db
+from app.repositories.alarm_recipient_read_repository import AlarmRecipientReadRepository
 from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
 from app.services.auth_service import verify_api_key
@@ -99,14 +100,9 @@ async def send_alarm_to_all(
 ):
     """전체 활성 사용자에게 알림 전송"""
     try:
-        cursor = db.cursor()
-        # plusfriend_user_key 우선 조회
-        cursor.execute("SELECT plusfriend_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NOT NULL")
-        plusfriend_users = list(dict.fromkeys([row["plusfriend_user_key"] for row in cursor.fetchall()]))
-
-        # bot_user_key만 있는 사용자
-        cursor.execute("SELECT bot_user_key FROM users WHERE active = 1 AND is_alarm_on = 1 AND plusfriend_user_key IS NULL AND bot_user_key IS NOT NULL")
-        bot_users = list(dict.fromkeys([row["bot_user_key"] for row in cursor.fetchall()]))
+        recipients = AlarmRecipientReadRepository.list_active_recipients(db)
+        plusfriend_users = recipients["plusfriend_user_keys"]
+        bot_users = recipients["bot_user_keys"]
         
         if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="활성 사용자가 없습니다")
@@ -167,39 +163,14 @@ async def send_filtered_alarm(
 ):
     """필터링된 사용자에게 알림 전송"""
     try:
-        cursor = db.cursor()
-        
-        # 기본 쿼리
-        query = """
-            SELECT plusfriend_user_key, bot_user_key 
-            FROM users 
-            WHERE active = 1 AND is_alarm_on = 1
-            AND (plusfriend_user_key IS NOT NULL OR bot_user_key IS NOT NULL)
-        """
-        params = []
-        
-        # 필터 조건 추가
-        if request.filter_location:
-            query += " AND location LIKE ?"
-            params.append(f"%{request.filter_location}%")
-        
-        if request.filter_marked_bus:
-            query += " AND marked_bus = ?"
-            params.append(request.filter_marked_bus)
-        
-        if request.filter_has_route is not None:
-            if request.filter_has_route:
-                query += " AND departure_x IS NOT NULL AND arrival_x IS NOT NULL"
-            else:
-                query += " AND (departure_x IS NULL OR arrival_x IS NULL)"
-        
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        
-        plusfriend_users_raw = [r[0] for r in rows if r[0] is not None]
-        bot_users_raw = [r[1] for r in rows if r[0] is None and r[1] is not None]
-        plusfriend_users = list(dict.fromkeys(plusfriend_users_raw))
-        bot_users = list(dict.fromkeys(bot_users_raw))
+        recipients = AlarmRecipientReadRepository.list_filtered_recipients(
+            db,
+            filter_location=request.filter_location,
+            filter_marked_bus=request.filter_marked_bus,
+            filter_has_route=request.filter_has_route,
+        )
+        plusfriend_users = recipients["plusfriend_user_keys"]
+        bot_users = recipients["bot_user_keys"]
         
         if not plusfriend_users and not bot_users:
             raise HTTPException(status_code=404, detail="조건에 맞는 사용자가 없습니다")

@@ -3,8 +3,11 @@ from fastapi import APIRouter, Request, HTTPException
 import logging
 import json
 from datetime import datetime
+from typing import Any, cast
 
+from app.database.connection import get_db_connection
 from app.models.kakao import KakaoRequest
+from app.repositories.user_identity_repository import UserIdentityRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/kakao", tags=["kakao"])
@@ -18,53 +21,51 @@ async def kakao_chat_fallback(request: KakaoRequest):
     """
     user_message = request.userRequest.utterance
     bot_user_key = request.userRequest.user.id
-    properties = request.userRequest.user.properties
-    plusfriend_key = properties.get('plusfriendUserKey') if properties else None
+    properties = cast(dict[str, Any], request.userRequest.user.properties or {})
+    plusfriend_value = properties.get('plusfriendUserKey')
+    plusfriend_key = plusfriend_value if isinstance(plusfriend_value, str) else None
 
     logger.info(f"📨 사용자 메시지: {user_message} (botUserKey: {bot_user_key}, plusfriend: {plusfriend_key})")
 
-    from app.database.connection import get_db_connection
-
     with get_db_connection() as db:
-        cursor = db.cursor()
-
         # plusfriend_user_key로 기존 사용자 조회 (가장 안정적)
         if plusfriend_key:
-            cursor.execute(
-                "SELECT bot_user_key, open_id FROM users WHERE plusfriend_user_key = ?",
-                (plusfriend_key,)
-            )
-            existing = cursor.fetchone()
+            existing = UserIdentityRepository.find_by_plusfriend_key(db, plusfriend_key)
+            now = datetime.now()
 
             if existing:
                 # 이미 존재 → bot_user_key 업데이트
-                cursor.execute(
-                    "UPDATE users SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1 WHERE plusfriend_user_key = ?",
-                    (bot_user_key, datetime.now(), plusfriend_key)
+                UserIdentityRepository.touch_chat_plusfriend_user(
+                    db,
+                    plusfriend_key=plusfriend_key,
+                    bot_user_key=bot_user_key,
+                    now=now,
                 )
                 db.commit()
                 logger.info(f"사용자 업데이트: plusfriend={plusfriend_key}")
             else:
                 # 웹훅 사용자 찾기 시도
-                cursor.execute(
-                    "SELECT id FROM users WHERE bot_user_key IS NULL AND plusfriend_user_key IS NULL LIMIT 1"
-                )
-                orphan = cursor.fetchone()
+                orphan = UserIdentityRepository.find_first_unlinked_user(db)
 
                 if orphan:
                     # 웹훅 사용자 연결
-                    cursor.execute(
-                        "UPDATE users SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ? WHERE id = ?",
-                        (bot_user_key, plusfriend_key, datetime.now(), orphan["id"])
+                    UserIdentityRepository.link_unlinked_user_from_chat(
+                        db,
+                        user_id=orphan["id"],
+                        bot_user_key=bot_user_key,
+                        plusfriend_key=plusfriend_key,
+                        now=now,
                     )
                     db.commit()
                     logger.info(f"✅ 웹훅 사용자 연결: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
                 else:
                     # 완전 신규 사용자
-                    cursor.execute('''
-                        INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
-                        VALUES (?, ?, ?, ?, 1, 1)
-                    ''', (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
+                    UserIdentityRepository.insert_kakao_identity(
+                        db,
+                        bot_user_key=bot_user_key,
+                        plusfriend_key=plusfriend_key,
+                        now=now,
+                    )
                     db.commit()
                     logger.info(f"새 사용자 등록: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
 
@@ -102,47 +103,52 @@ async def kakao_channel_webhook(request: Request):
     카카오톡 채널 추가/차단 웹훅 엔드포인트
     웹훅에서는 open_id만 제공됨
     """
-    body = await request.json()
+    body = cast(dict[str, Any], await request.json())
     logger.info(f"🔗 카카오 채널 웹훅 수신: {json.dumps(body, ensure_ascii=False)}")
 
-    event = body.get('event', '')
-    open_id = body.get('id', '')
+    event_value = body.get('event', '')
+    open_id_value = body.get('id', '')
+    event = event_value if isinstance(event_value, str) else ""
+    open_id = open_id_value if isinstance(open_id_value, str) else ""
 
     if not open_id:
         logger.warning("사용자 ID가 없는 웹훅 요청")
         return {"status": "error", "message": "사용자 ID 필요"}
 
-    from app.database.connection import get_db_connection
-
     try:
         with get_db_connection() as db:
-            cursor = db.cursor()
-
             # open_id로 기존 사용자 조회 (plusfriend_user_key도 확인)
-            cursor.execute(
-                "SELECT bot_user_key, plusfriend_user_key, active FROM users WHERE open_id = ?",
-                (open_id,)
-            )
-            existing_user = cursor.fetchone()
+            existing_user = UserIdentityRepository.find_by_open_id(db, open_id)
+            now = datetime.now()
 
             if event == 'added' or event == 'chat_room':
                 logger.info(f"✅ 채널 추가: open_id={open_id}")
 
                 if existing_user:
                     # 이미 존재 → active만 업데이트
-                    plusfriend_key = existing_user["plusfriend_user_key"]
+                    plusfriend_value = existing_user["plusfriend_user_key"]
+                    plusfriend_key = plusfriend_value if isinstance(plusfriend_value, str) else None
                     if plusfriend_key:
                         # plusfriend_key로 업데이트 (더 안정적)
-                        cursor.execute("UPDATE users SET active = 1 WHERE plusfriend_user_key = ?", (plusfriend_key,))
+                        UserIdentityRepository.set_active_by_plusfriend_key(
+                            db,
+                            plusfriend_key=plusfriend_key,
+                            active=True,
+                        )
                     else:
-                        cursor.execute("UPDATE users SET active = 1 WHERE open_id = ?", (open_id,))
+                        UserIdentityRepository.set_active_by_open_id(
+                            db,
+                            open_id=open_id,
+                            active=True,
+                        )
                     db.commit()
                 else:
                     # 신규 → open_id만 저장 (Skill Block 접속 시 나머지 추가)
-                    cursor.execute('''
-                        INSERT INTO users (open_id, first_message_at, last_message_at, message_count, active)
-                        VALUES (?, ?, ?, 1, 1)
-                    ''', (open_id, datetime.now(), datetime.now()))
+                    UserIdentityRepository.insert_open_id_user(
+                        db,
+                        open_id=open_id,
+                        now=now,
+                    )
                     db.commit()
                     logger.info(f"신규 사용자 생성 (open_id만): {open_id}")
 
@@ -150,11 +156,20 @@ async def kakao_channel_webhook(request: Request):
                 logger.info(f"❌ 채널 차단: open_id={open_id}")
 
                 if existing_user:
-                    plusfriend_key = existing_user["plusfriend_user_key"]
+                    plusfriend_value = existing_user["plusfriend_user_key"]
+                    plusfriend_key = plusfriend_value if isinstance(plusfriend_value, str) else None
                     if plusfriend_key:
-                        cursor.execute("UPDATE users SET active = 0 WHERE plusfriend_user_key = ?", (plusfriend_key,))
+                        UserIdentityRepository.set_active_by_plusfriend_key(
+                            db,
+                            plusfriend_key=plusfriend_key,
+                            active=False,
+                        )
                     else:
-                        cursor.execute("UPDATE users SET active = 0 WHERE open_id = ?", (open_id,))
+                        UserIdentityRepository.set_active_by_open_id(
+                            db,
+                            open_id=open_id,
+                            active=False,
+                        )
                     db.commit()
 
             else:
