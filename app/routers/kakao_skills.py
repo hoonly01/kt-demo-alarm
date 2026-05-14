@@ -6,10 +6,22 @@ import logging
 from app.config.settings import settings
 from app.database.connection import get_db
 from app.services.event_service import EventService
+from app.services.notification_service import NotificationService
 from app.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["kakao-skills"])
+
+
+def _to_notification_event_data(event: object) -> dict:
+    """사용자 출력 템플릿에 필요한 집회 필드만 변환"""
+    return {
+        "description": getattr(event, "description", None),
+        "location": getattr(event, "location_name"),
+        "start_date": getattr(event, "start_date"),
+        "end_date": getattr(event, "end_date", None),
+    }
+
 
 # ─── 집회 정보 조회 ─────────────────────────────────────────
 
@@ -44,18 +56,10 @@ async def get_upcoming_protests(
             }
         }
 
-    # 집회 정보를 텍스트로 포맷
-    event_messages = []
-    for event in events:
-        severity_emoji = "🔴" if event.severity_level >= 3 else "🟡" if event.severity_level >= 2 else "🟢"
-        event_messages.append(
-            f"{severity_emoji} {event.title}\n"
-            f"📍 {event.location_name}\n"
-            f"⏰ {event.start_date}\n"
-            f"🏷️ {event.category if event.category else '일반'}"
-        )
-
-    message_text = f"📅 예정된 집회 {len(events)}건:\n\n" + "\n\n".join(event_messages)
+    message_text = NotificationService._format_event_collection_message(
+        "예정된 집회 안내입니다.",
+        [_to_notification_event_data(event) for event in events],
+    )
 
     return {
         "version": "2.0",
@@ -97,18 +101,10 @@ async def get_today_protests(
             }
         }
 
-    # 집회 정보를 텍스트로 포맷
-    event_messages = []
-    for event in events:
-        severity_emoji = "🔴" if event.severity_level >= 3 else "🟡" if event.severity_level >= 2 else "🟢"
-        event_messages.append(
-            f"{severity_emoji} {event.title}\n"
-            f"📍 {event.location_name}\n"
-            f"⏰ {event.start_date}\n"
-            f"🏷️ {event.category if event.category else '일반'}"
-        )
-
-    message_text = f"📅 오늘 예정된 집회 {len(events)}건:\n\n" + "\n\n".join(event_messages)
+    message_text = NotificationService._format_event_collection_message(
+        "오늘 예정된 집회 안내입니다.",
+        [_to_notification_event_data(event) for event in events],
+    )
 
     return {
         "version": "2.0",
@@ -168,21 +164,9 @@ async def check_user_route_events(
             }
         }
 
-    # 집회 정보 포맷
-    event_messages = []
-    for event in result.events_found:
-        severity_emoji = "🔴" if event.severity_level >= 3 else "🟡" if event.severity_level >= 2 else "🟢"
-        event_messages.append(
-            f"{severity_emoji} {event.title}\n"
-            f"📍 {event.location_name}\n"
-            f"⏰ {event.start_date}\n"
-            f"🏷️ {event.category if event.category else '일반'}"
-        )
-
-    message_text = (
-        f"⚠️ 경로상에 {len(result.events_found)}개의 집회가 감지되었습니다:\n\n"
-        + "\n\n".join(event_messages)
-        + "\n\n우회 경로를 고려해주세요."
+    message_text = NotificationService._format_event_collection_message(
+        "경로상 감지된 집회 안내입니다.",
+        [_to_notification_event_data(event) for event in result.events_found],
     )
 
     return {
