@@ -254,6 +254,31 @@ class TestAlarmSettingSaveViaClientExtra:
                 assert mock_update.call_args[0][1] is True
 
 
+class TestUsersAlarmSetting:
+    """/users/alarm-setting 라우터 응답 회귀 테스트"""
+
+    def test_users_alarm_setting_off_uses_newline(
+        self,
+        clean_test_db,
+        alarm_save_payload,
+    ):
+        """알림 끄기 응답이 리터럴 역슬래시가 아닌 실제 줄바꿈을 포함한다."""
+        alarm_save_payload["action"]["params"]["alarm_status"] = "off"
+
+        users_response = client.post("/users/alarm-setting", json=alarm_save_payload)
+        save_response = client.post("/alarm-setting/save", json=alarm_save_payload)
+
+        assert users_response.status_code == 200
+        assert save_response.status_code == 200
+
+        users_text = users_response.json()["template"]["outputs"][0]["simpleText"]["text"]
+        save_text = save_response.json()["template"]["outputs"][0]["simpleText"]["text"]
+
+        assert "꺼졌습니다.\n이동 경로" in users_text
+        assert "\\이동" not in users_text
+        assert users_text == save_text
+
+
 class TestFavoriteZoneSaveViaClientExtra:
     """/favorite-zone/save: block+extra 방식(clientExtra) 관심장소 저장 테스트"""
 

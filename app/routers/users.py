@@ -301,7 +301,7 @@ async def alarm_setting(request: dict, db: sqlite3.Connection = Depends(get_db))
             msg = "✅ 매일 아침 알림이 켜졌습니다.\n등록하신 이동 경로에 영향을 주는 집회 정보를 안내해 드립니다."
         elif alarm_status_str == 'off':
             is_alarm_on = False
-            msg = "🔕 매일 아침 알림이 꺼졌습니다.\이동 경로 집회 알림이 더 이상 발송되지 않습니다."
+            msg = "🔕 매일 아침 알림이 꺼졌습니다.\n이동 경로 집회 알림이 더 이상 발송되지 않습니다."
         else:
             return {
                 "version": "2.0",
