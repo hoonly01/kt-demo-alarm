@@ -41,7 +41,7 @@ _task_lock = asyncio.Lock()
 KST_ZONE_NAME = "Asia/Seoul"
 KST = ZoneInfo(KST_ZONE_NAME)
 DASHBOARD_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S KST"
-DASHBOARD_DATE_FORMAT = "%Y-%m-%d"
+DASHBOARD_DATE_FORMAT = "%Y-%m-%d KST"
 
 def verify_admin(credentials: HTTPBasicCredentials | None = admin_credentials):
     # Using environment variables for admin credentials.
@@ -159,7 +159,7 @@ def fetch_recent_alarms() -> List[Dict[str, Any]]:
         """)
         alarms = cursor.fetchall()
         for alarm in alarms:
-            alarm["created_at_display"] = _format_utc_timestamp_as_kst(alarm.get("created_at"))
+            alarm["created_at_display"] = _format_kst_local_datetime(alarm.get("created_at"))
         return alarms
 
 # Helper for sqlite row to dict
@@ -290,7 +290,7 @@ def _format_user_created_at(value: Any) -> str:
     parsed = _parse_datetime_value(value)
     if parsed is not None:
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=KST)
         return parsed.astimezone(KST).strftime(DASHBOARD_DATE_FORMAT)
 
     return "" if value in (None, "") else str(value)[:10]
