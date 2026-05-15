@@ -44,6 +44,8 @@ EVENTS_TABLE_SCHEMA = '''
         category TEXT,
         severity_level INTEGER DEFAULT 1,  -- 1: 낮음, 2: 보통, 3: 높음
         status TEXT DEFAULT 'active',     -- active, ended, cancelled
+        image_path TEXT,                  -- 집회 안내 원본 이미지 경로
+        attendees INTEGER,                -- 예상 참가 인원
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
