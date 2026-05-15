@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     # --- Notification ---
     BATCH_SIZE: int = 100
     NOTIFICATION_TIMEOUT: float = 10.0
+    KAKAO_TASK_RESULT_POLL_ATTEMPTS: int = 5
+    KAKAO_TASK_RESULT_POLL_DELAY_SECONDS: float = 0.5
 
     # --- Geo/Route ---
     ROUTE_THRESHOLD_METERS: int = 500

@@ -77,7 +77,8 @@ def kakao_settings(monkeypatch):
     monkeypatch.setattr(notification_module.settings, "KAKAO_EVENT_API_KEY", "test-rest-api-key")
     monkeypatch.setattr(notification_module.settings, "NOTIFICATION_TIMEOUT", 1.0)
     monkeypatch.setattr(notification_module.settings, "BATCH_SIZE", 100)
-    monkeypatch.setattr(notification_module, "KAKAO_TASK_RESULT_POLL_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(notification_module.settings, "KAKAO_TASK_RESULT_POLL_ATTEMPTS", 5)
+    monkeypatch.setattr(notification_module.settings, "KAKAO_TASK_RESULT_POLL_DELAY_SECONDS", 0.0)
 
 
 async def send_with_transport(
@@ -142,8 +143,8 @@ async def test_bulk_alarm_preserves_duplicate_input_without_duplicate_ids_in_one
             {"json": {"status": "SUCCESS", "taskId": "task-2"}},
         ],
         task_responses={
-            "task-1": {"json": {"allRequestCount": 2, "successCount": 2}},
-            "task-2": {"json": {"allRequestCount": 3, "successCount": 3}},
+            "task-1": {"json": {"allRequestCount": 3, "successCount": 3}},
+            "task-2": {"json": {"allRequestCount": 2, "successCount": 2}},
         },
     )
 
@@ -153,6 +154,29 @@ async def test_bulk_alarm_preserves_duplicate_input_without_duplicate_ids_in_one
     assert result == {"success": True, "total_sent": 5, "total_failed": 0, "total_users": 5}
     assert sum(len(user_list) for user_list in posted_user_lists) == len(user_ids)
     assert all(len(user_list) == len(set(user_list)) for user_list in posted_user_lists)
+
+
+@pytest.mark.asyncio
+async def test_bulk_alarm_defers_duplicates_without_flushing_underfilled_batch(kakao_settings):
+    user_ids = ["dup", "other", "dup", "third", "dup", "fourth"]
+    transport = CapturingKakaoTransport(
+        post_responses=[
+            {"json": {"status": "SUCCESS", "taskId": "task-1"}},
+            {"json": {"status": "SUCCESS", "taskId": "task-2"}},
+            {"json": {"status": "SUCCESS", "taskId": "task-3"}},
+        ],
+        task_responses={
+            "task-1": {"json": {"allRequestCount": 4, "successCount": 4}},
+            "task-2": {"json": {"allRequestCount": 1, "successCount": 1}},
+            "task-3": {"json": {"allRequestCount": 1, "successCount": 1}},
+        },
+    )
+
+    result = await send_with_transport(user_ids, transport)
+
+    posted_user_lists = [[user["id"] for user in request["json"]["user"]] for request in transport.post_requests()]
+    assert result == {"success": True, "total_sent": 6, "total_failed": 0, "total_users": 6}
+    assert posted_user_lists == [["dup", "other", "third", "fourth"], ["dup"], ["dup"]]
 
 
 @pytest.mark.asyncio
@@ -185,6 +209,52 @@ async def test_bulk_alarm_polls_task_result_until_counts_are_parseable(kakao_set
     assert result == {"success": True, "total_sent": 4, "total_failed": 1, "total_users": 5}
     assert len(task_requests) == 2
     assert all(request["path"] == "/v1/tasks/task-1" for request in task_requests)
+
+
+@pytest.mark.asyncio
+async def test_bulk_alarm_uses_configured_poll_attempt_limit(kakao_settings, monkeypatch):
+    monkeypatch.setattr(notification_module.settings, "KAKAO_TASK_RESULT_POLL_ATTEMPTS", 2)
+    transport = CapturingKakaoTransport(
+        post_responses=[{"json": {"status": "SUCCESS", "taskId": "task-1"}}],
+        task_responses={
+            "task-1": [
+                {"json": {"status": "RUNNING"}},
+                {"json": {"status": "RUNNING"}},
+                {"json": {"successCount": 1, "fail": {"count": 0, "list": []}}},
+            ],
+        },
+    )
+
+    result = await send_with_transport(["u1"], transport)
+
+    assert result == {"success": True, "total_sent": 0, "total_failed": 1, "total_users": 1}
+    assert len(transport.task_requests()) == 2
+
+
+def test_task_poll_delay_uses_exponential_backoff_from_settings(kakao_settings, monkeypatch):
+    monkeypatch.setattr(notification_module.settings, "KAKAO_TASK_RESULT_POLL_DELAY_SECONDS", 0.5)
+
+    delays = [NotificationService._task_poll_delay_seconds(attempt) for attempt in range(1, 4)]
+
+    assert delays == [0.5, 1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_bulk_alarm_stops_polling_on_definitive_count_validation_failure(kakao_settings):
+    transport = CapturingKakaoTransport(
+        post_responses=[{"json": {"status": "SUCCESS", "taskId": "task-1"}}],
+        task_responses={
+            "task-1": [
+                {"json": {"successCount": 3, "fail": {"count": 3, "list": []}}},
+                {"json": {"successCount": 2, "fail": {"count": 0, "list": []}}},
+            ],
+        },
+    )
+
+    result = await send_with_transport(["u1", "u2"], transport)
+
+    assert result == {"success": True, "total_sent": 0, "total_failed": 2, "total_users": 2}
+    assert len(transport.task_requests()) == 1
 
 
 @pytest.mark.asyncio

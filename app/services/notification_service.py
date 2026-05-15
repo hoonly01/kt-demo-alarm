@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 KAKAO_BOT_API_BASE_URL = "https://bot-api.kakao.com"
 KAKAO_EVENT_API_MAX_USERS_PER_REQUEST = 100
 KAKAO_EVENT_API_SUCCESS_STATUS = "SUCCESS"
-KAKAO_TASK_RESULT_POLL_ATTEMPTS = 3
-KAKAO_TASK_RESULT_POLL_DELAY_SECONDS = 0.2
+KAKAO_TASK_RESULT_POLL_ATTEMPTS = 5
+KAKAO_TASK_RESULT_POLL_DELAY_SECONDS = 0.5
+KAKAO_TASK_PENDING_STATUSES = {"PENDING", "PROCESSING", "RUNNING", "WAITING"}
 
 
 class NotificationService:
@@ -269,21 +270,22 @@ class NotificationService:
         id_type: str,
         batch_size: int
     ) -> Iterator[List[EventUser]]:
-        """요청 내 중복 없이 입력 순서와 건수를 보존하는 Event API 배치 생성"""
-        batch: List[EventUser] = []
-        seen_in_batch: set[Tuple[str, str]] = set()
-
+        """요청 내 중복 없이 건수를 보존하고 가능한 한 채운 Event API 배치 생성"""
+        batches: List[Tuple[List[EventUser], set[Tuple[str, str]]]] = []
         for user_id in user_ids:
             user_key = (id_type, user_id)
-            if batch and (len(batch) >= batch_size or user_key in seen_in_batch):
-                yield batch
-                batch = []
-                seen_in_batch = set()
 
-            batch.append(EventUser(type=id_type, id=user_id))
-            seen_in_batch.add(user_key)
+            for batch, seen_in_batch in batches:
+                if len(batch) < batch_size and user_key not in seen_in_batch:
+                    batch.append(EventUser(type=id_type, id=user_id))
+                    seen_in_batch.add(user_key)
+                    break
+            else:
+                batches.append(
+                    ([EventUser(type=id_type, id=user_id)], {user_key})
+                )
 
-        if batch:
+        for batch, _ in batches:
             yield batch
 
     @staticmethod
@@ -321,7 +323,7 @@ class NotificationService:
                 headers=NotificationService._kakao_event_headers(),
                 timeout=settings.NOTIFICATION_TIMEOUT
             )
-        except Exception as e:
+        except httpx.HTTPError as e:
             logger.error(f"카카오 Event API 배치 POST 실패: batch_size={batch_size}, reason={str(e)}")
             return 0, batch_size
 
@@ -363,8 +365,9 @@ class NotificationService:
         batch_size: int
     ) -> Optional[Tuple[int, int]]:
         """카카오 Event API task 결과를 제한된 횟수 안에서 조회하고 집계 건수를 반환"""
-        for attempt in range(1, KAKAO_TASK_RESULT_POLL_ATTEMPTS + 1):
-            parsed_counts = await NotificationService._get_task_result_counts_once(
+        poll_attempts = NotificationService._task_poll_attempts()
+        for attempt in range(1, poll_attempts + 1):
+            parsed_counts, should_retry = await NotificationService._get_task_result_counts_once(
                 client=client,
                 task_id=task_id,
                 batch_size=batch_size,
@@ -372,15 +375,38 @@ class NotificationService:
             )
             if parsed_counts is not None:
                 return parsed_counts
+            if not should_retry:
+                return None
 
-            if attempt < KAKAO_TASK_RESULT_POLL_ATTEMPTS:
-                await asyncio.sleep(KAKAO_TASK_RESULT_POLL_DELAY_SECONDS)
+            if attempt < poll_attempts:
+                await asyncio.sleep(NotificationService._task_poll_delay_seconds(attempt))
 
         logger.error(
-            f"카카오 Event API task 조회 최종 실패: attempts={KAKAO_TASK_RESULT_POLL_ATTEMPTS}, "
+            f"카카오 Event API task 조회 최종 실패: attempts={poll_attempts}, "
             f"taskId={task_id}, batch_size={batch_size}"
         )
         return None
+
+    @staticmethod
+    def _task_poll_attempts() -> int:
+        """설정 가능한 task 조회 최대 시도 횟수"""
+        configured_attempts = getattr(
+            settings,
+            "KAKAO_TASK_RESULT_POLL_ATTEMPTS",
+            KAKAO_TASK_RESULT_POLL_ATTEMPTS,
+        )
+        return max(1, int(configured_attempts))
+
+    @staticmethod
+    def _task_poll_delay_seconds(attempt: int) -> float:
+        """시도 횟수에 따른 지수 backoff 대기 시간"""
+        configured_delay = getattr(
+            settings,
+            "KAKAO_TASK_RESULT_POLL_DELAY_SECONDS",
+            KAKAO_TASK_RESULT_POLL_DELAY_SECONDS,
+        )
+        base_delay = max(0.0, float(configured_delay))
+        return base_delay * (2 ** (attempt - 1))
 
     @staticmethod
     async def _get_task_result_counts_once(
@@ -388,7 +414,7 @@ class NotificationService:
         task_id: str,
         batch_size: int,
         attempt: int
-    ) -> Optional[Tuple[int, int]]:
+    ) -> Tuple[Optional[Tuple[int, int]], bool]:
         """단일 task 결과 조회 시도에서 파싱 가능한 성공/실패 건수를 반환"""
         try:
             task_response = await client.get(
@@ -396,19 +422,19 @@ class NotificationService:
                 headers=NotificationService._kakao_event_headers(),
                 timeout=settings.NOTIFICATION_TIMEOUT
             )
-        except Exception as e:
+        except httpx.HTTPError as e:
             logger.error(
                 f"카카오 Event API task 조회 실패: attempt={attempt}, "
                 f"taskId={task_id}, batch_size={batch_size}, reason={str(e)}"
             )
-            return None
+            return None, True
 
         if task_response.status_code != 200:
             logger.error(
                 f"카카오 Event API task 조회 HTTP 실패: attempt={attempt}, "
                 f"taskId={task_id}, status={task_response.status_code}, batch_size={batch_size}"
             )
-            return None
+            return None, True
 
         try:
             task_payload = task_response.json()
@@ -417,17 +443,32 @@ class NotificationService:
                 f"카카오 Event API task 응답 JSON 파싱 실패: attempt={attempt}, "
                 f"taskId={task_id}, batch_size={batch_size}, reason={str(e)}"
             )
-            return None
+            return None, True
 
         parsed_counts = NotificationService._parse_task_result_counts(task_payload, batch_size)
         if parsed_counts is None:
+            if NotificationService._is_task_result_pending(task_payload):
+                logger.info(
+                    f"카카오 Event API task 처리 대기: attempt={attempt}, "
+                    f"taskId={task_id}, batch_size={batch_size}, status={task_payload.get('status')}"
+                )
+                return None, True
+
             logger.error(
                 f"카카오 Event API task 집계 파싱 실패: attempt={attempt}, "
                 f"taskId={task_id}, batch_size={batch_size}"
             )
-            return None
+            return None, False
 
-        return parsed_counts
+        return parsed_counts, False
+
+    @staticmethod
+    def _is_task_result_pending(payload: Dict[str, Any]) -> bool:
+        """아직 최종 집계가 준비되지 않은 task 상태인지 판별"""
+        status = payload.get("status")
+        if not isinstance(status, str):
+            return False
+        return status.upper() in KAKAO_TASK_PENDING_STATUSES
 
     @staticmethod
     def _parse_task_result_counts(payload: Dict[str, Any], batch_size: int) -> Optional[Tuple[int, int]]:
