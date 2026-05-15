@@ -12,6 +12,6 @@ SMPA_GEOCODE_ABBREVIATION_RULES: tuple[GeocodeAbbreviationRule, ...] = (
         r"\g<station> \g<exit>번 출구",
     ),
     (r"(?P<exit>\d+)\s*出", r"\g<exit>번 출구"),
-    (r"(?P<place>.+?)PB$", r"\g<place>치안센터"),
-    (r"(?P<place>.+?)R$", r"\g<place>교차로"),
+    (r"(?P<place>.*[가-힣])PB$", r"\g<place>치안센터"),
+    (r"(?P<place>.*[가-힣])R$", r"\g<place>교차로"),
 )

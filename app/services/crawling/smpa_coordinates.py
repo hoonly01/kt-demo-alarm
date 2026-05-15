@@ -225,11 +225,8 @@ async def _geocode_first_matching_query(
     client: httpx.AsyncClient | None,
 ) -> GeocodeResult | None:
     if not settings.KAKAO_LOCATION_API_KEY:
-        return await geocode_place_with_kakao(
-            queries[0] if queries else "",
-            client,
-            warn_on_empty_result=False,
-        )
+        logger.warning("KAKAO_LOCATION_API_KEY가 없어 지오코딩을 건너뜁니다.")
+        return None
 
     for query in queries:
         result = await geocode_place_with_kakao(
