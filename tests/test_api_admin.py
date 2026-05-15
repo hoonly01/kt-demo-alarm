@@ -110,7 +110,7 @@ def test_trigger_crawling_authorized(test_client, monkeypatch):
     headers = {"Origin": "http://testserver"}
     
     with monkeypatch.context() as m:
-        m.setattr("app.services.crawling_service.CrawlingService.crawl_and_sync_events", mock_crawl)
+        m.setattr("app.routers.admin.crawl_and_sync_smpa_events", mock_crawl)
         response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"), headers=headers)
         
     assert response.status_code == 200
@@ -123,7 +123,7 @@ def test_trigger_crawling_authorized_with_api_key(test_client, monkeypatch):
     headers = {"X-API-Key": "test-api-key"}
 
     with monkeypatch.context() as m:
-        m.setattr("app.services.crawling_service.CrawlingService.crawl_and_sync_events", mock_crawl)
+        m.setattr("app.routers.admin.crawl_and_sync_smpa_events", mock_crawl)
         response = test_client.post("/admin/trigger-crawling", headers=headers)
 
     assert response.status_code == 200
