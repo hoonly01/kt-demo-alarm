@@ -17,7 +17,7 @@ import math
 from app.utils.scheduler_utils import get_scheduler_status
 from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
-from app.services.crawling_service import CrawlingService
+from app.services.crawling import crawl_and_sync_smpa_events
 from app.services.zone_alarm_service import ZoneAlarmService
 
 from urllib.parse import urlparse
@@ -348,7 +348,7 @@ async def trigger_crawling(
     """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
     return await _schedule_background_task(
         "trigger-crawling",
-        CrawlingService.crawl_and_sync_events,
+        crawl_and_sync_smpa_events,
     )
 
 @router.post("/trigger-bus-notice")

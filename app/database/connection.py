@@ -3,7 +3,12 @@ import sqlite3
 import logging
 from contextlib import contextmanager
 from app.config.settings import settings
-from app.database.models import USERS_TABLE_SCHEMA, EVENTS_TABLE_SCHEMA, ALARM_TASKS_TABLE_SCHEMA
+from app.database.models import (
+    USERS_TABLE_SCHEMA,
+    EVENTS_TABLE_SCHEMA,
+    ALARM_TASKS_TABLE_SCHEMA,
+    EVENTS_MIGRATION_COLUMNS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,26 @@ def get_db_connection():
         conn.close()
 
 
+def _ensure_events_contract(cursor: sqlite3.Cursor) -> None:
+    """기존 events 테이블을 현재 SMPA 이벤트 계약으로 보강한다."""
+    existing_columns = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info(events)").fetchall()
+    }
+
+    for column_name, column_definition in EVENTS_MIGRATION_COLUMNS:
+        if column_name not in existing_columns:
+            cursor.execute(
+                f"ALTER TABLE events ADD COLUMN {column_name} {column_definition}"
+            )
+
+    cursor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_source_record_hash "
+        "ON events(source_record_hash) "
+        "WHERE source_record_hash IS NOT NULL"
+    )
+
+
 def init_db():
     """데이터베이스 초기화 - 중앙집중식 스키마 사용"""
     conn = sqlite3.connect(get_database_path(), check_same_thread=False)
@@ -44,6 +69,7 @@ def init_db():
 
     # Events 테이블 생성 (통합 스키마 사용)
     cursor.execute(EVENTS_TABLE_SCHEMA)
+    _ensure_events_contract(cursor)
 
     # Alarm Tasks 테이블 생성 (알림 상태 추적용)
     cursor.execute(ALARM_TASKS_TABLE_SCHEMA)
