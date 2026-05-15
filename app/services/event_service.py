@@ -11,6 +11,26 @@ from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
+EVENT_RESPONSE_COLUMNS = (
+    "id",
+    "title",
+    "description",
+    "attendees",
+    "police_station",
+    "location_name",
+    "location_address",
+    "latitude",
+    "longitude",
+    "start_date",
+    "end_date",
+    "category",
+    "severity_level",
+    "status",
+    "created_at",
+    "updated_at",
+)
+EVENT_RESPONSE_SELECT_COLUMNS = ", ".join(EVENT_RESPONSE_COLUMNS)
+
 
 class EventService:
     """이벤트/집회 관리 비즈니스 로직"""
@@ -189,8 +209,9 @@ class EventService:
             dep_lon, dep_lat, arr_lon, arr_lat = user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]
             
             # 활성 집회 목록 조회
-            cursor.execute('''
-                SELECT * FROM events 
+            cursor.execute(f'''
+                SELECT {EVENT_RESPONSE_SELECT_COLUMNS}
+                FROM events 
                 WHERE status = 'active' AND start_date > datetime('now', '+9 hours')
                 ORDER BY start_date
             ''')
