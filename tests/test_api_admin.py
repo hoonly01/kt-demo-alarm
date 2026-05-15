@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 from app.config.settings import settings
+from app.database.connection import get_db_connection
 
 # Do not instantiate a global TestClient here.
 # Use the `test_client` fixture to isolate the DB and rely on `clean_test_db`.
@@ -33,6 +34,78 @@ def test_admin_dashboard_valid_credentials(test_client, monkeypatch):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "KT Demo Alarm Back-office" in response.text
+
+
+@pytest.mark.usefixtures("clean_test_db")
+def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
+    """관리자 대시보드의 운영 타임스탬프는 KST로 변환해서 표시해야 함"""
+    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
+    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+
+    with get_db_connection() as db:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO events (
+                title, location_name, latitude, longitude, start_date,
+                severity_level, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "KST 표시 검증 집회",
+                "광화문",
+                37.5716,
+                126.9784,
+                "2026-05-15 11:00:00",
+                1,
+                "active",
+                "2026-05-15 00:30:00",
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (
+                task_id, alarm_type, status, total_recipients,
+                successful_sends, failed_sends, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task-kst-display",
+                "bulk",
+                "completed",
+                3,
+                3,
+                0,
+                "2026-05-15T00:40:00",
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO users (
+                bot_user_key, first_message_at, last_message_at,
+                message_count, active
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "kst-user",
+                "2026-05-20 23:30:00",
+                "2026-05-20 23:30:00",
+                1,
+                1,
+            ),
+        )
+        db.commit()
+
+    response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+
+    assert response.status_code == 200
+    assert "2026-05-15 09:30:00 KST" in response.text
+    assert "2026-05-15 09:40:00 KST" in response.text
+    assert "광화문 • 2026-05-15 11:00:00 KST" in response.text
+    assert "2026-05-15 20:00:00 KST" not in response.text
+    assert "kst-user" in response.text
+    assert "2026-05-21" in response.text
+    assert "2026-05-20" not in response.text
 
 def test_admin_dashboard_missing_env_vars(test_client, monkeypatch):
     """환경변수가 설정되지 않은 경우 500 에러를 반환해야 함"""
