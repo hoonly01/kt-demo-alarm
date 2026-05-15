@@ -211,7 +211,7 @@ class EventService:
             # 활성 집회 목록 조회
             cursor.execute(f'''
                 SELECT {EVENT_RESPONSE_SELECT_COLUMNS}
-                FROM events 
+                FROM events
                 WHERE status = 'active' AND start_date > datetime('now', '+9 hours')
                 ORDER BY start_date
             ''')
