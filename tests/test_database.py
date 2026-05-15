@@ -54,6 +54,35 @@ def test_events_table_schema(clean_test_db):
         cursor.execute("SELECT * FROM events WHERE title = ?", ("Test Event",))
         row = cursor.fetchone()
         assert row is not None
+        assert row["attendees"] == "미상"
+
+
+def test_events_table_has_smpa_source_contract(clean_test_db):
+    """events 테이블은 SMPA product fields와 내부 source envelope를 제공한다."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+
+        columns = {
+            row["name"]: row
+            for row in cursor.execute("PRAGMA table_info(events)").fetchall()
+        }
+        for column_name in {
+            "attendees",
+            "police_station",
+            "source",
+            "source_id",
+            "source_url",
+            "source_record_hash",
+            "source_payload_hash",
+            "collected_at",
+            "parser_version",
+        }:
+            assert column_name in columns
+
+        assert columns["attendees"]["dflt_value"] == "'미상'"
+
+        index_rows = cursor.execute("PRAGMA index_list(events)").fetchall()
+        assert any(row["name"] == "idx_events_source_record_hash" for row in index_rows)
 
 
 def test_alarm_tasks_table_schema(clean_test_db):

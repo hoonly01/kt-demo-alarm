@@ -45,7 +45,7 @@ class ZoneAlarmService:
 
                 # 2. 활성 집회 전체 조회
                 cursor.execute('''
-                    SELECT id, title, description, location_name, location_address,
+                    SELECT id, title, description, attendees, location_name, location_address,
                            latitude, longitude, start_date, end_date, category, severity_level
                     FROM events
                     WHERE status = 'active'
@@ -97,6 +97,7 @@ class ZoneAlarmService:
                                     "id": e["id"],
                                     "title": e["title"],
                                     "description": e["description"],
+                                    "attendees": e["attendees"],
                                     "location": e["location_name"],
                                     "latitude": e["latitude"],
                                     "longitude": e["longitude"],

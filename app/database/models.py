@@ -35,6 +35,8 @@ EVENTS_TABLE_SCHEMA = '''
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
+        attendees TEXT NOT NULL DEFAULT '미상',
+        police_station TEXT,
         location_name TEXT NOT NULL,
         location_address TEXT,
         latitude REAL NOT NULL,
@@ -44,10 +46,29 @@ EVENTS_TABLE_SCHEMA = '''
         category TEXT,
         severity_level INTEGER DEFAULT 1,  -- 1: 낮음, 2: 보통, 3: 높음
         status TEXT DEFAULT 'active',     -- active, ended, cancelled
+        source TEXT NOT NULL DEFAULT 'SMPA',
+        source_id TEXT,
+        source_url TEXT,
+        source_record_hash TEXT,
+        source_payload_hash TEXT,
+        collected_at DATETIME,
+        parser_version TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
 '''
+
+EVENTS_MIGRATION_COLUMNS = [
+    ("attendees", "TEXT NOT NULL DEFAULT '미상'"),
+    ("police_station", "TEXT"),
+    ("source", "TEXT NOT NULL DEFAULT 'SMPA'"),
+    ("source_id", "TEXT"),
+    ("source_url", "TEXT"),
+    ("source_record_hash", "TEXT"),
+    ("source_payload_hash", "TEXT"),
+    ("collected_at", "DATETIME"),
+    ("parser_version", "TEXT"),
+]
 
 ALARM_TASKS_TABLE_SCHEMA = '''
     CREATE TABLE IF NOT EXISTS alarm_tasks (

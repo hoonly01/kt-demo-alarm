@@ -14,13 +14,13 @@ def test_route_alert_template_uses_numbered_brief_fields():
             "location": "산업은행 측면 -> 신교교차로",
             "start_date": datetime(2026, 5, 14, 11, 30),
             "end_date": datetime(2026, 5, 14, 13, 0),
-            "description": "70명",
+            "attendees": "70명",
         },
         {
             "location": "광화문 월대 -> 舊)효자치안센터",
             "start_date": "2026-05-14 14:30:00",
             "end_date": "2026-05-14 16:00:00",
-            "description": "300명",
+            "attendees": "300명",
         },
     ]
 
@@ -45,13 +45,13 @@ def test_zone_alert_template_uses_zone_header_and_unknown_description_default():
             "location": "산업은행 측면 -> 신교교차로",
             "start_date": "2026-05-14T11:30:00",
             "end_date": "2026-05-14T13:00:00",
-            "description": "",
+            "attendees": "",
         },
         {
             "location": "광화문 월대 -> 舊)효자치안센터",
             "start_date": "2026-05-14T14:30:00",
             "end_date": "2026-05-14T16:00:00",
-            "description": None,
+            "attendees": None,
         }
     ]
 
@@ -77,7 +77,8 @@ async def test_events_today_protests_uses_numbered_brief_template(monkeypatch):
         "get_today_events",
         lambda db: [
             SimpleNamespace(
-                description="70명",
+                description="legacy description must not be used",
+                attendees="70명",
                 location_name="산업은행 측면 -> 신교교차로",
                 start_date="2026-05-14 11:30:00",
                 end_date="2026-05-14 13:00:00",
@@ -103,7 +104,8 @@ async def test_kakao_skills_upcoming_protests_uses_numbered_brief_template(monke
         "get_upcoming_events",
         lambda limit, db: [
             SimpleNamespace(
-                description="300명",
+                description="legacy description must not be used",
+                attendees="300명",
                 location_name="광화문 월대 -> 舊)효자치안센터",
                 start_date="2026-05-14T14:30:00",
                 end_date="2026-05-14T16:00:00",
