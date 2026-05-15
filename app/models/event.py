@@ -16,6 +16,7 @@ class EventCreate(BaseModel):
     end_date: Optional[datetime] = Field(None, description="종료 일시")
     category: Optional[str] = Field(None, description="집회 카테고리")
     severity_level: int = Field(1, description="심각도 (1: 낮음, 2: 보통, 3: 높음)")
+    image_path: Optional[str] = Field(None, description="집회 안내 원본 이미지 경로")
 
 
 class EventResponse(BaseModel):
@@ -32,6 +33,7 @@ class EventResponse(BaseModel):
     category: Optional[str]
     severity_level: int
     status: str
+    image_path: Optional[str]
     created_at: datetime
     updated_at: datetime
 
