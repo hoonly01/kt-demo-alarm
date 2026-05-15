@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
-from urllib.parse import urljoin
+from http import HTTPStatus
+from typing import cast
 from urllib.error import URLError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 import httpx
@@ -16,6 +18,9 @@ from app.config.settings import settings
 from app.services.crawling.smpa_parser import SmpaListPost, parse_smpa_list_posts
 
 logger = logging.getLogger(__name__)
+
+TRANSIENT_HTTP_STATUS_CODES = {HTTPStatus.TOO_MANY_REQUESTS}
+TRANSIENT_HTTP_STATUS_MIN = HTTPStatus.INTERNAL_SERVER_ERROR
 
 SMPA_DETAIL_QUERY_TEMPLATE = (
     "{list_path}?View&pageST=SUBJECT&pageSV=&imsi=imsi&page=1"
@@ -63,10 +68,16 @@ def _fetch_text_with_urllib(url: str, config: SmpaHttpConfig) -> str:
     try:
         with urlopen(request, timeout=config.timeout_seconds) as response:
             charset = response.headers.get_content_charset() or "utf-8"
-            return response.read().decode(charset, errors="replace")
+            return cast(bytes, response.read()).decode(charset, errors="replace")
     except URLError:
         logger.exception("SMPA urllib fallback 수집 실패: %s", url)
         raise
+
+
+def _is_transient_http_status_error(error: httpx.HTTPStatusError) -> bool:
+    """재시도 또는 fallback 대상인 일시적 HTTP 상태 오류인지 판단한다."""
+    status_code = error.response.status_code
+    return status_code in TRANSIENT_HTTP_STATUS_CODES or status_code >= TRANSIENT_HTTP_STATUS_MIN
 
 
 async def fetch_smpa_text(
@@ -95,9 +106,11 @@ async def fetch_smpa_text(
                         timeout=active_config.timeout_seconds,
                     )
 
-            response.raise_for_status()
+            _ = response.raise_for_status()
             return response.text
-        except httpx.RequestError as error:
+        except (httpx.RequestError, httpx.HTTPStatusError) as error:
+            if isinstance(error, httpx.HTTPStatusError) and not _is_transient_http_status_error(error):
+                raise
             if client is not None:
                 raise
             last_error = error
@@ -127,7 +140,8 @@ async def fetch_recent_smpa_posts(
     active_config = config or SmpaHttpConfig()
     list_html = await fetch_smpa_text(active_config.list_url, active_config, client)
     posts = parse_smpa_list_posts(list_html)
-    selected_posts: Iterable[SmpaListPost] = posts[: limit or settings.SMPA_LIST_LIMIT]
+    effective_limit = settings.SMPA_LIST_LIMIT if limit is None else limit
+    selected_posts: Iterable[SmpaListPost] = posts[:effective_limit]
     return [
         post.with_detail_url(build_smpa_detail_url(post.board_no, active_config))
         for post in selected_posts
