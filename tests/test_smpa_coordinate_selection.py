@@ -141,8 +141,17 @@ def test_build_geocode_query_candidates_adds_context_to_replaced_query():
     )
 
 
+@pytest.mark.parametrize("candidate", ["STAR", "XPB"])
+def test_build_geocode_query_candidates_keeps_latin_suffix_words(candidate: str) -> None:
+    queries = build_geocode_query_candidates(candidate, candidate)
+
+    assert queries == (candidate,)
+
+
 @pytest.mark.asyncio
-async def test_select_coordinate_for_event_uses_replaced_query_in_kakao_path() -> None:
+async def test_select_coordinate_for_event_uses_replaced_query_in_kakao_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     transport = KakaoKeywordTransport(
         {
             "효자치안센터": [
@@ -157,16 +166,12 @@ async def test_select_coordinate_for_event_uses_replaced_query_in_kakao_path() -
         }
     )
 
-    previous_key = settings.KAKAO_LOCATION_API_KEY
-    settings.KAKAO_LOCATION_API_KEY = TEST_KAKAO_API_KEY
-    try:
-        async with httpx.AsyncClient(transport=transport) as client:
-            selected = await select_coordinate_for_event(
-                smpa_event_for_endpoint("효자PB"),
-                client,
-            )
-    finally:
-        settings.KAKAO_LOCATION_API_KEY = previous_key
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", TEST_KAKAO_API_KEY)
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("효자PB"),
+            client,
+        )
 
     assert transport.requested_queries == ["효자PB", "효자치안센터"]
     assert selected is not None
@@ -174,19 +179,34 @@ async def test_select_coordinate_for_event_uses_replaced_query_in_kakao_path() -
 
 
 @pytest.mark.asyncio
-async def test_select_coordinate_for_event_keeps_coordinate_failure_visible() -> None:
+async def test_select_coordinate_for_event_keeps_coordinate_failure_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     transport = KakaoKeywordTransport({})
 
-    previous_key = settings.KAKAO_LOCATION_API_KEY
-    settings.KAKAO_LOCATION_API_KEY = TEST_KAKAO_API_KEY
-    try:
-        async with httpx.AsyncClient(transport=transport) as client:
-            selected = await select_coordinate_for_event(
-                smpa_event_for_endpoint("신교R"),
-                client,
-            )
-    finally:
-        settings.KAKAO_LOCATION_API_KEY = previous_key
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", TEST_KAKAO_API_KEY)
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("신교R"),
+            client,
+        )
 
     assert transport.requested_queries == ["신교R", "신교교차로"]
+    assert selected is None
+
+
+@pytest.mark.asyncio
+async def test_select_coordinate_for_event_returns_without_query_when_kakao_key_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = KakaoKeywordTransport({"효자치안센터": []})
+
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", "")
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("효자PB"),
+            client,
+        )
+
+    assert transport.requested_queries == []
     assert selected is None
