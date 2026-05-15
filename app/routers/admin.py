@@ -3,8 +3,9 @@ import secrets
 import asyncio
 import logging
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Dict, Any, List, Set
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -36,6 +37,11 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirna
 # Task registry and lock to prevent duplicate runs and race conditions
 _background_tasks: dict[str, asyncio.Task[Any]] = {}
 _task_lock = asyncio.Lock()
+
+KST_ZONE_NAME = "Asia/Seoul"
+KST = ZoneInfo(KST_ZONE_NAME)
+DASHBOARD_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S KST"
+DASHBOARD_DATE_FORMAT = "%Y-%m-%d KST"
 
 def verify_admin(credentials: HTTPBasicCredentials | None = admin_credentials):
     # Using environment variables for admin credentials.
@@ -134,7 +140,11 @@ def fetch_recent_events() -> List[Dict[str, Any]]:
             ORDER BY id DESC 
             LIMIT 100
         """)
-        return cursor.fetchall()
+        events = cursor.fetchall()
+        for event in events:
+            event["created_at_display"] = _format_utc_timestamp_as_kst(event.get("created_at"))
+            event["start_date_display"] = _format_kst_local_datetime(event.get("start_date"))
+        return events
 
 def fetch_recent_alarms() -> List[Dict[str, Any]]:
     # Synchronous DB query
@@ -147,7 +157,10 @@ def fetch_recent_alarms() -> List[Dict[str, Any]]:
             ORDER BY created_at DESC 
             LIMIT 100
         """)
-        return cursor.fetchall()
+        alarms = cursor.fetchall()
+        for alarm in alarms:
+            alarm["created_at_display"] = _format_kst_local_datetime(alarm.get("created_at"))
+        return alarms
 
 # Helper for sqlite row to dict
 def dict_factory(cursor, row):
@@ -211,36 +224,86 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
         """, (limit, offset))
         return cursor.fetchall()
 
-def _format_user_created_at(value: Any) -> str:
+def _parse_datetime_value(value: Any) -> datetime | None:
     if value in (None, ""):
-        return ""
+        return None
 
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d")
+        return value
 
     if isinstance(value, (int, float)):
-        timestamp = float(value)
-        if timestamp > 1_000_000_000_000:
-            timestamp /= 1000.0
-        try:
-            return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
-        except (OverflowError, OSError, ValueError):
-            return str(value)[:10]
+        return _datetime_from_epoch(value)
 
     text = str(value).strip()
     if not text:
-        return ""
+        return None
+
+    if text.isdigit() and len(text) >= 10:
+        parsed_epoch = _datetime_from_epoch(int(text))
+        if parsed_epoch is not None:
+            return parsed_epoch
 
     for parser in (datetime.fromisoformat,):
         try:
-            return parser(text.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            return parser(text.replace("Z", "+00:00"))
         except ValueError:
             pass
 
-    if text.isdigit():
-        return _format_user_created_at(int(text))
+    return None
 
-    return text[:10]
+
+def _datetime_from_epoch(value: int | float) -> datetime | None:
+    timestamp = float(value)
+    if timestamp > 1_000_000_000_000:
+        timestamp /= 1000.0
+    try:
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _format_datetime_as_kst(
+    value: Any,
+    *,
+    naive_source_tz: tzinfo,
+    output_format: str = DASHBOARD_DATETIME_FORMAT,
+) -> str:
+    parsed = _parse_datetime_value(value)
+    if parsed is None:
+        return "" if value in (None, "") else str(value)
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=naive_source_tz)
+
+    return parsed.astimezone(KST).strftime(output_format)
+
+
+def _format_utc_timestamp_as_kst(value: Any) -> str:
+    return _format_datetime_as_kst(value, naive_source_tz=timezone.utc)
+
+
+def _format_kst_local_datetime(value: Any) -> str:
+    return _format_datetime_as_kst(value, naive_source_tz=KST)
+
+
+def _format_user_created_at(value: Any) -> str:
+    parsed = _parse_datetime_value(value)
+    if parsed is not None:
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=KST)
+        return parsed.astimezone(KST).strftime(DASHBOARD_DATE_FORMAT)
+
+    return "" if value in (None, "") else str(value)[:10]
+
+
+def _apply_scheduler_time_displays(scheduler_status: Dict[str, Any]) -> Dict[str, Any]:
+    for job in scheduler_status.get("jobs", []):
+        job["next_run_display"] = _format_datetime_as_kst(
+            job.get("next_run"),
+            naive_source_tz=KST,
+            output_format="%Y-%m-%d %H:%M KST",
+        )
+    return scheduler_status
 
 @router.get("/dashboard")
 async def dashboard(
@@ -265,7 +328,7 @@ async def dashboard(
         total_pages = math.ceil(total_users / page_size) if total_users > 0 else 1
 
         # Get Scheduler Status
-        scheduler_status = get_scheduler_status()
+        scheduler_status = _apply_scheduler_time_displays(get_scheduler_status())
 
         # Calculate some summary statistics
         total_events = len(events)
