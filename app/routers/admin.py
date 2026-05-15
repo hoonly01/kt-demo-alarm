@@ -2,6 +2,7 @@ import os
 import secrets
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Set
 
@@ -17,6 +18,7 @@ from app.utils.scheduler_utils import get_scheduler_status
 from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
 from app.services.crawling_service import CrawlingService
+from app.services.zone_alarm_service import ZoneAlarmService
 
 from urllib.parse import urlparse
 
@@ -32,7 +34,7 @@ admin_credentials = Depends(security)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates"))
 
 # Task registry and lock to prevent duplicate runs and race conditions
-_background_tasks: Dict[str, asyncio.Task] = {}
+_background_tasks: dict[str, asyncio.Task[Any]] = {}
 _task_lock = asyncio.Lock()
 
 def verify_admin(credentials: HTTPBasicCredentials | None = admin_credentials):
@@ -311,7 +313,7 @@ async def dashboard(
         raise HTTPException(status_code=500, detail="Admin dashboard failed") from e
 
 def _task_done_callback(task_key: str):
-    def callback(task: asyncio.Task):
+    def callback(task: asyncio.Task[Any]):
         try:
             _background_tasks.pop(task_key, None)
             task.result()
@@ -322,35 +324,62 @@ def _task_done_callback(task_key: str):
             logger.error(f"Background task {task_key} failed: {e}", exc_info=True)
     return callback
 
+
+async def _schedule_background_task(
+    task_key: str,
+    coroutine_factory: Callable[[], Coroutine[Any, Any, Any]],
+    in_progress_message: str = "Task already in progress",
+) -> dict[str, str]:
+    async with _task_lock:
+        task = _background_tasks.get(task_key)
+        if task is not None and not task.done():
+            return {"message": in_progress_message}
+
+        task = asyncio.create_task(coroutine_factory())
+        _background_tasks[task_key] = task
+        task.add_done_callback(_task_done_callback(task_key))
+    return {"message": "Scheduled"}
+
+
 @router.post("/trigger-crawling")
 async def trigger_crawling(
     _auth: str = Depends(verify_admin_action),
 ):
     """수동으로 서울경찰청 집회 정보 크롤링을 트리거합니다."""
-    task_key = "trigger-crawling"
-    async with _task_lock:
-        if task_key in _background_tasks and not _background_tasks[task_key].done():
-            return {"message": "Task already in progress"}
-            
-        task = asyncio.create_task(CrawlingService.crawl_and_sync_events())
-        _background_tasks[task_key] = task
-        task.add_done_callback(_task_done_callback(task_key))
-    return {"message": "Scheduled"}
+    return await _schedule_background_task(
+        "trigger-crawling",
+        CrawlingService.crawl_and_sync_events,
+    )
 
 @router.post("/trigger-bus-notice")
 async def trigger_bus_notice(
     _auth: str = Depends(verify_admin_action),
 ):
     """수동으로 TOPIS 버스 우회 공지 크롤링을 트리거합니다."""
-    task_key = "trigger-bus-notice"
-    async with _task_lock:
-        if task_key in _background_tasks and not _background_tasks[task_key].done():
-            return {"message": "Task already in progress"}
-            
-        task = asyncio.create_task(BusNoticeService.refresh())
-        _background_tasks[task_key] = task
-        task.add_done_callback(_task_done_callback(task_key))
-    return {"message": "Scheduled"}
+    return await _schedule_background_task(
+        "trigger-bus-notice",
+        BusNoticeService.refresh,
+    )
+
+@router.post("/trigger-route-check")
+async def trigger_route_check(
+    _auth: str = Depends(verify_admin_action),
+):
+    """수동으로 전체 사용자 경로 집회 알림 체크를 트리거합니다."""
+    return await _schedule_background_task(
+        "trigger-route-check",
+        EventService.scheduled_route_check,
+    )
+
+@router.post("/trigger-zone-check")
+async def trigger_zone_check(
+    _auth: str = Depends(verify_admin_action),
+):
+    """수동으로 관심구역 집회 알림 체크를 트리거합니다."""
+    return await _schedule_background_task(
+        "trigger-zone-check",
+        ZoneAlarmService.scheduled_zone_check,
+    )
 
 @router.post("/trigger-test-alarm-for-user")
 async def trigger_test_alarm_for_user(
@@ -359,17 +388,14 @@ async def trigger_test_alarm_for_user(
 ):
     """수동으로 특정 사용자의 경로 점검 및 알림 발송 로직을 테스트합니다."""
     task_key = f"test-alarm-{user_id}"
-    async with _task_lock:
-        if task_key in _background_tasks and not _background_tasks[task_key].done():
-            return {"message": "Task already in progress for this user"}
-        
-        # helper for background task that requires DB connection
-        async def _run_route_check_for_user(uid: str):
-            from app.database.connection import get_db_connection
-            with get_db_connection() as db:
-                await EventService.check_route_events(user_id=uid, auto_notify=True, db=db)
-                
-        task = asyncio.create_task(_run_route_check_for_user(user_id))
-        _background_tasks[task_key] = task
-        task.add_done_callback(_task_done_callback(task_key))
-    return {"message": "Scheduled"}
+
+    async def _run_route_check_for_user():
+        from app.database.connection import get_db_connection
+        with get_db_connection() as db:
+            await EventService.check_route_events(user_id=user_id, auto_notify=True, db=db)
+
+    return await _schedule_background_task(
+        task_key,
+        _run_route_check_for_user,
+        "Task already in progress for this user",
+    )

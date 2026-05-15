@@ -225,10 +225,12 @@ class EventService:
                     events_data.append({
                         "id": event.id,
                         "title": event.title,
+                        "description": event.description,
                         "location": event.location_name,
                         "latitude": event.latitude,
                         "longitude": event.longitude,
                         "start_date": event.start_date.isoformat(),
+                        "end_date": event.end_date.isoformat() if event.end_date else None,
                         "category": event.category,
                         "severity_level": event.severity_level
                     })
@@ -311,10 +313,12 @@ class EventService:
                                     {
                                         "id": event.id,
                                         "title": event.title,
+                                        "description": event.description,
                                         "location": event.location_name,
                                         "latitude": event.latitude,
                                         "longitude": event.longitude,
                                         "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
+                                        "end_date": event.end_date.isoformat() if event.end_date and hasattr(event.end_date, 'isoformat') else str(event.end_date) if event.end_date else None,
                                         "category": event.category,
                                         "severity_level": event.severity_level
                                     }

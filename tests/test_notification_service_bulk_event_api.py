@@ -15,7 +15,7 @@ class CapturingKakaoTransport(httpx.AsyncBaseTransport):
     def __init__(
         self,
         post_responses: Optional[List[Dict[str, Any]]] = None,
-        task_responses: Optional[Dict[str, Dict[str, Any]]] = None,
+        task_responses: Optional[Dict[str, Any]] = None,
     ):
         self.post_responses = list(post_responses or [])
         self.task_responses = task_responses or {}
@@ -38,7 +38,7 @@ class CapturingKakaoTransport(httpx.AsyncBaseTransport):
 
         if request.method == "GET" and request.url.path.startswith("/v1/tasks/"):
             task_id = request.url.path.rsplit("/", 1)[-1]
-            response_spec = self.task_responses[task_id]
+            response_spec = self._next_task_response(task_id)
             return self._build_response(request, response_spec)
 
         return httpx.Response(404, json={"error": "unexpected request"}, request=request)
@@ -55,6 +55,15 @@ class CapturingKakaoTransport(httpx.AsyncBaseTransport):
 
         return httpx.Response(status_code, json=response_spec.get("json", {}), request=request)
 
+    def _next_task_response(self, task_id: str) -> Dict[str, Any]:
+        response_spec = self.task_responses[task_id]
+        if isinstance(response_spec, list):
+            if len(response_spec) > 1:
+                return response_spec.pop(0)
+            return response_spec[0]
+
+        return response_spec
+
     def post_requests(self) -> List[Dict[str, Any]]:
         return [request for request in self.requests if request["method"] == "POST"]
 
@@ -68,6 +77,7 @@ def kakao_settings(monkeypatch):
     monkeypatch.setattr(notification_module.settings, "KAKAO_EVENT_API_KEY", "test-rest-api-key")
     monkeypatch.setattr(notification_module.settings, "NOTIFICATION_TIMEOUT", 1.0)
     monkeypatch.setattr(notification_module.settings, "BATCH_SIZE", 100)
+    monkeypatch.setattr(notification_module, "KAKAO_TASK_RESULT_POLL_DELAY_SECONDS", 0.0)
 
 
 async def send_with_transport(
@@ -155,6 +165,26 @@ async def test_bulk_alarm_aggregates_task_success_and_fail_counts(kakao_settings
     result = await send_with_transport(["u1", "u2", "u3", "u4", "u5"], transport)
 
     assert result == {"success": True, "total_sent": 3, "total_failed": 2, "total_users": 5}
+
+
+@pytest.mark.asyncio
+async def test_bulk_alarm_polls_task_result_until_counts_are_parseable(kakao_settings):
+    transport = CapturingKakaoTransport(
+        post_responses=[{"json": {"status": "SUCCESS", "taskId": "task-1"}}],
+        task_responses={
+            "task-1": [
+                {"json": {"status": "RUNNING"}},
+                {"json": {"successCount": 4, "fail": {"count": 1, "list": []}}},
+            ],
+        },
+    )
+
+    result = await send_with_transport(["u1", "u2", "u3", "u4", "u5"], transport)
+
+    task_requests = transport.task_requests()
+    assert result == {"success": True, "total_sent": 4, "total_failed": 1, "total_users": 5}
+    assert len(task_requests) == 2
+    assert all(request["path"] == "/v1/tasks/task-1" for request in task_requests)
 
 
 @pytest.mark.asyncio
