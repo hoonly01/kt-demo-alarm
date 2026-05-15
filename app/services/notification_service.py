@@ -1,6 +1,8 @@
 """알림 전송 서비스"""
+import asyncio
 import logging
 import httpx
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Iterator, Tuple
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
 from app.models.kakao import EventAPIRequest, Event, EventUser
@@ -11,6 +13,8 @@ logger = logging.getLogger(__name__)
 KAKAO_BOT_API_BASE_URL = "https://bot-api.kakao.com"
 KAKAO_EVENT_API_MAX_USERS_PER_REQUEST = 100
 KAKAO_EVENT_API_SUCCESS_STATUS = "SUCCESS"
+KAKAO_TASK_RESULT_POLL_ATTEMPTS = 3
+KAKAO_TASK_RESULT_POLL_DELAY_SECONDS = 0.2
 
 
 class NotificationService:
@@ -35,16 +39,49 @@ class NotificationService:
         return f"{KAKAO_BOT_API_BASE_URL}/v1/tasks/{task_id}"
 
     @staticmethod
-    def _format_event_block(event: Dict[str, Any]) -> str:
-        """단일 집회 정보를 이모지 블록으로 포맷팅"""
-        severity_level = event.get("severity_level", 1)
-        severity_emoji = "🔴" if severity_level >= 3 else "🟡" if severity_level >= 2 else "🟢"
+    def _format_event_time(value: Any) -> str:
+        """집회 일시 표시용 HH:MM 포맷 변환"""
+        if value is None:
+            return "미정"
+
+        if isinstance(value, datetime):
+            return value.strftime("%H:%M")
+
+        value_text = str(value).strip()
+        if not value_text:
+            return "미정"
+
+        try:
+            return datetime.fromisoformat(value_text).strftime("%H:%M")
+        except ValueError:
+            return value_text[:5] if len(value_text) >= 5 else value_text
+
+    @staticmethod
+    def _format_event_time_range(event: Dict[str, Any]) -> str:
+        """집회 시작/종료 일시 범위 포맷팅"""
+        start_time = NotificationService._format_event_time(event.get("start_date"))
+        end_time = NotificationService._format_event_time(event.get("end_date"))
+        return f"{start_time} ~ {end_time}"
+
+    @staticmethod
+    def _format_event_block(index: int, event: Dict[str, Any]) -> str:
+        """단일 집회 정보를 사용자 알림용 번호 블록으로 포맷팅"""
+        description = str(event.get("description") or "").strip() or "미상"
         return (
-            f"{severity_emoji} {event['title']}\n"
-            f"📍 {event['location']}\n"
-            f"⏰ {event['start_date']}\n"
-            f"🏷️ {event.get('category', '일반')}"
+            f"{index}.\n"
+            f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
+            f"집회 장소 : {event['location']}\n"
+            f"신고 인원 : {description}"
         )
+
+    @staticmethod
+    def _format_event_collection_message(header: str, events: List[Dict[str, Any]]) -> str:
+        """여러 집회 정보를 공통 번호형 템플릿으로 포맷팅"""
+        blocks = [
+            NotificationService._format_event_block(index, event)
+            for index, event in enumerate(events, start=1)
+        ]
+        return f"{header}\n\n" + "\n\n".join(blocks)
 
     @staticmethod
     def _format_event_message(events: List[Dict[str, Any]]) -> str:
@@ -57,8 +94,10 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        blocks = [NotificationService._format_event_block(e) for e in events]
-        return f"⚠️ 경로상에 {len(events)}개의 집회가 감지되었습니다:\n\n" + "\n\n".join(blocks)
+        return NotificationService._format_event_collection_message(
+            "경로상 감지된 집회 안내입니다.",
+            events,
+        )
 
     @staticmethod
     def _format_zone_message(zone_name: str, events: List[Dict[str, Any]]) -> str:
@@ -72,8 +111,10 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        blocks = [NotificationService._format_event_block(e) for e in events]
-        return f"설정하신 {zone_name}에 집회가 감지되었습니다.\n\n" + "\n\n".join(blocks)
+        return NotificationService._format_event_collection_message(
+            f"설정하신 {zone_name}의 집회 안내입니다.",
+            events,
+        )
 
     @staticmethod
     async def send_individual_alarm(
@@ -305,36 +346,86 @@ class NotificationService:
             )
             return 0, batch_size
 
+        parsed_counts = await NotificationService._poll_task_result_counts(
+            client=client,
+            task_id=str(task_id),
+            batch_size=batch_size,
+        )
+        if parsed_counts is None:
+            return 0, batch_size
+
+        return parsed_counts
+
+    @staticmethod
+    async def _poll_task_result_counts(
+        client: httpx.AsyncClient,
+        task_id: str,
+        batch_size: int
+    ) -> Optional[Tuple[int, int]]:
+        """카카오 Event API task 결과를 제한된 횟수 안에서 조회하고 집계 건수를 반환"""
+        for attempt in range(1, KAKAO_TASK_RESULT_POLL_ATTEMPTS + 1):
+            parsed_counts = await NotificationService._get_task_result_counts_once(
+                client=client,
+                task_id=task_id,
+                batch_size=batch_size,
+                attempt=attempt,
+            )
+            if parsed_counts is not None:
+                return parsed_counts
+
+            if attempt < KAKAO_TASK_RESULT_POLL_ATTEMPTS:
+                await asyncio.sleep(KAKAO_TASK_RESULT_POLL_DELAY_SECONDS)
+
+        logger.error(
+            f"카카오 Event API task 조회 최종 실패: attempts={KAKAO_TASK_RESULT_POLL_ATTEMPTS}, "
+            f"taskId={task_id}, batch_size={batch_size}"
+        )
+        return None
+
+    @staticmethod
+    async def _get_task_result_counts_once(
+        client: httpx.AsyncClient,
+        task_id: str,
+        batch_size: int,
+        attempt: int
+    ) -> Optional[Tuple[int, int]]:
+        """단일 task 결과 조회 시도에서 파싱 가능한 성공/실패 건수를 반환"""
         try:
             task_response = await client.get(
-                NotificationService._kakao_task_url(str(task_id)),
+                NotificationService._kakao_task_url(task_id),
                 headers=NotificationService._kakao_event_headers(),
                 timeout=settings.NOTIFICATION_TIMEOUT
             )
         except Exception as e:
-            logger.error(f"카카오 Event API task 조회 실패: taskId={task_id}, batch_size={batch_size}, reason={str(e)}")
-            return 0, batch_size
+            logger.error(
+                f"카카오 Event API task 조회 실패: attempt={attempt}, "
+                f"taskId={task_id}, batch_size={batch_size}, reason={str(e)}"
+            )
+            return None
 
         if task_response.status_code != 200:
             logger.error(
-                f"카카오 Event API task 조회 HTTP 실패: taskId={task_id}, "
-                f"status={task_response.status_code}, batch_size={batch_size}"
+                f"카카오 Event API task 조회 HTTP 실패: attempt={attempt}, "
+                f"taskId={task_id}, status={task_response.status_code}, batch_size={batch_size}"
             )
-            return 0, batch_size
+            return None
 
         try:
             task_payload = task_response.json()
         except ValueError as e:
             logger.error(
-                f"카카오 Event API task 응답 JSON 파싱 실패: taskId={task_id}, "
-                f"batch_size={batch_size}, reason={str(e)}"
+                f"카카오 Event API task 응답 JSON 파싱 실패: attempt={attempt}, "
+                f"taskId={task_id}, batch_size={batch_size}, reason={str(e)}"
             )
-            return 0, batch_size
+            return None
 
         parsed_counts = NotificationService._parse_task_result_counts(task_payload, batch_size)
         if parsed_counts is None:
-            logger.error(f"카카오 Event API task 집계 파싱 실패: taskId={task_id}, batch_size={batch_size}")
-            return 0, batch_size
+            logger.error(
+                f"카카오 Event API task 집계 파싱 실패: attempt={attempt}, "
+                f"taskId={task_id}, batch_size={batch_size}"
+            )
+            return None
 
         return parsed_counts
 
