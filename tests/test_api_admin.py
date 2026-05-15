@@ -76,7 +76,24 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
                 3,
                 3,
                 0,
-                "2026-05-15T00:40:00",
+                "2026-05-15T09:40:00",
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (
+                task_id, alarm_type, status, total_recipients,
+                successful_sends, failed_sends, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "task-utc-offset-display",
+                "bulk",
+                "completed",
+                2,
+                2,
+                0,
+                "2026-05-15T00:50:00+00:00",
             ),
         )
         cursor.execute(
@@ -101,11 +118,12 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
     assert response.status_code == 200
     assert "2026-05-15 09:30:00 KST" in response.text
     assert "2026-05-15 09:40:00 KST" in response.text
+    assert "2026-05-15 09:50:00 KST" in response.text
     assert "광화문 • 2026-05-15 11:00:00 KST" in response.text
     assert "2026-05-15 20:00:00 KST" not in response.text
     assert "kst-user" in response.text
-    assert "2026-05-21" in response.text
-    assert "2026-05-20" not in response.text
+    assert "2026-05-20 KST" in response.text
+    assert "2026-05-21" not in response.text
 
 def test_admin_dashboard_missing_env_vars(test_client, monkeypatch):
     """환경변수가 설정되지 않은 경우 500 에러를 반환해야 함"""
