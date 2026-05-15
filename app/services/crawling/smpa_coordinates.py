@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
+from functools import lru_cache
+from typing import cast
 
 import httpx
 
 from app.config.settings import settings
+from app.services.crawling.smpa_geocode_rules import (
+    SMPA_GEOCODE_ABBREVIATION_RULES,
+    GeocodeAbbreviationRule,
+)
 from app.services.crawling.smpa_parser import ParsedSmpaEvent
 
 logger = logging.getLogger(__name__)
@@ -20,6 +27,8 @@ JONGNO_BBOX = {
     "min_lon": 126.9400,
     "max_lon": 127.0250,
 }
+LOCATION_CONTEXT_RE = re.compile(r"<(?P<context>[^>]+)>")
+CONTEXT_TRAILING_MARKERS_RE = re.compile(r"\s*(?:등|일대)$")
 
 
 @dataclass(frozen=True)
@@ -90,9 +99,86 @@ def choose_representative_coordinate(
     )
 
 
+def _clean_query_text(value: str) -> str:
+    return " ".join(value.split()).strip()
+
+
+def _dedupe_queries(queries: list[str]) -> tuple[str, ...]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        cleaned = _clean_query_text(query)
+        if cleaned and cleaned not in seen:
+            deduped.append(cleaned)
+            seen.add(cleaned)
+    return tuple(deduped)
+
+
+def _extract_location_context(raw_location: str) -> str:
+    match = LOCATION_CONTEXT_RE.search(raw_location)
+    if match is None:
+        return ""
+    context = _clean_query_text(match.group("context"))
+    return CONTEXT_TRAILING_MARKERS_RE.sub("", context).strip()
+
+
+@lru_cache(maxsize=16)
+def _compile_geocode_abbreviation_rules(
+    raw_rules: tuple[GeocodeAbbreviationRule, ...],
+) -> tuple[tuple[re.Pattern[str], str], ...]:
+    return tuple((re.compile(pattern_text), replacement) for pattern_text, replacement in raw_rules)
+
+
+def _active_geocode_abbreviation_rules() -> tuple[tuple[re.Pattern[str], str], ...]:
+    return _compile_geocode_abbreviation_rules(SMPA_GEOCODE_ABBREVIATION_RULES)
+
+
+def _replace_geocode_abbreviations(query: str) -> str:
+    replaced = query
+    for pattern, replacement in _active_geocode_abbreviation_rules():
+        replaced = pattern.sub(replacement, replaced)
+    return _clean_query_text(replaced)
+
+
+def build_geocode_query_candidates(candidate: str, raw_location: str) -> tuple[str, ...]:
+    """SMPA 장소 표기를 Kakao keyword search용 후보 검색어로 확장한다."""
+    cleaned = _clean_query_text(candidate)
+    replaced = _replace_geocode_abbreviations(cleaned)
+    context = _extract_location_context(raw_location)
+
+    queries = [cleaned, replaced]
+    base_for_context = replaced or cleaned
+    if context and base_for_context:
+        queries.extend([f"{context} {base_for_context}", f"{base_for_context} {context}"])
+
+    return _dedupe_queries(queries)
+
+
+def _first_kakao_document(payload: object) -> dict[str, object] | None:
+    if not isinstance(payload, dict):
+        return None
+    payload_mapping = cast(dict[str, object], payload)
+    raw_documents = payload_mapping.get("documents")
+    if not isinstance(raw_documents, list) or not raw_documents:
+        return None
+    documents = cast(list[object], raw_documents)
+    first = documents[0]
+    if not isinstance(first, dict):
+        return None
+    return cast(dict[str, object], first)
+
+
+def _optional_text(value: object, fallback: str = "") -> str:
+    if isinstance(value, str) and value:
+        return value
+    return fallback
+
+
 async def geocode_place_with_kakao(
     query: str,
     client: httpx.AsyncClient | None = None,
+    *,
+    warn_on_empty_result: bool = True,
 ) -> GeocodeResult | None:
     """Kakao keyword search로 장소명 하나를 좌표로 변환한다."""
     if not settings.KAKAO_LOCATION_API_KEY:
@@ -108,20 +194,53 @@ async def geocode_place_with_kakao(
         async with httpx.AsyncClient(timeout=settings.SMPA_HTTP_TIMEOUT_SECONDS) as new_client:
             response = await new_client.get(KAKAO_LOCAL_KEYWORD_URL, headers=headers, params=params)
 
-    response.raise_for_status()
-    documents = response.json().get("documents") or []
-    if not documents:
-        logger.warning("Kakao 지오코딩 결과 없음: %s", query)
+    _ = response.raise_for_status()
+    payload = cast(object, response.json())
+    first = _first_kakao_document(payload)
+    if first is None:
+        if warn_on_empty_result:
+            logger.warning("Kakao 지오코딩 결과 없음: %s", query)
         return None
 
-    first = documents[0]
+    latitude = first.get("y")
+    longitude = first.get("x")
+    if not isinstance(latitude, str) or not isinstance(longitude, str):
+        logger.warning("Kakao 지오코딩 좌표 형식 오류: %s", query)
+        return None
+
     return GeocodeResult(
         query=query,
-        name=first.get("place_name") or query,
-        address=first.get("road_address_name") or first.get("address_name") or "",
-        latitude=float(first["y"]),
-        longitude=float(first["x"]),
+        name=_optional_text(first.get("place_name"), query),
+        address=_optional_text(
+            first.get("road_address_name"),
+            _optional_text(first.get("address_name")),
+        ),
+        latitude=float(latitude),
+        longitude=float(longitude),
     )
+
+
+async def _geocode_first_matching_query(
+    queries: tuple[str, ...],
+    client: httpx.AsyncClient | None,
+) -> GeocodeResult | None:
+    if not settings.KAKAO_LOCATION_API_KEY:
+        return await geocode_place_with_kakao(
+            queries[0] if queries else "",
+            client,
+            warn_on_empty_result=False,
+        )
+
+    for query in queries:
+        result = await geocode_place_with_kakao(
+            query,
+            client,
+            warn_on_empty_result=False,
+        )
+        if result is not None:
+            return result
+    logger.warning("Kakao 지오코딩 결과 없음: %s", " | ".join(queries))
+    return None
 
 
 async def select_coordinate_for_event(
@@ -131,7 +250,8 @@ async def select_coordinate_for_event(
     """파싱된 이벤트의 endpoint 후보를 지오코딩하고 대표 좌표를 선택한다."""
     results: list[GeocodeResult] = []
     for candidate in event.endpoint_candidates:
-        result = await geocode_place_with_kakao(candidate, client)
+        queries = build_geocode_query_candidates(candidate, event.raw_location)
+        result = await _geocode_first_matching_query(queries, client)
         if result is not None:
             results.append(result)
     if not results:
