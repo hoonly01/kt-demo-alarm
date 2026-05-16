@@ -7,9 +7,14 @@ from app.config.settings import settings
 from app.database.connection import init_db
 
 
+ADMIN_USER = "admin"
+ADMIN_PASS = f"{ADMIN_USER}-schema-auth"
+ADMIN_AUTH = (ADMIN_USER, ADMIN_PASS)
+
+
 def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -101,7 +106,7 @@ def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch)
 
         monkeypatch.setattr("app.routers.admin.get_db_connection", legacy_db_connection)
 
-        response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+        response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
 
         assert response.status_code == 200
         assert "legacy-user" in response.text

@@ -433,11 +433,6 @@ def fetch_paginated_users(limit: int, offset: int) -> List[Dict[str, Any]]:
             "open_id": "open_id",
             "is_alarm_on": "is_alarm_on",
             "favorite_zone": "COALESCE(favorite_zone, 0) as favorite_zone",
-            "departure_x": "departure_x",
-            "departure_y": "departure_y",
-            "arrival_x": "arrival_x",
-            "arrival_y": "arrival_y",
-            "last_message_at": "last_message_at",
             "route_updated_at": "route_updated_at",
             "language": "language",
         }
@@ -546,21 +541,26 @@ def fetch_admin_overview() -> Dict[str, Any]:
             if {"active", "is_alarm_on"}.issubset(user_columns)
             else 0
         )
+        route_ready_conditions: list[str] = []
         if {"departure_x", "departure_y", "arrival_x", "arrival_y"}.issubset(user_columns):
-            route_ready_users = _count_where(
-                cursor,
-                "users",
+            route_ready_conditions.append(
                 "departure_x IS NOT NULL AND departure_y IS NOT NULL "
-                "AND arrival_x IS NOT NULL AND arrival_y IS NOT NULL",
+                + "AND arrival_x IS NOT NULL AND arrival_y IS NOT NULL"
             )
-        elif {"departure_name", "arrival_name"}.issubset(user_columns):
-            route_ready_users = _count_where(
+        if {"departure_name", "arrival_name"}.issubset(user_columns):
+            route_ready_conditions.append(
+                "COALESCE(departure_name, '') != '' AND COALESCE(arrival_name, '') != ''"
+            )
+
+        route_ready_users = (
+            _count_where(
                 cursor,
                 "users",
-                "COALESCE(departure_name, '') != '' AND COALESCE(arrival_name, '') != ''",
+                " OR ".join(f"({condition})" for condition in route_ready_conditions),
             )
-        else:
-            route_ready_users = 0
+            if route_ready_conditions
+            else 0
+        )
 
     success_rate = 0
     if total_alarms_sent > 0:
@@ -730,9 +730,6 @@ async def dashboard(
                 "alarms": alarms,
                 "users": users,
                 "scheduler_status": scheduler_status,
-                "overview": overview,
-                "admin_actions": ADMIN_ACTION_CATALOG,
-                "bus_status": bus_notice_status,
                 "pagination": {
                     "page": page,
                     "page_size": page_size,
