@@ -1,10 +1,12 @@
-import pytest
 from datetime import datetime
 from html import unescape
+import os
 import re
 from typing import Any, cast
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.config.settings import settings
 from app.database.connection import get_db_connection
@@ -32,8 +34,10 @@ ADMIN_ACTION_ENDPOINTS = [
 ]
 
 ADMIN_USER = "admin"
-ADMIN_PASS = "secret123"
+ADMIN_CREDENTIAL_ENV = "KT_DEMO_TEST_ADMIN_PASS"
+ADMIN_PASS = os.environ.get(ADMIN_CREDENTIAL_ENV) or f"{ADMIN_USER}-test-auth"
 ADMIN_AUTH = (ADMIN_USER, ADMIN_PASS)
+INVALID_ADMIN_AUTH = (ADMIN_USER, f"invalid-{ADMIN_PASS}")
 SOURCE_URL = "https://source.example/smpa/20260516-001"
 
 
@@ -50,9 +54,9 @@ def _restore_bus_notice_state(crawler, cached_notices, last_update) -> None:
 
 def test_admin_dashboard_no_credentials(test_client, monkeypatch):
     """인증 정보 없이 접근 시 401 에러를 반환해야 함"""
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     response = test_client.get("/admin/dashboard")
     assert response.status_code == 401
     assert "WWW-Authenticate" in response.headers
@@ -60,17 +64,17 @@ def test_admin_dashboard_no_credentials(test_client, monkeypatch):
 
 def test_admin_dashboard_invalid_credentials(test_client, monkeypatch):
     """잘못된 인증 정보로 접근 시 401 에러를 반환해야 함"""
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
-    response = test_client.get("/admin/dashboard", auth=("admin", "wrongpassword"))
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
+    response = test_client.get("/admin/dashboard", auth=INVALID_ADMIN_AUTH)
     assert response.status_code == 401
 
 @pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_valid_credentials(test_client, monkeypatch):
     """올바른 인증 정보로 접근 시 200 OK와 HTML을 반환해야 함"""
     _set_admin_credentials(monkeypatch)
-    
+
     response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -80,8 +84,8 @@ def test_admin_dashboard_valid_credentials(test_client, monkeypatch):
 @pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, monkeypatch):
     """대시보드는 7개 운영 섹션과 실제 sqlite 기반 운영 신호를 표시해야 함"""
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
     monkeypatch.setattr(BusNoticeService, "crawler", object())
     monkeypatch.setattr(BusNoticeService, "cached_notices", {"bus-1": {"seq": "bus-1"}})
     monkeypatch.setattr(
@@ -143,7 +147,7 @@ def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, 
                 3,
                 2,
                 event_id,
-                '{"event_id": 1, "target": "route"}',
+                f'{{"event_id": {event_id}, "target": "route"}}',
                 '["Kakao timeout", "Invalid token"]',
                 "2026-05-16 02:00:00",
                 "2026-05-16 02:05:00",
@@ -183,7 +187,7 @@ def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, 
         )
         db.commit()
 
-    response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+    response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
     rendered = unescape(response.text)
 
     assert response.status_code == 200
@@ -198,7 +202,7 @@ def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, 
     assert "parser-v1" in rendered
     assert "종로경찰서" in rendered
     assert "120명" in rendered
-    assert "event_id: 1" in rendered
+    assert f"event_id: {event_id}" in rendered
     assert "Kakao timeout" in rendered
     assert "Invalid token" in rendered
     assert "3</strong> success" in rendered
@@ -215,7 +219,7 @@ def test_admin_dashboard_action_catalog_endpoints(test_client, monkeypatch):
     """관리자 대시보드의 수동 운영 액션 catalog는 기존 endpoint만 노출해야 함"""
     _set_admin_credentials(monkeypatch)
 
-    response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+    response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
 
     assert response.status_code == 200
     for endpoint in [
@@ -453,6 +457,40 @@ def test_admin_dashboard_renders_real_operational_aggregates_and_diagnostics(
                     2,
                 ),
             )
+            cursor.execute(
+                """
+                INSERT INTO users (
+                    bot_user_key, plusfriend_user_key, open_id,
+                    first_message_at, last_message_at, message_count, active,
+                    is_alarm_on, departure_name, departure_address,
+                    departure_x, departure_y, arrival_name, arrival_address,
+                    arrival_x, arrival_y, route_updated_at, marked_bus,
+                    language, favorite_zone
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "named-route-user",
+                    "plusfriend-named-route",
+                    "open-named-route",
+                    "2026-05-15 11:00:00",
+                    "2026-05-16 08:40:00",
+                    3,
+                    1,
+                    1,
+                    "잠실역",
+                    "서울 송파구 올림픽로",
+                    None,
+                    None,
+                    "서울역",
+                    "서울 용산구 한강대로",
+                    None,
+                    None,
+                    "2026-05-16 08:50:00",
+                    "741",
+                    "ko",
+                    1,
+                ),
+            )
             db.commit()
 
         response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
@@ -474,9 +512,13 @@ def test_admin_dashboard_renders_real_operational_aggregates_and_diagnostics(
             "recipient timeout",
             "partial provider failure",
             "2026-05-16 10:10:00 KST",
+            "2/2",
+            "100.0% route-ready",
             "route-ready",
             "강남역",
             "광화문역",
+            "잠실역",
+            "서울역",
             "470",
             "ko",
             "route-ready",
@@ -499,8 +541,8 @@ def test_admin_dashboard_missing_env_vars(test_client, monkeypatch):
     """환경변수가 설정되지 않은 경우 500 에러를 반환해야 함"""
     monkeypatch.setattr(settings, "ADMIN_USER", None)
     monkeypatch.setattr(settings, "ADMIN_PASS", None)
-    
-    response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+
+    response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
     assert response.status_code == 500
     assert response.json() == {"detail": "Admin credentials are not configured on the server"}
 
@@ -516,64 +558,64 @@ def test_admin_dashboard_empty_or_whitespace_env_vars(test_client, monkeypatch, 
     """환경변수가 빈 문자열이거나 공백만 있는 경우 500 에러를 반환해야 함"""
     monkeypatch.setattr(settings, "ADMIN_USER", admin_user)
     monkeypatch.setattr(settings, "ADMIN_PASS", admin_pass)
-    
-    response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+
+    response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
     assert response.status_code == 500
     assert response.json() == {"detail": "Admin credentials are not configured on the server"}
 
 @pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_pagination(test_client, monkeypatch):
     """Pagination 파라미터가 유효하게 작동하는지 검증"""
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     # Check page=1, page_size=10
-    response = test_client.get("/admin/dashboard?page=1&page_size=10", auth=("admin", "secret123"))
+    response = test_client.get("/admin/dashboard?page=1&page_size=10", auth=ADMIN_AUTH)
     assert response.status_code == 200
-    
+
     # Boundary cases: ge=1, le=200
     # Negative/zero page should fail validation
     for p in [0, -1]:
-        response = test_client.get(f"/admin/dashboard?page={p}", auth=("admin", "secret123"))
+        response = test_client.get(f"/admin/dashboard?page={p}", auth=ADMIN_AUTH)
         assert response.status_code == 422
-        
+
     # Zero page_size or too large should fail validation
     for ps in [0, 201]:
-        response = test_client.get(f"/admin/dashboard?page_size={ps}", auth=("admin", "secret123"))
+        response = test_client.get(f"/admin/dashboard?page_size={ps}", auth=ADMIN_AUTH)
         assert response.status_code == 422
 
     # Invalid type should fail
-    response = test_client.get("/admin/dashboard?page=invalid", auth=("admin", "secret123"))
+    response = test_client.get("/admin/dashboard?page=invalid", auth=ADMIN_AUTH)
     assert response.status_code == 422
 
 def test_trigger_crawling_unauthorized(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
     response = test_client.post("/admin/trigger-crawling")
     assert response.status_code == 401
 
 def test_trigger_crawling_csrf_failure(test_client, monkeypatch):
     """Origin/Referer 헤더 누락 시 403 Forbidden 반환 검증"""
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     # POST without Origin/Referer
-    response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"))
+    response = test_client.post("/admin/trigger-crawling", auth=ADMIN_AUTH)
     assert response.status_code == 403
     assert "Forbidden" in response.json()["detail"]
 
 def test_trigger_crawling_authorized(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     # Mock to avoid real crawling and ensure task key cleanup
     mock_crawl = AsyncMock()
     headers = {"Origin": "http://testserver"}
-    
+
     with monkeypatch.context() as m:
         m.setattr("app.routers.admin.crawl_and_sync_smpa_events", mock_crawl)
-        response = test_client.post("/admin/trigger-crawling", auth=("admin", "secret123"), headers=headers)
-        
+        response = test_client.post("/admin/trigger-crawling", auth=ADMIN_AUTH, headers=headers)
+
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
 
@@ -592,16 +634,16 @@ def test_trigger_crawling_authorized_with_api_key(test_client, monkeypatch):
     mock_crawl.assert_called_once()
 
 def test_trigger_bus_notice_authorized(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     mock_refresh = AsyncMock()
     headers = {"Origin": "http://testserver"}
-    
+
     with monkeypatch.context() as m:
         m.setattr("app.services.bus_notice_service.BusNoticeService.refresh", mock_refresh)
-        response = test_client.post("/admin/trigger-bus-notice", auth=("admin", "secret123"), headers=headers)
-        
+        response = test_client.post("/admin/trigger-bus-notice", auth=ADMIN_AUTH, headers=headers)
+
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
 
@@ -636,8 +678,8 @@ def test_trigger_bus_notice_rejects_invalid_api_key(test_client, monkeypatch):
     "/admin/trigger-test-alarm-for-user?user_id=12345",
 ])
 def test_new_trigger_endpoints_reject_missing_credentials(test_client, monkeypatch, endpoint):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
 
     response = test_client.post(endpoint)
 
@@ -691,16 +733,16 @@ def test_trigger_zone_check_authorized_with_api_key(test_client, monkeypatch):
     mock_zone_check.assert_called_once()
 
 def test_trigger_test_alarm_for_user_authorized(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
-    
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
+
     mock_route_check = AsyncMock()
     headers = {"Origin": "http://testserver"}
-    
+
     with monkeypatch.context() as m:
         m.setattr("app.services.event_service.EventService.check_route_events", mock_route_check)
-        response = test_client.post("/admin/trigger-test-alarm-for-user?user_id=12345", auth=("admin", "secret123"), headers=headers)
-        
+        response = test_client.post("/admin/trigger-test-alarm-for-user?user_id=12345", auth=ADMIN_AUTH, headers=headers)
+
     assert response.status_code == 200
     assert response.json() == {"message": "Scheduled"}
 

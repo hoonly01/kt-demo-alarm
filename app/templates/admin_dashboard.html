@@ -233,26 +233,43 @@
                     <span class="badge badge-danger">Scheduler stopped</span>
                 {% endif %}
             </div>
-            <div class="section-body grid grid-4">
-                <div class="metric">
-                    <span>Total Events</span>
-                    <strong>{{ stats.total_events }}</strong>
-                    <div class="subtext">Active: {{ stats.active_events }}</div>
+            <div class="section-body">
+                <div class="grid grid-4">
+                    <div class="metric">
+                        <span>Total Events</span>
+                        <strong>{{ stats.total_events }}</strong>
+                        <div class="subtext">Active: {{ stats.active_events }}</div>
+                    </div>
+                    <div class="metric">
+                        <span>Notification Tasks</span>
+                        <strong>{{ stats.total_alarms }}</strong>
+                        <div class="subtext">Failed/partial tasks: {{ stats.failed_alarm_tasks }}</div>
+                    </div>
+                    <div class="metric">
+                        <span>Alarms Sent</span>
+                        <strong>{{ stats.total_alarms_sent }}</strong>
+                        <div class="subtext">Success rate: {{ stats.success_rate }}% · Failures: {{ stats.failed_sends }}</div>
+                    </div>
+                    <div class="metric">
+                        <span>User Readiness</span>
+                        <strong>{{ stats.route_ready_users }}/{{ stats.total_users }}</strong>
+                        <div class="subtext">{{ stats.readiness_rate }}% route-ready · {{ stats.subscribed_users }} subscribed</div>
+                    </div>
                 </div>
-                <div class="metric">
-                    <span>Notification Tasks</span>
-                    <strong>{{ stats.total_alarms }}</strong>
-                    <div class="subtext">Failed/partial tasks: {{ stats.failed_alarm_tasks }}</div>
-                </div>
-                <div class="metric">
-                    <span>Alarms Sent</span>
-                    <strong>{{ stats.total_alarms_sent }}</strong>
-                    <div class="subtext">Success rate: {{ stats.success_rate }}% · Failures: {{ stats.failed_sends }}</div>
-                </div>
-                <div class="metric">
-                    <span>User Readiness</span>
-                    <strong>{{ stats.route_ready_users }}/{{ stats.total_users }}</strong>
-                    <div class="subtext">{{ stats.readiness_rate }}% route-ready · {{ stats.subscribed_users }} subscribed</div>
+                <div style="margin-top: 16px;">
+                    <div class="muted" style="margin-bottom: 8px;">Scheduler 상태 · 다음 실행 시각(KST)</div>
+                    {% if scheduler_status and scheduler_status.jobs %}
+                    <div class="grid grid-3">
+                        {% for job in scheduler_status.jobs %}
+                        <div class="metric">
+                            <span>{{ job.name }}</span>
+                            <strong style="font-size: 18px;">{{ job.next_run_display if job.next_run_display else 'N/A' }}</strong>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="empty">No scheduler jobs are currently registered.</div>
+                    {% endif %}
                 </div>
             </div>
         </section>
@@ -578,28 +595,6 @@
             </div>
         </section>
 
-        <section class="section" data-testid="scheduler-section">
-            <div class="section-header">
-                <div>
-                    <h2>Scheduler 상태</h2>
-                    <p>운영 배치의 다음 실행 시각을 KST로 확인합니다.</p>
-                </div>
-            </div>
-            <div class="section-body">
-                {% if scheduler_status and scheduler_status.jobs %}
-                <div class="grid grid-3">
-                    {% for job in scheduler_status.jobs %}
-                    <div class="metric">
-                        <span>{{ job.name }}</span>
-                        <strong style="font-size: 18px;">{{ job.next_run_display if job.next_run_display else 'N/A' }}</strong>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div class="empty">No scheduler jobs are currently registered.</div>
-                {% endif %}
-            </div>
-        </section>
     </main>
 </div>
 
