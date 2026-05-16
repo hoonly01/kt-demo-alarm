@@ -7,9 +7,14 @@ from app.config.settings import settings
 from app.database.connection import init_db
 
 
+ADMIN_USER = "admin"
+ADMIN_PASS = f"{ADMIN_USER}-schema-auth"
+ADMIN_AUTH = (ADMIN_USER, ADMIN_PASS)
+
+
 def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch):
-    monkeypatch.setattr(settings, "ADMIN_USER", "admin")
-    monkeypatch.setattr(settings, "ADMIN_PASS", "secret123")
+    monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
+    monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
 
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
@@ -57,6 +62,16 @@ def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch)
         )
         cursor.execute(
             """
+            INSERT INTO events (
+                title, location_name, severity_level, start_date, created_at, status
+            ) VALUES (
+                'legacy-event', 'legacy-location', 1, '2026-05-16 10:00:00',
+                '2026-05-16 01:00:00', 'active'
+            )
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE alarm_tasks (
                 task_id TEXT PRIMARY KEY,
                 alarm_type TEXT,
@@ -65,6 +80,16 @@ def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch)
                 successful_sends INTEGER,
                 failed_sends INTEGER,
                 created_at DATETIME
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (
+                task_id, alarm_type, status, total_recipients,
+                successful_sends, failed_sends, created_at
+            ) VALUES (
+                'legacy-task', 'bulk', 'failed', 3, 1, 2, '2026-05-16 02:00:00'
             )
             """
         )
@@ -81,10 +106,15 @@ def test_admin_dashboard_works_with_legacy_user_schema(test_client, monkeypatch)
 
         monkeypatch.setattr("app.routers.admin.get_db_connection", legacy_db_connection)
 
-        response = test_client.get("/admin/dashboard", auth=("admin", "secret123"))
+        response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
 
         assert response.status_code == 200
         assert "legacy-user" in response.text
+        assert "legacy-event" in response.text
+        assert "legacy schema" in response.text
+        assert "No source URL" in response.text
+        assert "legacy-task" in response.text
+        assert "not recorded" in response.text
     finally:
         os.unlink(db_path)
 
