@@ -1,19 +1,65 @@
+from datetime import datetime
+from collections.abc import Mapping
+from typing import override
+
+import httpx
 import pytest
 
+from app.config.settings import settings
 from app.services.crawling.smpa_coordinates import (
     GeocodeResult,
+    build_geocode_query_candidates,
     choose_representative_coordinate,
     is_jongno_result,
+    select_coordinate_for_event,
 )
+from app.services.crawling.smpa_parser import ParsedSmpaEvent
+
+TEST_KAKAO_API_KEY = "test-api-key"
+SMPA_TEST_SOURCE_URL = "https://example.test/smpa"
+SMPA_TEST_START_AT = datetime(2026, 5, 15, 9, 0)
+SMPA_TEST_END_AT = datetime(2026, 5, 15, 10, 0)
 
 
-def result(query, address, latitude, longitude):
+class KakaoKeywordTransport(httpx.AsyncBaseTransport):
+    """실제 httpx.AsyncClient 경로로 Kakao keyword 응답을 재현하는 인프로세스 전송 계층."""
+
+    def __init__(self, documents_by_query: Mapping[str, list[dict[str, str]]]) -> None:
+        self._documents_by_query: Mapping[str, list[dict[str, str]]] = documents_by_query
+        self.requested_queries: list[str] = []
+
+    @override
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        query = request.url.params["query"]
+        self.requested_queries.append(query)
+        return httpx.Response(
+            200,
+            json={"documents": self._documents_by_query.get(query, [])},
+            request=request,
+        )
+
+
+def result(query: str, address: str, latitude: float, longitude: float) -> GeocodeResult:
     return GeocodeResult(
         query=query,
         name=query,
         address=address,
         latitude=latitude,
         longitude=longitude,
+    )
+
+
+def smpa_event_for_endpoint(endpoint: str) -> ParsedSmpaEvent:
+    return ParsedSmpaEvent(
+        title=f"SMPA 집회 - {endpoint}",
+        raw_location=endpoint,
+        endpoint_candidates=(endpoint,),
+        attendees="10명",
+        police_station="종로서",
+        start_date=SMPA_TEST_START_AT,
+        end_date=SMPA_TEST_END_AT,
+        source_id="board-1",
+        source_url=SMPA_TEST_SOURCE_URL,
     )
 
 
@@ -63,4 +109,104 @@ def test_bbox_fallback_is_used_only_when_address_is_missing():
 
 def test_empty_geocode_results_are_rejected():
     with pytest.raises(ValueError):
-        choose_representative_coordinate("원문 경로", [])
+        _ = choose_representative_coordinate("원문 경로", [])
+
+
+@pytest.mark.parametrize(
+    ("candidate", "expected_replaced"),
+    [
+        ("舊)효자PB", "구)효자치안센터"),
+        ("문래역4出", "문래역 4번 출구"),
+        ("신교R", "신교교차로"),
+        ("효자PB", "효자치안센터"),
+    ],
+)
+def test_build_geocode_query_candidates_applies_generic_abbreviation_replacements(
+    candidate: str,
+    expected_replaced: str,
+) -> None:
+    queries = build_geocode_query_candidates(candidate, candidate)
+
+    assert queries == (candidate, expected_replaced)
+
+
+def test_build_geocode_query_candidates_adds_context_to_replaced_query():
+    queries = build_geocode_query_candidates("문래역4出", "문래역4出 -> 당산역10出 <문래동3가 등>")
+
+    assert queries == (
+        "문래역4出",
+        "문래역 4번 출구",
+        "문래동3가 문래역 4번 출구",
+        "문래역 4번 출구 문래동3가",
+    )
+
+
+@pytest.mark.parametrize("candidate", ["STAR", "XPB"])
+def test_build_geocode_query_candidates_keeps_latin_suffix_words(candidate: str) -> None:
+    queries = build_geocode_query_candidates(candidate, candidate)
+
+    assert queries == (candidate,)
+
+
+@pytest.mark.asyncio
+async def test_select_coordinate_for_event_uses_replaced_query_in_kakao_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = KakaoKeywordTransport(
+        {
+            "효자치안센터": [
+                {
+                    "place_name": "효자치안센터",
+                    "address_name": "서울 종로구 효자동",
+                    "road_address_name": "",
+                    "x": "126.9700",
+                    "y": "37.5800",
+                }
+            ]
+        }
+    )
+
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", TEST_KAKAO_API_KEY)
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("효자PB"),
+            client,
+        )
+
+    assert transport.requested_queries == ["효자PB", "효자치안센터"]
+    assert selected is not None
+    assert selected.selected_name == "효자치안센터"
+
+
+@pytest.mark.asyncio
+async def test_select_coordinate_for_event_keeps_coordinate_failure_visible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = KakaoKeywordTransport({})
+
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", TEST_KAKAO_API_KEY)
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("신교R"),
+            client,
+        )
+
+    assert transport.requested_queries == ["신교R", "신교교차로"]
+    assert selected is None
+
+
+@pytest.mark.asyncio
+async def test_select_coordinate_for_event_returns_without_query_when_kakao_key_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = KakaoKeywordTransport({"효자치안센터": []})
+
+    monkeypatch.setattr(settings, "KAKAO_LOCATION_API_KEY", "")
+    async with httpx.AsyncClient(transport=transport) as client:
+        selected = await select_coordinate_for_event(
+            smpa_event_for_endpoint("효자PB"),
+            client,
+        )
+
+    assert transport.requested_queries == []
+    assert selected is None
