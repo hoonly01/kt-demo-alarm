@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI):
     # 데이터베이스 초기화
     init_db()
     
+    # 서비스 초기화
+    BusNoticeService.initialize()
+    
     # 스케줄러 설정 및 시작
     from app.services.event_service import EventService
     from app.services.zone_alarm_service import ZoneAlarmService
