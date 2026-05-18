@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 import pytest
 from playwright.sync_api import expect, sync_playwright
 
@@ -7,6 +9,7 @@ from app.config.settings import settings
 ADMIN_USER = "admin"
 ADMIN_PASS = f"{ADMIN_USER}-playwright-auth"
 ADMIN_AUTH = (ADMIN_USER, ADMIN_PASS)
+ADMIN_DASHBOARD_PATH = "/admin/dashboard"
 
 ADMIN_SECTION_TEST_IDS = [
     "overview-section",
@@ -43,7 +46,7 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
     monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
     monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
 
-    response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
+    response = test_client.get(ADMIN_DASHBOARD_PATH, auth=ADMIN_AUTH)
     assert response.status_code == 200
 
     console_errors = []
@@ -55,7 +58,13 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
 
         def route_dashboard_and_block_non_local_requests(route):
             request_url = route.request.url
-            if request_url.startswith("http://testserver/admin/dashboard"):
+            parsed_url = urlsplit(request_url)
+            is_dashboard_request = (
+                parsed_url.scheme == "http"
+                and parsed_url.netloc == "testserver"
+                and parsed_url.path == ADMIN_DASHBOARD_PATH
+            )
+            if is_dashboard_request:
                 route.fulfill(status=200, content_type="text/html; charset=utf-8", body=response.text)
                 return
             if request_url.startswith(("http://testserver", "data:", "blob:", "about:")):
@@ -100,8 +109,12 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
                     "aria-expanded",
                     "false",
                 )
+            button.click()
+            expect(button).to_have_attribute("aria-expanded", "false")
+            for test_id in ADMIN_DETAIL_SECTION_TEST_IDS:
+                expect(page.get_by_test_id(test_id)).to_be_hidden()
 
-        page.goto("http://testserver/admin/dashboard#readiness", wait_until="domcontentloaded")
+        page.goto(f"http://testserver{ADMIN_DASHBOARD_PATH}#readiness", wait_until="domcontentloaded")
         expect(page.get_by_test_id("user-readiness-section")).to_be_visible()
         expect(page.get_by_test_id("dashboard-task-button-readiness")).to_have_attribute(
             "aria-expanded",
@@ -113,6 +126,16 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
             "alarm-section",
             "event-explorer-section",
         ):
+            expect(page.get_by_test_id(test_id)).to_be_hidden()
+        page.evaluate("window.location.hash = ''")
+        for test_id in ADMIN_DETAIL_SECTION_TEST_IDS:
+            expect(page.get_by_test_id(test_id)).to_be_hidden()
+        expect(page.get_by_test_id("dashboard-task-button-readiness")).to_have_attribute(
+            "aria-expanded",
+            "false",
+        )
+        page.evaluate("window.location.hash = '#not-a-dashboard-panel'")
+        for test_id in ADMIN_DETAIL_SECTION_TEST_IDS:
             expect(page.get_by_test_id(test_id)).to_be_hidden()
 
         browser.close()
