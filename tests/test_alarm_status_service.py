@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 from app.services.alarm_status_service import AlarmStatusService
 from app.database.connection import get_db_connection
-from app.utils.time_utils import utc_now_for_db
+from app.utils.time_utils import KST, utc_now, utc_now_for_db
 
 
 def assert_utc_storage(value: str) -> None:
@@ -167,6 +167,44 @@ def test_cleanup_old_tasks_compares_utc_storage_contract(clean_test_db):
             VALUES (?, ?, ?, ?)
             """,
             ("old-utc-task", "bulk", "completed", "2000-01-01T00:00:00+00:00"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("new-utc-task", "bulk", "pending", utc_now_for_db()),
+        )
+        db.commit()
+
+    deleted_count = AlarmStatusService.cleanup_old_tasks(days=30)
+
+    assert deleted_count == 1
+    with get_db_connection() as db:
+        remaining = [
+            row["task_id"]
+            for row in db.execute("SELECT task_id FROM alarm_tasks ORDER BY task_id").fetchall()
+        ]
+    assert remaining == ["new-utc-task"]
+
+
+def test_cleanup_old_tasks_normalizes_legacy_kst_naive_storage(clean_test_db):
+    """기존 naive KST 저장값도 실제 시점 기준으로 정리해야 함"""
+    legacy_old_instant = utc_now() - timedelta(days=30, hours=1)
+    legacy_kst_storage = (
+        legacy_old_instant.astimezone(KST)
+        .replace(tzinfo=None, microsecond=0)
+        .isoformat(timespec="seconds")
+    )
+
+    with get_db_connection() as db:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("legacy-kst-task", "bulk", "completed", legacy_kst_storage),
         )
         cursor.execute(
             """

@@ -6,7 +6,13 @@ from typing import Dict, Any, Optional, List
 import logging
 
 from app.database.connection import get_db_connection
-from app.utils.time_utils import format_utc_datetime_for_db, utc_now, utc_now_for_db
+from app.utils.time_utils import (
+    KST,
+    format_utc_datetime_for_db,
+    parse_db_timestamp,
+    utc_now,
+    utc_now_for_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +252,9 @@ class AlarmStatusService:
     def cleanup_old_tasks(days: int = 30) -> int:
         """
         오래된 알림 작업 정리
+
+        신규 UTC-aware 저장값과 기존 naive KST 저장값을 모두 실제 시점 기준으로
+        비교한다. 기존 row는 backfill하지 않고 cleanup 경계에서만 해석한다.
         
         Args:
             days: 보관 일수
@@ -255,19 +264,25 @@ class AlarmStatusService:
         """
         try:
             # Python에서 날짜 계산
-            cutoff_date = format_utc_datetime_for_db(utc_now() - timedelta(days=days))
+            cutoff_datetime = (utc_now() - timedelta(days=days)).replace(microsecond=0)
+            cutoff_date = format_utc_datetime_for_db(cutoff_datetime)
             
             with get_db_connection() as db:
                 cursor = db.cursor()
-                cursor.execute(
-                    """
-                    DELETE FROM alarm_tasks 
-                    WHERE datetime(created_at) < datetime(?)
-                    """,
-                    (cutoff_date,)
-                )
+                cursor.execute("SELECT task_id, created_at FROM alarm_tasks")
+                expired_task_ids = []
+                for row in cursor.fetchall():
+                    created_at = parse_db_timestamp(row["created_at"], naive_source_tz=KST)
+                    if created_at is not None and created_at < cutoff_datetime:
+                        expired_task_ids.append(row["task_id"])
+
+                if expired_task_ids:
+                    cursor.executemany(
+                        "DELETE FROM alarm_tasks WHERE task_id = ?",
+                        [(task_id,) for task_id in expired_task_ids],
+                    )
                 db.commit()
-                deleted_count = cursor.rowcount
+                deleted_count = len(expired_task_ids)
                 
                 logger.info(f"오래된 알림 작업 {deleted_count}개 정리 완료 ({days}일 이전, {cutoff_date} 기준)")
                 return deleted_count
