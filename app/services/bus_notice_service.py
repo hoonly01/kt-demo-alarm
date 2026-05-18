@@ -272,7 +272,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
                                 }
                             }
                         ]
@@ -304,7 +304,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
                                 }
                             }
                         ]
@@ -343,7 +343,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"ℹ️ 노선 {normalized_route}번 안내\n\n해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+                                    "text": f"ℹ️ 노선 {normalized_route}번 안내\n\n해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
                                 }
                             }
                         ]
@@ -380,7 +380,7 @@ class BusNoticeService:
         if detour_path:
             detour_short = detour_path[:60] + '...' if len(detour_path) > 60 else detour_path
             info_text += f"🔄 우회: {detour_short}\n"
-        info_text += "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\nhttps://topis.seoul.go.kr/map/openControlMap.do"
+        info_text += "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
         
         # 도메인 추가 (이미지 URL이 상대경로인 경우)
         full_image_url = image_url
