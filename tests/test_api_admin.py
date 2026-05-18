@@ -306,6 +306,22 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
                 1,
             ),
         )
+        cursor.execute(
+            """
+            INSERT INTO users (
+                bot_user_key, first_message_at, last_message_at,
+                route_updated_at, message_count, active
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "utc-user",
+                "2026-05-20T00:20:00+00:00",
+                "2026-05-20T00:30:00+00:00",
+                "2026-05-20T00:40:00+00:00",
+                1,
+                1,
+            ),
+        )
         db.commit()
 
     response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
@@ -318,6 +334,9 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
     assert "2026-05-15 20:00:00 KST" not in response.text
     assert "kst-user" in response.text
     assert "2026-05-20 KST" in response.text
+    assert "utc-user" in response.text
+    assert "2026-05-20 09:30:00 KST" in response.text
+    assert "2026-05-20 09:40:00 KST" in response.text
     assert "2026-05-21" not in response.text
 
 
