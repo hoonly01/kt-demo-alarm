@@ -53,18 +53,11 @@ def test_database_connections_use_current_settings_path_without_module_patch(
         db_generator.close()
 
 
-def test_crawling_service_db_paths_use_current_settings(monkeypatch, tmp_path):
-    """크롤링 서비스의 DB 파생 경로는 import-time 캐시가 아니라 현재 settings를 따른다."""
-    from app.services.crawling_service import BASE_DIR, get_data_dir, get_db_abs_path
+def test_database_runtime_settings_path_is_current(monkeypatch, tmp_path):
+    """DB 경로 해석은 중앙 settings 경계를 따른다."""
+    relative_db_path = tmp_path / "relative-test.db"
+    monkeypatch.setattr(settings, "DATABASE_PATH", str(relative_db_path))
 
-    relative_db_path = "relative-test.db"
-    monkeypatch.setattr(settings, "DATABASE_PATH", relative_db_path)
+    init_db()
 
-    assert get_db_abs_path() == BASE_DIR / relative_db_path
-    assert get_data_dir() == BASE_DIR
-
-    absolute_db_path = tmp_path / "absolute-test.db"
-    monkeypatch.setattr(settings, "DATABASE_PATH", str(absolute_db_path))
-
-    assert get_db_abs_path() == absolute_db_path
-    assert get_data_dir() == tmp_path
+    assert {"users", "events", "alarm_tasks"}.issubset(_table_names(str(relative_db_path)))

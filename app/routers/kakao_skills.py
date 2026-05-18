@@ -16,7 +16,7 @@ router = APIRouter(tags=["kakao-skills"])
 def _to_notification_event_data(event: object) -> dict:
     """사용자 출력 템플릿에 필요한 집회 필드만 변환"""
     return {
-        "description": getattr(event, "description", None),
+        "attendees": getattr(event, "attendees", "미상"),
         "location": getattr(event, "location_name"),
         "start_date": getattr(event, "start_date"),
         "end_date": getattr(event, "end_date", None),

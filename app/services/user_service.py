@@ -1,10 +1,10 @@
 """사용자 관리 서비스"""
 import logging
 import sqlite3
-from datetime import datetime
 from typing import Optional, Dict, Any
 from app.models.user import UserPreferences, InitialSetupRequest
 from app.utils.geo_utils import get_location_info
+from app.utils.time_utils import utc_now_for_db
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class UserService:
         """
         try:
             cursor = db.cursor()
-            now = datetime.now()
+            now = utc_now_for_db()
             
             # 기존 사용자 확인
             cursor.execute('SELECT * FROM users WHERE bot_user_key = ?', (bot_user_key,))
@@ -74,7 +74,7 @@ class UserService:
         """
         try:
             cursor = db.cursor()
-            now = datetime.now()
+            now = utc_now_for_db()
             
             if not plusfriend_key:
                 # plusfriend_key가 없는 경우 기존 레거시 로직(bot_user_key 기준) 사용
@@ -304,7 +304,7 @@ class UserService:
                 departure_info["x"], departure_info["y"],
                 arrival_info["name"], arrival_info["address"],
                 arrival_info["x"], arrival_info["y"],
-                datetime.now(),
+                utc_now_for_db(),
                 user_id
             ))
 
@@ -348,11 +348,12 @@ class UserService:
                 WHERE {} = ?
             '''
             # 1. plusfriend_user_key로 우선 업데이트 시도
-            cursor.execute(clear_sql.format("plusfriend_user_key"), (datetime.now(), user_id))
+            now = utc_now_for_db()
+            cursor.execute(clear_sql.format("plusfriend_user_key"), (now, user_id))
 
             # 2. 업데이트된 레코드가 없으면 bot_user_key로 폴백 시도
             if cursor.rowcount == 0:
-                cursor.execute(clear_sql.format("bot_user_key"), (datetime.now(), user_id))
+                cursor.execute(clear_sql.format("bot_user_key"), (now, user_id))
 
             if cursor.rowcount == 0:
                 logger.warning(f"경로 삭제 대상 사용자를 찾을 수 없음: {user_id}")
@@ -375,6 +376,7 @@ class UserService:
         """
         try:
             cursor = db.cursor()
+            now = utc_now_for_db()
 
             # 1. plusfriend_user_key 기준 업데이트
             cursor.execute('''
@@ -384,7 +386,7 @@ class UserService:
                 WHERE plusfriend_user_key = ?
             ''', (
                 marked_bus,
-                datetime.now(),
+                now,
                 user_id
             ))
 
@@ -397,7 +399,7 @@ class UserService:
                     WHERE bot_user_key = ?
                 ''', (
                     marked_bus,
-                    datetime.now(),
+                    now,
                     user_id
                 ))
 
@@ -447,7 +449,7 @@ class UserService:
             # 단순화를 위해 모두 업데이트 (None이면 NULL 처리될 수 있음에 유의)
             
             update_query = "UPDATE users SET route_updated_at = ?"
-            params = [datetime.now()]
+            params = [utc_now_for_db()]
             
             if dep_info:
                 update_query += ", departure_name=?, departure_address=?, departure_x=?, departure_y=?"
@@ -514,8 +516,8 @@ class UserService:
                 return {"success": False, "error": "사용자를 찾을 수 없습니다"}
             
             # 설정 업데이트
-            update_fields = []
-            update_values = []
+            update_fields: list[str] = []
+            update_values: list[str] = []
             
             if preferences.marked_bus:
                 update_fields.append("marked_bus = ?")

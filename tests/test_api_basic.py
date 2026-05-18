@@ -3,12 +3,23 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock
 
+from app.database.connection import get_db_connection
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def assert_utc_storage(value: str) -> None:
+    parsed = datetime.fromisoformat(value)
+    assert "T" in value
+    assert value.endswith("+00:00")
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
 
 
 def test_root_endpoint(test_client):
@@ -81,6 +92,36 @@ def test_events_list_empty(test_client, clean_test_db):
     data = response.json()
     assert isinstance(data, list)
     assert len(data) == 0
+
+
+def test_kakao_chat_writes_utc_aware_user_timestamps(test_client, clean_test_db):
+    payload = {
+        "userRequest": {
+            "utterance": "안녕",
+            "user": {
+                "id": "bot-kakao-utc",
+                "type": "botUserKey",
+                "properties": {"plusfriendUserKey": "pf-kakao-utc"},
+            },
+        }
+    }
+
+    response = test_client.post("/kakao/chat", json=payload)
+
+    assert response.status_code == 200
+    with get_db_connection() as db:
+        row = db.execute(
+            """
+            SELECT first_message_at, last_message_at
+            FROM users
+            WHERE bot_user_key = ?
+            """,
+            ("bot-kakao-utc",),
+        ).fetchone()
+
+    assert row is not None
+    assert_utc_storage(row["first_message_at"])
+    assert_utc_storage(row["last_message_at"])
 
 
 def test_scheduler_status(test_client):
