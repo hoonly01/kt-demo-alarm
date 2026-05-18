@@ -58,9 +58,19 @@ def setup_scheduler(crawling_func, route_check_func, bus_crawling_func=None, zon
             replace_existing=True
         )
 
+    # 30일 지난 오래된 이미지 파일 정리 작업 추가 (매일 새벽 3시)
+    from app.utils.file_cleanup import cleanup_old_files
+    scheduler.add_job(
+        cleanup_old_files,
+        CronTrigger(hour=3, minute=0, timezone='Asia/Seoul'),
+        id="daily_file_cleanup",
+        name="Daily Old Files Cleanup",
+        replace_existing=True
+    )
+
     bus_job_info = f", {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 버스 통제 공지 갱신" if bus_crawling_func else ""
     zone_job_info = f", {settings.ZONE_CHECK_HOUR:02d}:{settings.ZONE_CHECK_MINUTE:02d} 구역 확인" if zone_check_func else ""
-    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인{bus_job_info}{zone_job_info}")
+    logger.info(f"🚀 스케줄러 작업 등록 완료: 매일 {settings.CRAWLING_HOUR:02d}:{settings.CRAWLING_MINUTE:02d} 크롤링, {settings.ROUTE_CHECK_HOUR:02d}:{settings.ROUTE_CHECK_MINUTE:02d} 경로 확인, 03:00 오래된 파일 정리{bus_job_info}{zone_job_info}")
 
 
 def start_scheduler():
