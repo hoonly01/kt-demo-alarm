@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
+from bs4 import BeautifulSoup
 
 from app.config.settings import settings
 from app.database.connection import get_db_connection
@@ -17,12 +18,21 @@ from app.services.bus_notice_service import BusNoticeService
 
 ADMIN_SECTION_HEADINGS = [
     "Overview",
+    "업무 상세 보기",
     "데이터 수집 상태",
     "알림 발송 운영",
     "사용자 readiness",
     "수동 운영 액션",
     "이벤트/집회 탐색",
     "버스 공지 운영",
+]
+
+ADMIN_DETAIL_SECTION_TEST_IDS = [
+    "collection-section",
+    "bus-section",
+    "alarm-section",
+    "user-readiness-section",
+    "event-explorer-section",
 ]
 
 ADMIN_ACTION_ENDPOINTS = [
@@ -50,6 +60,12 @@ def _restore_bus_notice_state(crawler, cached_notices, last_update) -> None:
     BusNoticeService.crawler = crawler
     BusNoticeService.cached_notices = cached_notices
     BusNoticeService.last_update = last_update
+
+
+def _section_text(soup: BeautifulSoup, test_id: str) -> str:
+    section = soup.find(attrs={"data-testid": test_id})
+    assert section is not None
+    return section.get_text(" ", strip=True)
 
 
 def test_admin_dashboard_no_credentials(test_client, monkeypatch):
@@ -83,7 +99,7 @@ def test_admin_dashboard_valid_credentials(test_client, monkeypatch):
 
 @pytest.mark.usefixtures("clean_test_db")
 def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, monkeypatch):
-    """대시보드는 7개 운영 섹션과 실제 sqlite 기반 운영 신호를 표시해야 함"""
+    """대시보드는 Overview 위험 신호와 기본 hidden 업무 패널을 실제 sqlite 경로로 표시해야 함"""
     monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
     monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
     monkeypatch.setattr(BusNoticeService, "crawler", object())
@@ -189,6 +205,7 @@ def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, 
 
     response = test_client.get("/admin/dashboard", auth=ADMIN_AUTH)
     rendered = unescape(response.text)
+    soup = BeautifulSoup(response.text, "html.parser")
 
     assert response.status_code == 200
     for heading in ADMIN_SECTION_HEADINGS:
@@ -212,6 +229,38 @@ def test_admin_dashboard_redesign_sections_and_operational_signals(test_client, 
     assert "Crawler initialized" in rendered
     assert "cached_count" in rendered
     assert "2026-05-16 12:00:00 KST" in rendered
+
+    overview_text = _section_text(soup, "overview-section")
+    readiness_text = _section_text(soup, "user-readiness-section")
+    assert "Latest collected: 2026-05-16 10:00:00 KST" in overview_text
+    assert "Latest event update: 2026-05-16 10:10:00 KST" in overview_text
+    assert "Success rate: 60.0%" in overview_text
+    assert "Failures: 2" in overview_text
+    assert "Crawler initialized" in overview_text
+    assert "cached_count: 1" in overview_text
+    assert "User Readiness" not in overview_text
+    assert "Route ready" not in overview_text
+    assert "bot-ready-user" not in overview_text
+    assert "Route ready" in readiness_text
+    assert "Bus: 470" in readiness_text
+    assert "Language: ko" in readiness_text
+
+    for test_id in ("overview-section", "action-section"):
+        section = soup.find(attrs={"data-testid": test_id})
+        assert section is not None
+        assert not section.has_attr("hidden")
+    for test_id in ADMIN_DETAIL_SECTION_TEST_IDS:
+        section = soup.find(attrs={"data-testid": test_id})
+        assert section is not None
+        assert section.has_attr("hidden")
+
+    task_buttons = soup.find_all("button", attrs={"data-dashboard-panel-button": True})
+    assert len(task_buttons) == len(ADMIN_DETAIL_SECTION_TEST_IDS)
+    for button in task_buttons:
+        controls = button.get("aria-controls")
+        assert controls
+        assert button.get("aria-expanded") == "false"
+        assert soup.find(id=controls) is not None
 
 
 @pytest.mark.usefixtures("clean_test_db")
