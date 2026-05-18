@@ -4,9 +4,8 @@ import asyncio
 import logging
 import json
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone, tzinfo
+from datetime import timezone, tzinfo
 from typing import Dict, Any, List, Set
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -21,6 +20,7 @@ from app.services.event_service import EventService
 from app.services.bus_notice_service import BusNoticeService
 from app.services.crawling import crawl_and_sync_smpa_events
 from app.services.zone_alarm_service import ZoneAlarmService
+from app.utils.time_utils import KST, parse_datetime_value
 
 from urllib.parse import urlparse
 
@@ -39,8 +39,6 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(os.path.dirna
 _background_tasks: dict[str, asyncio.Task[Any]] = {}
 _task_lock = asyncio.Lock()
 
-KST_ZONE_NAME = "Asia/Seoul"
-KST = ZoneInfo(KST_ZONE_NAME)
 DASHBOARD_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S KST"
 DASHBOARD_DATE_FORMAT = "%Y-%m-%d KST"
 DASHBOARD_RECENT_LIMIT = 100
@@ -611,51 +609,13 @@ def get_bus_notice_snapshot() -> Dict[str, Any]:
         ),
     }
 
-def _parse_datetime_value(value: Any) -> datetime | None:
-    if value in (None, ""):
-        return None
-
-    if isinstance(value, datetime):
-        return value
-
-    if isinstance(value, (int, float)):
-        return _datetime_from_epoch(value)
-
-    text = str(value).strip()
-    if not text:
-        return None
-
-    if text.isdigit() and len(text) >= 10:
-        parsed_epoch = _datetime_from_epoch(int(text))
-        if parsed_epoch is not None:
-            return parsed_epoch
-
-    for parser in (datetime.fromisoformat,):
-        try:
-            return parser(text.replace("Z", "+00:00"))
-        except ValueError:
-            pass
-
-    return None
-
-
-def _datetime_from_epoch(value: int | float) -> datetime | None:
-    timestamp = float(value)
-    if timestamp > 1_000_000_000_000:
-        timestamp /= 1000.0
-    try:
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
-
-
 def _format_datetime_as_kst(
     value: Any,
     *,
     naive_source_tz: tzinfo,
     output_format: str = DASHBOARD_DATETIME_FORMAT,
 ) -> str:
-    parsed = _parse_datetime_value(value)
+    parsed = parse_datetime_value(value)
     if parsed is None:
         return "" if value in (None, "") else str(value)
 
@@ -674,7 +634,7 @@ def _format_kst_local_datetime(value: Any) -> str:
 
 
 def _format_user_created_at(value: Any) -> str:
-    parsed = _parse_datetime_value(value)
+    parsed = parse_datetime_value(value)
     if parsed is not None:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=KST)

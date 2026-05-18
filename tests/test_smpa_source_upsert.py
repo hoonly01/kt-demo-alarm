@@ -48,7 +48,12 @@ def selected_coordinate(address="서울특별시 종로구 종로1가", latitude
 
 def test_insert_skip_update_with_real_sqlite_connection():
     conn = make_conn()
-    first = prepare_event_candidate(parsed_event(), selected_coordinate())
+    first_collected_at = datetime(2026, 5, 16, 1, 0, tzinfo=timezone.utc)
+    first = prepare_event_candidate(
+        parsed_event(),
+        selected_coordinate(),
+        collected_at=first_collected_at,
+    )
 
     assert sync_event_candidates(conn, [first]).to_dict() == {
         "inserted": 1,
@@ -63,13 +68,29 @@ def test_insert_skip_update_with_real_sqlite_connection():
         "errors": 0,
     }
 
-    updated = prepare_event_candidate(parsed_event(attendees="500명"), selected_coordinate())
+    updated_collected_at = datetime(2026, 5, 16, 2, 0, tzinfo=timezone.utc)
+    updated = prepare_event_candidate(
+        parsed_event(attendees="500명"),
+        selected_coordinate(),
+        collected_at=updated_collected_at,
+    )
     result = sync_event_candidates(conn, [updated])
 
     assert result.to_dict() == {"inserted": 0, "updated": 1, "skipped": 0, "errors": 0}
-    row = conn.execute("SELECT attendees, source_payload_hash FROM events").fetchone()
+    row = conn.execute(
+        """
+        SELECT attendees, source_payload_hash, start_date, end_date,
+               collected_at, created_at, updated_at
+        FROM events
+        """
+    ).fetchone()
     assert row["attendees"] == "500명"
     assert row["source_payload_hash"] == updated.source_payload_hash
+    assert row["start_date"] == "2026-05-15 11:00:00"
+    assert row["end_date"] == "2026-05-15 13:00:00"
+    assert row["collected_at"] == "2026-05-16T02:00:00+00:00"
+    assert row["created_at"].endswith("+00:00")
+    assert row["updated_at"].endswith("+00:00")
 
 
 def test_empty_source_record_hash_is_rejected_without_db_write():
