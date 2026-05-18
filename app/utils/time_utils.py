@@ -89,7 +89,7 @@ def parse_db_timestamp(value: object, *, naive_source_tz: tzinfo) -> datetime | 
 
 def _datetime_from_epoch(value: int | float) -> datetime | None:
     timestamp = float(value)
-    if timestamp > EPOCH_MILLISECONDS_THRESHOLD:
+    if timestamp >= EPOCH_MILLISECONDS_THRESHOLD:
         timestamp /= 1000.0
     try:
         return datetime.fromtimestamp(timestamp, tz=UTC)
