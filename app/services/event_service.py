@@ -51,7 +51,7 @@ class EventService:
             id=row["id"],
             title=row["title"],
             description=row["description"],
-            attendees=EventService._row_value(row, "attendees", "미상") or "미상",
+            attendees=str(EventService._row_value(row, "attendees") or "미상"),
             police_station=EventService._row_value(row, "police_station"),
             location_name=row["location_name"],
             location_address=row["location_address"],
