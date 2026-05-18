@@ -3,10 +3,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.utils.time_utils import (
+    EPOCH_MILLISECONDS_THRESHOLD,
     KST,
     format_kst_wall_clock_for_db,
     format_utc_datetime_for_db,
     parse_db_timestamp,
+    parse_datetime_value,
     utc_now,
     utc_now_for_db,
 )
@@ -42,6 +44,15 @@ def test_parse_db_timestamp_applies_explicit_legacy_source_timezone():
     assert sqlite_utc.utcoffset() == timedelta(0)
     assert aware_utc is not None
     assert aware_utc.utcoffset() == timedelta(0)
+
+
+def test_parse_datetime_value_treats_epoch_threshold_as_milliseconds():
+    parsed = parse_datetime_value(EPOCH_MILLISECONDS_THRESHOLD)
+
+    assert parsed == datetime.fromtimestamp(
+        EPOCH_MILLISECONDS_THRESHOLD / 1000,
+        tz=timezone.utc,
+    )
 
 
 def test_kst_wall_clock_storage_preserves_naive_smpa_schedule():

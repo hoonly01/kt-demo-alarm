@@ -334,9 +334,10 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
     assert "2026-05-15 20:00:00 KST" not in response.text
     assert "kst-user" in response.text
     assert "2026-05-20 KST" in response.text
-    assert "utc-user" in response.text
-    assert "2026-05-20 09:30:00 KST" in response.text
-    assert "2026-05-20 09:40:00 KST" in response.text
+    utc_user_row = re.search(r"<tr>[\s\S]*?utc-user[\s\S]*?</tr>", response.text)
+    assert utc_user_row is not None
+    assert "2026-05-20 09:30:00 KST" in utc_user_row.group(0)
+    assert "2026-05-20 09:40:00 KST" in utc_user_row.group(0)
     assert "2026-05-21" not in response.text
 
 
