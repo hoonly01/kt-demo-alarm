@@ -11,9 +11,59 @@ from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
 
+EVENT_RESPONSE_COLUMNS = (
+    "id",
+    "title",
+    "description",
+    "attendees",
+    "police_station",
+    "location_name",
+    "location_address",
+    "latitude",
+    "longitude",
+    "start_date",
+    "end_date",
+    "category",
+    "severity_level",
+    "status",
+    "created_at",
+    "updated_at",
+)
+EVENT_RESPONSE_SELECT_COLUMNS = ", ".join(EVENT_RESPONSE_COLUMNS)
+
 
 class EventService:
     """이벤트/집회 관리 비즈니스 로직"""
+
+    @staticmethod
+    def _row_value(row: sqlite3.Row, key: str, default: Any = None) -> Any:
+        """sqlite3.Row에서 신규 컬럼이 없는 기존 테스트 행도 안전하게 읽는다."""
+        try:
+            return row[key]
+        except (IndexError, KeyError):
+            return default
+
+    @staticmethod
+    def _event_response_from_row(row: sqlite3.Row) -> EventResponse:
+        """DB row를 공개 이벤트 응답 모델로 변환한다."""
+        return EventResponse(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            attendees=EventService._row_value(row, "attendees", "미상") or "미상",
+            police_station=EventService._row_value(row, "police_station"),
+            location_name=row["location_name"],
+            location_address=row["location_address"],
+            latitude=row["latitude"],
+            longitude=row["longitude"],
+            start_date=row["start_date"],
+            end_date=row["end_date"],
+            category=row["category"],
+            severity_level=row["severity_level"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     @staticmethod
     def create_event(event_data: EventCreate, db: sqlite3.Connection) -> Dict[str, Any]:
@@ -30,13 +80,16 @@ class EventService:
         try:
             cursor = db.cursor()
             cursor.execute('''
-                INSERT INTO events (title, description, location_name, location_address,
+                INSERT INTO events (title, description, attendees, police_station,
+                                  location_name, location_address,
                                   latitude, longitude, start_date, end_date, category, 
                                   severity_level, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_data.title,
                 event_data.description,
+                event_data.attendees or "미상",
+                event_data.police_station,
                 event_data.location_name,
                 event_data.location_address,
                 event_data.latitude,
@@ -95,7 +148,8 @@ class EventService:
             where_clause = " WHERE " + " AND ".join(where_conditions) if where_conditions else ""
             
             query = f'''
-                SELECT id, title, description, location_name, location_address,
+                SELECT id, title, description, attendees, police_station,
+                       location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events{where_clause}
@@ -108,22 +162,7 @@ class EventService:
             
             events = []
             for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
+                events.append(EventService._event_response_from_row(row))
 
             return events
 
@@ -170,8 +209,9 @@ class EventService:
             dep_lon, dep_lat, arr_lon, arr_lat = user_row["departure_x"], user_row["departure_y"], user_row["arrival_x"], user_row["arrival_y"]
             
             # 활성 집회 목록 조회
-            cursor.execute('''
-                SELECT * FROM events 
+            cursor.execute(f'''
+                SELECT {EVENT_RESPONSE_SELECT_COLUMNS}
+                FROM events
                 WHERE status = 'active' AND start_date > datetime('now', '+9 hours')
                 ORDER BY start_date
             ''')
@@ -188,29 +228,11 @@ class EventService:
 
                 # 정확한 경로 기반 검사 (Mobility API 사용)
                 if route_coordinates and is_event_near_route_accurate(route_coordinates, event_lat, event_lon):
-                    route_events.append(EventResponse(
-                        id=row["id"], title=row["title"], description=row["description"],
-                        location_name=row["location_name"], location_address=row["location_address"],
-                        latitude=row["latitude"], longitude=row["longitude"],
-                        start_date=datetime.fromisoformat(row["start_date"]),
-                        end_date=datetime.fromisoformat(row["end_date"]) if row["end_date"] else None,
-                        category=row["category"], severity_level=row["severity_level"], status=row["status"],
-                        created_at=datetime.fromisoformat(row["created_at"]),
-                        updated_at=datetime.fromisoformat(row["updated_at"])
-                    ))
+                    route_events.append(EventService._event_response_from_row(row))
                 # Mobility API 실패 시 기존 직선 방식으로 폴백
                 elif not route_coordinates and is_point_near_route(dep_lat, dep_lon, arr_lat, arr_lon, event_lat, event_lon):
                     logger.warning("Mobility API 실패로 직선 거리 방식 사용")
-                    route_events.append(EventResponse(
-                        id=row["id"], title=row["title"], description=row["description"],
-                        location_name=row["location_name"], location_address=row["location_address"],
-                        latitude=row["latitude"], longitude=row["longitude"],
-                        start_date=datetime.fromisoformat(row["start_date"]),
-                        end_date=datetime.fromisoformat(row["end_date"]) if row["end_date"] else None,
-                        category=row["category"], severity_level=row["severity_level"], status=row["status"],
-                        created_at=datetime.fromisoformat(row["created_at"]),
-                        updated_at=datetime.fromisoformat(row["updated_at"])
-                    ))
+                    route_events.append(EventService._event_response_from_row(row))
             
             route_info = {
                 "departure": {"name": user_row["departure_name"], "address": user_row["departure_address"], "lat": dep_lat, "lon": dep_lon},
@@ -226,6 +248,7 @@ class EventService:
                         "id": event.id,
                         "title": event.title,
                         "description": event.description,
+                        "attendees": event.attendees,
                         "location": event.location_name,
                         "latitude": event.latitude,
                         "longitude": event.longitude,
@@ -314,6 +337,7 @@ class EventService:
                                         "id": event.id,
                                         "title": event.title,
                                         "description": event.description,
+                                        "attendees": event.attendees,
                                         "location": event.location_name,
                                         "latitude": event.latitude,
                                         "longitude": event.longitude,
@@ -410,7 +434,8 @@ class EventService:
             # 또는 문자열로 변환하여 비교: now_kst.strftime("%Y-%m-%d %H:%M:%S")
             
             cursor.execute('''
-                SELECT id, title, description, location_name, location_address,
+                SELECT id, title, description, attendees, police_station,
+                       location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
@@ -421,22 +446,7 @@ class EventService:
             
             events = []
             for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
+                events.append(EventService._event_response_from_row(row))
 
             return events
 
@@ -466,7 +476,8 @@ class EventService:
             
             jongno_pattern = '%종로%'
             cursor.execute('''
-                SELECT id, title, description, location_name, location_address,
+                SELECT id, title, description, attendees, police_station,
+                       location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
                        severity_level, status, created_at, updated_at
                 FROM events
@@ -478,22 +489,7 @@ class EventService:
             
             events = []
             for row in cursor.fetchall():
-                events.append(EventResponse(
-                    id=row["id"],
-                    title=row["title"],
-                    description=row["description"],
-                    location_name=row["location_name"],
-                    location_address=row["location_address"],
-                    latitude=row["latitude"],
-                    longitude=row["longitude"],
-                    start_date=row["start_date"],
-                    end_date=row["end_date"],
-                    category=row["category"],
-                    severity_level=row["severity_level"],
-                    status=row["status"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"]
-                ))
+                events.append(EventService._event_response_from_row(row))
 
             return events
 

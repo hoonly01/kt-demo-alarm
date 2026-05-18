@@ -59,9 +59,20 @@ class Settings(BaseSettings):
     ZONE_CHECK_HOUR: int = 13
     ZONE_CHECK_MINUTE: int = 0
 
+    # --- SMPA Crawling ---
+    SMPA_BASE_URL: str = "https://smpa.go.kr"
+    SMPA_LIST_PATH: str = "/user/nd54882.do"
+    SMPA_LIST_LIMIT: int = 3
+    SMPA_HTTP_TIMEOUT_SECONDS: float = 20.0
+    SMPA_HTTP_RETRY_COUNT: int = 3
+    SMPA_HTTP_RETRY_DELAY_SECONDS: float = 0.5
+    SMPA_USER_AGENT: str = "kt-demo-alarm-smpa-crawler/1.0"
+
     # --- Notification ---
     BATCH_SIZE: int = 100
     NOTIFICATION_TIMEOUT: float = 10.0
+    KAKAO_TASK_RESULT_POLL_ATTEMPTS: int = 5
+    KAKAO_TASK_RESULT_POLL_DELAY_SECONDS: float = 0.5
 
     # --- Geo/Route ---
     ROUTE_THRESHOLD_METERS: int = 500

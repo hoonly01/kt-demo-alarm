@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     from app.services.event_service import EventService
     from app.services.zone_alarm_service import ZoneAlarmService
     setup_scheduler(
-        crawling_func=CrawlingService.crawl_and_sync_events,  # 실제 크롤링 서비스 연동
+        crawling_func=CrawlingService.crawl_and_sync_events,  # AI-driven SPATIC/SMPA 통합 동기화
         route_check_func=EventService.scheduled_route_check,
         bus_crawling_func=BusNoticeService.refresh,           # 버스 통제 공지 재크롤링
         zone_check_func=ZoneAlarmService.scheduled_zone_check,

@@ -18,7 +18,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 def _to_notification_event_data(event: EventResponse) -> dict:
     """사용자 출력 템플릿에 필요한 집회 필드만 변환"""
     return {
-        "description": event.description,
+        "attendees": event.attendees,
         "location": event.location_name,
         "start_date": event.start_date,
         "end_date": event.end_date,
@@ -43,6 +43,7 @@ async def create_event(
         if row:
             return EventResponse(
                 id=row["id"], title=row["title"], description=row["description"],
+                attendees=row["attendees"], police_station=row["police_station"],
                 location_name=row["location_name"], location_address=row["location_address"],
                 latitude=row["latitude"], longitude=row["longitude"],
                 start_date=row["start_date"], end_date=row["end_date"], category=row["category"],

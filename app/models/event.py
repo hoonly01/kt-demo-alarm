@@ -8,6 +8,8 @@ class EventCreate(BaseModel):
     """집회 생성 요청 모델"""
     title: str = Field(..., description="집회 제목")
     description: Optional[str] = Field(None, description="집회 설명")
+    attendees: str = Field("미상", description="신고 인원")
+    police_station: Optional[str] = Field(None, description="관할 경찰서")
     location_name: str = Field(..., description="집회 장소명")
     location_address: Optional[str] = Field(None, description="집회 주소")
     latitude: float = Field(..., description="위도")
@@ -24,6 +26,8 @@ class EventResponse(BaseModel):
     id: int
     title: str
     description: Optional[str]
+    attendees: str = "미상"
+    police_station: Optional[str] = None
     location_name: str
     location_address: Optional[str]
     latitude: float
