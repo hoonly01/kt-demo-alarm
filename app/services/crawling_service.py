@@ -397,6 +397,10 @@ class CrawlingService:
 
         if not settings.WORKS_AI_API_KEY or not settings.WORKS_AI_API_KEY.strip():
             logger.error("❌ WORKS_AI_API_KEY 환경변수가 설정되지 않았습니다.")
+            return {
+                "success": False,
+                "message": "WORKS_AI_API_KEY 환경변수가 설정되지 않아 크롤링 파이프라인을 중단합니다."
+            }
 
         return await asyncio.to_thread(cls._run_sync_pipeline)
 
