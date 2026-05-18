@@ -33,7 +33,7 @@ class EventResponse(BaseModel):
     category: Optional[str]
     severity_level: int
     status: str
-    image_path: Optional[str]
+    image_path: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
