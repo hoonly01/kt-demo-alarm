@@ -2,9 +2,9 @@
 from fastapi import APIRouter, Request, HTTPException
 import logging
 import json
-from datetime import datetime
 
 from app.models.kakao import KakaoRequest
+from app.utils.time_utils import utc_now_for_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/kakao", tags=["kakao"])
@@ -25,11 +25,12 @@ async def kakao_chat_fallback(request: KakaoRequest):
 
     from app.database.connection import get_db_connection
 
-    with get_db_connection() as db:
-        cursor = db.cursor()
+    if plusfriend_key:
+        with get_db_connection() as db:
+            cursor = db.cursor()
+            now = utc_now_for_db()
 
-        # plusfriend_user_key로 기존 사용자 조회 (가장 안정적)
-        if plusfriend_key:
+            # plusfriend_user_key로 기존 사용자 조회 (가장 안정적)
             cursor.execute(
                 "SELECT bot_user_key, open_id FROM users WHERE plusfriend_user_key = ?",
                 (plusfriend_key,)
@@ -40,7 +41,7 @@ async def kakao_chat_fallback(request: KakaoRequest):
                 # 이미 존재 → bot_user_key 업데이트
                 cursor.execute(
                     "UPDATE users SET bot_user_key = ?, last_message_at = ?, message_count = message_count + 1 WHERE plusfriend_user_key = ?",
-                    (bot_user_key, datetime.now(), plusfriend_key)
+                    (bot_user_key, now, plusfriend_key)
                 )
                 db.commit()
                 logger.info(f"사용자 업데이트: plusfriend={plusfriend_key}")
@@ -55,7 +56,7 @@ async def kakao_chat_fallback(request: KakaoRequest):
                     # 웹훅 사용자 연결
                     cursor.execute(
                         "UPDATE users SET bot_user_key = ?, plusfriend_user_key = ?, last_message_at = ? WHERE id = ?",
-                        (bot_user_key, plusfriend_key, datetime.now(), orphan["id"])
+                        (bot_user_key, plusfriend_key, now, orphan["id"])
                     )
                     db.commit()
                     logger.info(f"✅ 웹훅 사용자 연결: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
@@ -64,7 +65,7 @@ async def kakao_chat_fallback(request: KakaoRequest):
                     cursor.execute('''
                         INSERT INTO users (bot_user_key, plusfriend_user_key, first_message_at, last_message_at, message_count, active)
                         VALUES (?, ?, ?, ?, 1, 1)
-                    ''', (bot_user_key, plusfriend_key, datetime.now(), datetime.now()))
+                    ''', (bot_user_key, plusfriend_key, now, now))
                     db.commit()
                     logger.info(f"새 사용자 등록: botUserKey={bot_user_key}, plusfriend={plusfriend_key}")
 
@@ -117,6 +118,7 @@ async def kakao_channel_webhook(request: Request):
     try:
         with get_db_connection() as db:
             cursor = db.cursor()
+            now = utc_now_for_db()
 
             # open_id로 기존 사용자 조회 (plusfriend_user_key도 확인)
             cursor.execute(
@@ -142,7 +144,7 @@ async def kakao_channel_webhook(request: Request):
                     cursor.execute('''
                         INSERT INTO users (open_id, first_message_at, last_message_at, message_count, active)
                         VALUES (?, ?, ?, 1, 1)
-                    ''', (open_id, datetime.now(), datetime.now()))
+                    ''', (open_id, now, now))
                     db.commit()
                     logger.info(f"신규 사용자 생성 (open_id만): {open_id}")
 

@@ -1,12 +1,12 @@
 """알림 상태 추적 서비스"""
 import json
-import sqlite3
 import uuid
-from datetime import datetime
+from datetime import timedelta
 from typing import Dict, Any, Optional, List
 import logging
 
 from app.database.connection import get_db_connection
+from app.utils.time_utils import format_utc_datetime_for_db, utc_now, utc_now_for_db
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ class AlarmStatusService:
             str: 생성된 task_id
         """
         task_id = str(uuid.uuid4())
+        created_at = utc_now_for_db()
         
         with get_db_connection() as db:
             cursor = db.cursor()
@@ -50,7 +51,7 @@ class AlarmStatusService:
                     total_recipients,
                     event_id,
                     json.dumps(request_data) if request_data else None,
-                    datetime.now().isoformat()
+                    created_at
                 )
             )
             db.commit()
@@ -83,10 +84,11 @@ class AlarmStatusService:
         try:
             with get_db_connection() as db:
                 cursor = db.cursor()
+                updated_at = utc_now_for_db()
                 
                 # 기본 업데이트 쿼리 구성
                 update_fields = ["status = ?", "updated_at = ?"]
-                update_values = [status, datetime.now().isoformat()]
+                update_values: list[str | int] = [status, updated_at]
                 
                 # 선택적 필드 추가
                 if successful_sends is not None:
@@ -108,7 +110,7 @@ class AlarmStatusService:
                 # 완료 상태인 경우 완료 시간 추가
                 if status in ["completed", "failed", "partial"]:
                     update_fields.append("completed_at = ?")
-                    update_values.append(datetime.now().isoformat())
+                    update_values.append(updated_at)
                 
                 # 쿼리 실행
                 query = f"UPDATE alarm_tasks SET {', '.join(update_fields)} WHERE task_id = ?"
@@ -212,7 +214,7 @@ class AlarmStatusService:
                         successful_sends, failed_sends, event_id,
                         created_at, updated_at, completed_at
                     FROM alarm_tasks 
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ?
                     """,
                     (limit,)
@@ -252,17 +254,15 @@ class AlarmStatusService:
             int: 삭제된 작업 수
         """
         try:
-            from datetime import timedelta
-            
             # Python에서 날짜 계산
-            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            cutoff_date = format_utc_datetime_for_db(utc_now() - timedelta(days=days))
             
             with get_db_connection() as db:
                 cursor = db.cursor()
                 cursor.execute(
                     """
                     DELETE FROM alarm_tasks 
-                    WHERE created_at < ?
+                    WHERE datetime(created_at) < datetime(?)
                     """,
                     (cutoff_date,)
                 )
