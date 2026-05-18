@@ -1,8 +1,19 @@
 """Test alarm status service functionality"""
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from app.services.alarm_status_service import AlarmStatusService
+from app.database.connection import get_db_connection
+from app.utils.time_utils import KST, utc_now, utc_now_for_db
+
+
+def assert_utc_storage(value: str) -> None:
+    parsed = datetime.fromisoformat(value)
+    assert "T" in value
+    assert value.endswith("+00:00")
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
+    assert parsed.microsecond == 0
 
 
 def test_create_alarm_task_basic(clean_test_db):
@@ -21,6 +32,7 @@ def test_create_alarm_task_basic(clean_test_db):
     assert status["alarm_type"] == "individual"
     assert status["status"] == "pending"
     assert status["total_recipients"] == 1
+    assert_utc_storage(status["created_at"])
 
 
 def test_create_alarm_task_with_data(clean_test_db):
@@ -59,6 +71,7 @@ def test_update_alarm_task_status_success(clean_test_db):
     
     status = AlarmStatusService.get_alarm_task_status(task_id)
     assert status["status"] == "processing"
+    assert_utc_storage(status["updated_at"])
     
     # Update to completed
     success = AlarmStatusService.update_alarm_task_status(
@@ -74,6 +87,8 @@ def test_update_alarm_task_status_success(clean_test_db):
     assert status["failed_sends"] == 1
     assert status["success_rate"] == 80.0  # 4/5 = 80%
     assert status["completed_at"] is not None
+    assert_utc_storage(status["updated_at"])
+    assert_utc_storage(status["completed_at"])
 
 
 def test_update_alarm_task_status_with_errors(clean_test_db):
@@ -140,6 +155,75 @@ def test_cleanup_old_tasks_none(clean_test_db):
     """Test cleanup when no old tasks exist"""
     deleted_count = AlarmStatusService.cleanup_old_tasks(days=1)
     assert deleted_count == 0
+
+
+def test_cleanup_old_tasks_compares_utc_storage_contract(clean_test_db):
+    """오래된 작업 정리는 UTC-aware 저장 문자열 기준으로 비교해야 함"""
+    with get_db_connection() as db:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("old-utc-task", "bulk", "completed", "2000-01-01T00:00:00+00:00"),
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("new-utc-task", "bulk", "pending", utc_now_for_db()),
+        )
+        db.commit()
+
+    deleted_count = AlarmStatusService.cleanup_old_tasks(days=30)
+
+    assert deleted_count == 1
+    with get_db_connection() as db:
+        remaining = [
+            row["task_id"]
+            for row in db.execute("SELECT task_id FROM alarm_tasks ORDER BY task_id").fetchall()
+        ]
+    assert remaining == ["new-utc-task"]
+
+
+def test_cleanup_old_tasks_normalizes_legacy_kst_naive_storage(clean_test_db):
+    """기존 naive KST 저장값도 실제 시점 기준으로 정리해야 함"""
+    legacy_old_instant = utc_now() - timedelta(days=30, hours=1)
+    legacy_kst_storage = (
+        legacy_old_instant.astimezone(KST)
+        .replace(tzinfo=None, microsecond=0)
+        .isoformat(timespec="seconds")
+    )
+
+    with get_db_connection() as db:
+        cursor = db.cursor()
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("legacy-kst-task", "bulk", "completed", legacy_kst_storage),
+        )
+        cursor.execute(
+            """
+            INSERT INTO alarm_tasks (task_id, alarm_type, status, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("new-utc-task", "bulk", "pending", utc_now_for_db()),
+        )
+        db.commit()
+
+    deleted_count = AlarmStatusService.cleanup_old_tasks(days=30)
+
+    assert deleted_count == 1
+    with get_db_connection() as db:
+        remaining = [
+            row["task_id"]
+            for row in db.execute("SELECT task_id FROM alarm_tasks ORDER BY task_id").fetchall()
+        ]
+    assert remaining == ["new-utc-task"]
 
 
 def test_success_rate_calculation(clean_test_db):

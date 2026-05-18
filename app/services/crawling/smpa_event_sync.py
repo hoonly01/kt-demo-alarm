@@ -6,11 +6,17 @@ import hashlib
 import re
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from app.services.crawling.smpa_coordinates import SelectedCoordinate
 from app.services.crawling.smpa_parser import ParsedSmpaEvent, SMPA_SOURCE_NAME
+from app.utils.time_utils import (
+    format_kst_wall_clock_for_db,
+    format_utc_datetime_for_db,
+    utc_now,
+    utc_now_for_db,
+)
 
 LOW_SEVERITY_MAX_ATTENDEES = 99
 MEDIUM_SEVERITY_MAX_ATTENDEES = 499
@@ -144,21 +150,22 @@ def prepare_event_candidate(
         source_url=event.source_url,
         source_record_hash=source_record_hash,
         source_payload_hash=source_payload_hash,
-        collected_at=collected_at or datetime.now(timezone.utc),
+        collected_at=collected_at or utc_now(),
         parser_version=event.parser_version,
     )
 
 
 def _insert_candidate(cursor: sqlite3.Cursor, candidate: EventCandidate) -> None:
+    write_timestamp = utc_now_for_db()
     cursor.execute(
         """
         INSERT INTO events (
             title, description, attendees, police_station, location_name, location_address,
             latitude, longitude, start_date, end_date, category, severity_level, status,
             source, source_id, source_url, source_record_hash, source_payload_hash,
-            collected_at, parser_version
+            collected_at, parser_version, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             candidate.title,
@@ -169,8 +176,8 @@ def _insert_candidate(cursor: sqlite3.Cursor, candidate: EventCandidate) -> None
             candidate.location_address,
             candidate.latitude,
             candidate.longitude,
-            candidate.start_date,
-            candidate.end_date,
+            format_kst_wall_clock_for_db(candidate.start_date),
+            format_kst_wall_clock_for_db(candidate.end_date),
             candidate.category,
             candidate.severity_level,
             candidate.source,
@@ -178,8 +185,10 @@ def _insert_candidate(cursor: sqlite3.Cursor, candidate: EventCandidate) -> None
             candidate.source_url,
             candidate.source_record_hash,
             candidate.source_payload_hash,
-            candidate.collected_at,
+            format_utc_datetime_for_db(candidate.collected_at),
             candidate.parser_version,
+            write_timestamp,
+            write_timestamp,
         ),
     )
 
@@ -206,7 +215,7 @@ def _update_candidate(cursor: sqlite3.Cursor, candidate: EventCandidate, event_i
                source_payload_hash = ?,
                collected_at = ?,
                parser_version = ?,
-               updated_at = CURRENT_TIMESTAMP
+               updated_at = ?
          WHERE id = ?
         """,
         (
@@ -218,16 +227,17 @@ def _update_candidate(cursor: sqlite3.Cursor, candidate: EventCandidate, event_i
             candidate.location_address,
             candidate.latitude,
             candidate.longitude,
-            candidate.start_date,
-            candidate.end_date,
+            format_kst_wall_clock_for_db(candidate.start_date),
+            format_kst_wall_clock_for_db(candidate.end_date),
             candidate.category,
             candidate.severity_level,
             candidate.source,
             candidate.source_id,
             candidate.source_url,
             candidate.source_payload_hash,
-            candidate.collected_at,
+            format_utc_datetime_for_db(candidate.collected_at),
             candidate.parser_version,
+            utc_now_for_db(),
             event_id,
         ),
     )

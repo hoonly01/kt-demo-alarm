@@ -1,12 +1,18 @@
 """알림 상태 추적 서비스"""
 import json
-import sqlite3
 import uuid
-from datetime import datetime
+from datetime import timedelta
 from typing import Dict, Any, Optional, List
 import logging
 
 from app.database.connection import get_db_connection
+from app.utils.time_utils import (
+    KST,
+    format_utc_datetime_for_db,
+    parse_db_timestamp,
+    utc_now,
+    utc_now_for_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,7 @@ class AlarmStatusService:
             str: 생성된 task_id
         """
         task_id = str(uuid.uuid4())
+        created_at = utc_now_for_db()
         
         with get_db_connection() as db:
             cursor = db.cursor()
@@ -50,7 +57,7 @@ class AlarmStatusService:
                     total_recipients,
                     event_id,
                     json.dumps(request_data) if request_data else None,
-                    datetime.now().isoformat()
+                    created_at
                 )
             )
             db.commit()
@@ -83,10 +90,11 @@ class AlarmStatusService:
         try:
             with get_db_connection() as db:
                 cursor = db.cursor()
+                updated_at = utc_now_for_db()
                 
                 # 기본 업데이트 쿼리 구성
                 update_fields = ["status = ?", "updated_at = ?"]
-                update_values = [status, datetime.now().isoformat()]
+                update_values: list[str | int] = [status, updated_at]
                 
                 # 선택적 필드 추가
                 if successful_sends is not None:
@@ -108,7 +116,7 @@ class AlarmStatusService:
                 # 완료 상태인 경우 완료 시간 추가
                 if status in ["completed", "failed", "partial"]:
                     update_fields.append("completed_at = ?")
-                    update_values.append(datetime.now().isoformat())
+                    update_values.append(updated_at)
                 
                 # 쿼리 실행
                 query = f"UPDATE alarm_tasks SET {', '.join(update_fields)} WHERE task_id = ?"
@@ -212,7 +220,7 @@ class AlarmStatusService:
                         successful_sends, failed_sends, event_id,
                         created_at, updated_at, completed_at
                     FROM alarm_tasks 
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ?
                     """,
                     (limit,)
@@ -244,6 +252,9 @@ class AlarmStatusService:
     def cleanup_old_tasks(days: int = 30) -> int:
         """
         오래된 알림 작업 정리
+
+        신규 UTC-aware 저장값과 기존 naive KST 저장값을 모두 실제 시점 기준으로
+        비교한다. 기존 row는 backfill하지 않고 cleanup 경계에서만 해석한다.
         
         Args:
             days: 보관 일수
@@ -252,22 +263,26 @@ class AlarmStatusService:
             int: 삭제된 작업 수
         """
         try:
-            from datetime import timedelta
-            
             # Python에서 날짜 계산
-            cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+            cutoff_datetime = (utc_now() - timedelta(days=days)).replace(microsecond=0)
+            cutoff_date = format_utc_datetime_for_db(cutoff_datetime)
             
             with get_db_connection() as db:
                 cursor = db.cursor()
-                cursor.execute(
-                    """
-                    DELETE FROM alarm_tasks 
-                    WHERE created_at < ?
-                    """,
-                    (cutoff_date,)
-                )
+                cursor.execute("SELECT task_id, created_at FROM alarm_tasks")
+                expired_task_ids = []
+                for row in cursor.fetchall():
+                    created_at = parse_db_timestamp(row["created_at"], naive_source_tz=KST)
+                    if created_at is not None and created_at < cutoff_datetime:
+                        expired_task_ids.append(row["task_id"])
+
+                if expired_task_ids:
+                    cursor.executemany(
+                        "DELETE FROM alarm_tasks WHERE task_id = ?",
+                        [(task_id,) for task_id in expired_task_ids],
+                    )
                 db.commit()
-                deleted_count = cursor.rowcount
+                deleted_count = len(expired_task_ids)
                 
                 logger.info(f"오래된 알림 작업 {deleted_count}개 정리 완료 ({days}일 이전, {cutoff_date} 기준)")
                 return deleted_count
