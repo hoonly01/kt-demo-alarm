@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
     init_db()
     
     # 서비스 초기화
-    BusNoticeService.initialize()
+    await BusNoticeService.initialize()
     
     # 스케줄러 설정 및 시작
     from app.services.event_service import EventService
