@@ -595,8 +595,8 @@ class CrawlingService:
                     title = tds[1].inner_text()
                     date_txt = tds[2].inner_text() # 보통 YYYY-MM-DD 형식
                     
-                    # 테스트를 위해 날짜 필터 잠시 완화 (실제 운영시에는 today_str in date_txt 필요)
-                    if "집회" in title:
+                    # 운영에서는 오늘자 집회 공지만 수집하여 프롬프트 크기/비용/지연 증가를 방지
+                    if today_str in date_txt and "집회" in title:
                         onclick = row.get_attribute("onclick") or ""
                         m = re.search(r"(\d{4,})", onclick)
                         if m:
