@@ -616,8 +616,8 @@
                     <div class="kv-row" style="margin-top: 16px;">
                         <span>Showing page {{ pagination.page }} of {{ pagination.total_pages }}</span>
                         <span>
-                            {% if pagination.has_previous %}<a class="link" href="?page={{ pagination.previous_page }}&page_size={{ pagination.page_size }}">Previous</a>{% endif %}
-                            {% if pagination.has_next %}<a class="link" href="?page={{ pagination.next_page }}&page_size={{ pagination.page_size }}">Next</a>{% endif %}
+                            {% if pagination.has_previous %}<a class="link" data-dashboard-pagination-link href="?page={{ pagination.previous_page }}&page_size={{ pagination.page_size }}">Previous</a>{% endif %}
+                            {% if pagination.has_next %}<a class="link" data-dashboard-pagination-link href="?page={{ pagination.next_page }}&page_size={{ pagination.page_size }}">Next</a>{% endif %}
                         </span>
                     </div>
                     {% endif %}
@@ -790,6 +790,16 @@
                     return;
                 }
                 setDashboardPanelVisibility(panelId, true);
+            });
+        });
+        document.querySelectorAll('[data-dashboard-pagination-link]').forEach((link) => {
+            link.addEventListener('click', (event) => {
+                const href = link.getAttribute('href');
+                if (!href || !window.location.hash) return;
+                event.preventDefault();
+                const targetUrl = new URL(href, window.location.href);
+                targetUrl.hash = window.location.hash;
+                window.location.href = targetUrl.toString();
             });
         });
         restoreDashboardPanelFromHash();
