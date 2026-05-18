@@ -67,6 +67,7 @@
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
             overflow: hidden;
         }
+        [data-dashboard-panel][hidden] { display: none !important; }
         .section-header {
             display: flex;
             justify-content: space-between;
@@ -168,6 +169,49 @@
             cursor: pointer;
         }
         .action-card button:disabled { opacity: 0.55; cursor: not-allowed; }
+        .task-nav {
+            margin-top: 24px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+            padding: 18px 20px;
+        }
+        .task-nav-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            margin-bottom: 14px;
+        }
+        .task-nav h2 {
+            margin: 0;
+        }
+        .task-nav p {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 14px;
+        }
+        .task-button-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+        }
+        .task-button {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            background: #f8fafc;
+            color: var(--text);
+            cursor: pointer;
+            font-weight: 700;
+            text-align: left;
+        }
+        .task-button[aria-expanded="true"] {
+            border-color: var(--primary);
+            background: #eef2ff;
+            color: #3730a3;
+        }
         .kv-list { display: grid; gap: 10px; }
         .kv-row {
             display: flex;
@@ -199,12 +243,14 @@
         @media (max-width: 1100px) {
             .grid-4, .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .task-button-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .grid-2 { grid-template-columns: 1fr; }
         }
         @media (max-width: 640px) {
             main, .header-inner { width: min(100% - 20px, 100%); }
-            .grid-4, .grid-3, .action-grid { grid-template-columns: 1fr; }
+            .grid-4, .grid-3, .action-grid, .task-button-grid { grid-template-columns: 1fr; }
             .header-inner { align-items: flex-start; flex-direction: column; }
+            .task-nav-header { flex-direction: column; }
         }
     </style>
 </head>
@@ -225,7 +271,7 @@
             <div class="section-header">
                 <div>
                     <h2>Overview</h2>
-                    <p>운영 판단에 필요한 수집 최신성, 발송 실패, 사용자 readiness, 버스 캐시 상태를 한 화면에 모읍니다.</p>
+                    <p>운영 판단에 필요한 수집 최신성, 발송 실패, 버스 캐시, 스케줄러 상태를 한 화면에 모읍니다.</p>
                 </div>
                 {% if scheduler_status and scheduler_status.status == 'running' %}
                     <span class="badge badge-success">Scheduler running</span>
@@ -241,19 +287,22 @@
                         <div class="subtext">Active: {{ stats.active_events }}</div>
                     </div>
                     <div class="metric">
+                        <span>Collection Recency</span>
+                        <strong style="font-size: 18px;">Latest collected: {{ stats.latest_collected_at_display or 'not recorded' }}</strong>
+                        <div class="subtext">Latest event update: {{ stats.latest_event_updated_at_display or 'not recorded' }}</div>
+                    </div>
+                    <div class="metric">
                         <span>Notification Tasks</span>
                         <strong>{{ stats.total_alarms }}</strong>
-                        <div class="subtext">Failed/partial tasks: {{ stats.failed_alarm_tasks }}</div>
+                        <div class="subtext">Sent: {{ stats.total_alarms_sent }} · Failed/partial tasks: {{ stats.failed_alarm_tasks }} · Success rate: {{ stats.success_rate }}% · Failures: {{ stats.failed_sends }}</div>
                     </div>
                     <div class="metric">
-                        <span>Alarms Sent</span>
-                        <strong>{{ stats.total_alarms_sent }}</strong>
-                        <div class="subtext">Success rate: {{ stats.success_rate }}% · Failures: {{ stats.failed_sends }}</div>
-                    </div>
-                    <div class="metric">
-                        <span>User Readiness</span>
-                        <strong>{{ stats.route_ready_users }}/{{ stats.total_users }}</strong>
-                        <div class="subtext">{{ stats.readiness_rate }}% route-ready · {{ stats.subscribed_users }} subscribed</div>
+                        <span>Bus cache</span>
+                        <strong style="font-size: 18px;">cached_count: {{ bus_notice_status.cached_count }}</strong>
+                        <div class="subtext">
+                            {% if bus_notice_status.crawler_initialized %}Crawler initialized{% else %}Crawler not initialized{% endif %}
+                            · Last update: {{ bus_notice_status.last_update_display or 'not recorded' }}
+                        </div>
                     </div>
                 </div>
                 <div style="margin-top: 16px;">
@@ -274,8 +323,65 @@
             </div>
         </section>
 
-        <div class="grid grid-2">
-            <section class="section" data-testid="collection-section">
+        <nav class="task-nav" aria-label="업무 상세 보기">
+            <div class="task-nav-header">
+                <div>
+                    <h2>업무 상세 보기</h2>
+                    <p>긴 상세 표는 기본으로 숨기고, 필요한 업무 버튼을 선택할 때 하나씩 펼칩니다.</p>
+                </div>
+                <span class="badge badge-muted">Details hidden by default</span>
+            </div>
+            <div class="task-button-grid">
+                <button
+                    type="button"
+                    class="task-button"
+                    data-testid="dashboard-task-button-collection"
+                    data-dashboard-panel-button
+                    data-panel-hash="collection"
+                    aria-expanded="false"
+                    aria-controls="collection-panel"
+                >데이터 수집 상태</button>
+                <button
+                    type="button"
+                    class="task-button"
+                    data-testid="dashboard-task-button-bus"
+                    data-dashboard-panel-button
+                    data-panel-hash="bus"
+                    aria-expanded="false"
+                    aria-controls="bus-panel"
+                >버스 공지 운영</button>
+                <button
+                    type="button"
+                    class="task-button"
+                    data-testid="dashboard-task-button-alarms"
+                    data-dashboard-panel-button
+                    data-panel-hash="alarms"
+                    aria-expanded="false"
+                    aria-controls="alarm-panel"
+                >알림 발송 운영</button>
+                <button
+                    type="button"
+                    class="task-button"
+                    data-testid="dashboard-task-button-readiness"
+                    data-dashboard-panel-button
+                    data-panel-hash="readiness"
+                    aria-expanded="false"
+                    aria-controls="readiness-panel"
+                >사용자 readiness</button>
+                <button
+                    type="button"
+                    class="task-button"
+                    data-testid="dashboard-task-button-events"
+                    data-dashboard-panel-button
+                    data-panel-hash="events"
+                    aria-expanded="false"
+                    aria-controls="events-panel"
+                >이벤트/집회 탐색</button>
+            </div>
+        </nav>
+
+        <div class="dashboard-panels" data-dashboard-panels>
+            <section id="collection-panel" class="section" data-testid="collection-section" data-dashboard-panel hidden>
                 <div class="section-header">
                     <div>
                         <h2>데이터 수집 상태</h2>
@@ -326,7 +432,7 @@
                 </div>
             </section>
 
-            <section class="section" data-testid="bus-section">
+            <section id="bus-panel" class="section" data-testid="bus-section" data-dashboard-panel hidden>
                 <div class="section-header">
                     <div>
                         <h2>버스 공지 운영</h2>
@@ -353,154 +459,234 @@
                     </div>
                 </div>
             </section>
+
+            <section id="alarm-panel" class="section" data-testid="alarm-section" data-dashboard-panel hidden>
+                <div class="section-header">
+                    <div>
+                        <h2>알림 발송 운영</h2>
+                        <p>event_id, request_data, error_messages, completed_at, updated_at를 포함해 실패 진단을 노출합니다.</p>
+                    </div>
+                    <span class="badge {% if stats.failed_sends > 0 %}badge-danger{% else %}badge-success{% endif %}">{{ stats.failed_sends }} failed sends</span>
+                </div>
+                <div class="section-body">
+                    {% if alarms %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Task / Time (KST)</th>
+                                    <th>Status</th>
+                                    <th>Delivery</th>
+                                    <th>Diagnostics</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for alarm in alarms %}
+                                <tr>
+                                    <td>
+                                        <div class="mono">{{ alarm.task_id_display }}</div>
+                                        <div class="muted">Created: {{ alarm.created_at_display or 'not recorded' }}</div>
+                                        <div class="muted">Updated: {{ alarm.updated_at_display or 'not recorded' }}</div>
+                                        <div class="muted">Completed: {{ alarm.completed_at_display or 'not recorded' }}</div>
+                                    </td>
+                                    <td>
+                                        {% if alarm.status == 'completed' %}
+                                            <span class="badge badge-success">Completed</span>
+                                        {% elif alarm.status == 'failed' %}
+                                            <span class="badge badge-danger">Failed</span>
+                                        {% elif alarm.status == 'partial' %}
+                                            <span class="badge badge-warning">Partial</span>
+                                        {% else %}
+                                            <span class="badge">{{ alarm.status }}</span>
+                                        {% endif %}
+                                        <div class="muted">Type: {{ alarm.alarm_type }}</div>
+                                        <div class="muted">event_id: {{ alarm.event_id or 'none' }}</div>
+                                    </td>
+                                    <td>
+                                        <strong>{{ alarm.successful_sends }}</strong> success /
+                                        <strong>{{ alarm.failed_sends }}</strong> failed of
+                                        <strong>{{ alarm.total_recipients }}</strong>
+                                    </td>
+                                    <td>
+                                        <div><strong>Request:</strong> {{ alarm.request_summary or 'not recorded' }}</div>
+                                        <div><strong>Errors:</strong> {{ alarm.error_summary or 'not recorded' }}</div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="empty">No recent alarms found — notification diagnostics are empty.</div>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section id="readiness-panel" class="section" data-testid="user-readiness-section" data-dashboard-panel hidden>
+                <div class="section-header">
+                    <div>
+                        <h2>사용자 readiness</h2>
+                        <p>active/alarm 상태, route 좌표 완성도, favorite_zone, marked_bus, language, last activity를 확인합니다.</p>
+                    </div>
+                    <span class="badge badge-muted">{{ pagination.total_users }} total users</span>
+                </div>
+                <div class="section-body">
+                    <div class="grid grid-3" style="margin-bottom: 16px;">
+                        <div class="metric">
+                            <span>Route ready</span>
+                            <strong>{{ stats.route_ready_users }}/{{ stats.total_users }}</strong>
+                            <div class="subtext">{{ stats.readiness_rate }}% route-ready</div>
+                        </div>
+                        <div class="metric">
+                            <span>Subscribed users</span>
+                            <strong>{{ stats.subscribed_users }}</strong>
+                            <div class="subtext">Alarm opt-in users</div>
+                        </div>
+                        <div class="metric">
+                            <span>Total users</span>
+                            <strong>{{ stats.total_users }}</strong>
+                            <div class="subtext">Current filtered page: {{ users|length }}</div>
+                        </div>
+                    </div>
+                    {% if users %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>User Key / ID</th>
+                                    <th>Status</th>
+                                    <th>Route Info</th>
+                                    <th>Preferences</th>
+                                    <th>Activity</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for user in users %}
+                                <tr>
+                                    <td>
+                                        <div class="mono">{{ user.display_identifier }}</div>
+                                        <div class="muted">ID: {{ user.id }}</div>
+                                    </td>
+                                    <td>
+                                        {% if user.active %}
+                                            <span class="badge badge-success">Active</span>
+                                        {% else %}
+                                            <span class="badge badge-muted">Inactive</span>
+                                        {% endif %}
+                                        {% if user.is_alarm_on %}
+                                            <span class="badge">Subscribed</span>
+                                        {% else %}
+                                            <span class="badge badge-danger">Unsubscribed</span>
+                                        {% endif %}
+                                        {% if user.route_ready %}
+                                            <span class="badge badge-success">{{ user.readiness_label }}</span>
+                                        {% else %}
+                                            <span class="badge badge-warning">{{ user.readiness_label }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if user.departure_name and user.arrival_name %}
+                                            <div><strong>From:</strong> {{ user.departure_name }}</div>
+                                            <div><strong>To:</strong> {{ user.arrival_name }}</div>
+                                        {% else %}
+                                            <span class="muted">Route not set</span>
+                                        {% endif %}
+                                        <div class="muted">route_updated_at: {{ user.route_updated_at_display or 'not recorded' }}</div>
+                                    </td>
+                                    <td>
+                                        <div>Bus: <strong>{{ user.marked_bus or 'not set' }}</strong></div>
+                                        <div>Zone: <strong>{{ user.favorite_zone or 'not set' }}</strong></div>
+                                        <div>Language: <strong>{{ user.language_display }}</strong></div>
+                                    </td>
+                                    <td>
+                                        <div>Msgs: <strong>{{ user.message_count }}</strong></div>
+                                        <div>Created: {{ user.created_at_display }}</div>
+                                        <div>Last: {{ user.last_message_at_display or 'not recorded' }}</div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="empty">No users found — readiness cannot be evaluated until users are registered.</div>
+                    {% endif %}
+
+                    {% if pagination.total_pages > 1 %}
+                    <div class="kv-row" style="margin-top: 16px;">
+                        <span>Showing page {{ pagination.page }} of {{ pagination.total_pages }}</span>
+                        <span>
+                            {% if pagination.has_previous %}<a class="link" data-dashboard-pagination-link href="?page={{ pagination.previous_page }}&page_size={{ pagination.page_size }}">Previous</a>{% endif %}
+                            {% if pagination.has_next %}<a class="link" data-dashboard-pagination-link href="?page={{ pagination.next_page }}&page_size={{ pagination.page_size }}">Next</a>{% endif %}
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+            </section>
+
+            <section id="events-panel" class="section" data-testid="event-explorer-section" data-dashboard-panel hidden>
+                <div class="section-header">
+                    <div>
+                        <h2>이벤트/집회 탐색</h2>
+                        <p>source, 기간, 장소, 참석자, 관할서, severity/status, 원문 링크, 수집/갱신 이력을 탐색합니다.</p>
+                    </div>
+                    <span class="badge badge-muted">{{ events|length }} recent rows</span>
+                </div>
+                <div class="section-body">
+                    {% if events %}
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Event Details</th>
+                                    <th>Period / Place</th>
+                                    <th>People / Police</th>
+                                    <th>Severity / Status</th>
+                                    <th>Source History</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            {% for event in events %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ event.title }}</strong>
+                                        <div class="muted mono">#{{ event.id }}</div>
+                                    </td>
+                                    <td>
+                                        <div>{{ event.location_name }} • {{ event.start_date_display }}</div>
+                                        {% if event.end_date_display %}<div class="muted">Ends: {{ event.end_date_display }}</div>{% endif %}
+                                        {% if event.location_address %}<div class="muted">{{ event.location_address }}</div>{% endif %}
+                                    </td>
+                                    <td>
+                                        <div>Attendees: {{ event.attendees or '미상' }}</div>
+                                        <div>Police: {{ event.police_station or 'not recorded' }}</div>
+                                    </td>
+                                    <td>
+                                        {% if event.severity_level|int == 3 %}
+                                            <span class="badge badge-danger">High</span>
+                                        {% elif event.severity_level|int == 2 %}
+                                            <span class="badge badge-warning">Medium</span>
+                                        {% else %}
+                                            <span class="badge badge-success">Low</span>
+                                        {% endif %}
+                                        <span class="badge badge-muted">{{ event.status }}</span>
+                                    </td>
+                                    <td>
+                                        <div>Source: {{ event.source_label }}</div>
+                                        <div>Created: {{ event.created_at_display or 'not recorded' }}</div>
+                                        <div>Updated: {{ event.updated_at_display or 'not recorded' }}</div>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="empty">No recent events found — event exploration has no source records yet.</div>
+                    {% endif %}
+                </div>
+            </section>
         </div>
-
-        <section class="section" data-testid="alarm-section">
-            <div class="section-header">
-                <div>
-                    <h2>알림 발송 운영</h2>
-                    <p>event_id, request_data, error_messages, completed_at, updated_at를 포함해 실패 진단을 노출합니다.</p>
-                </div>
-                <span class="badge {% if stats.failed_sends > 0 %}badge-danger{% else %}badge-success{% endif %}">{{ stats.failed_sends }} failed sends</span>
-            </div>
-            <div class="section-body">
-                {% if alarms %}
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Task / Time (KST)</th>
-                                <th>Status</th>
-                                <th>Delivery</th>
-                                <th>Diagnostics</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        {% for alarm in alarms %}
-                            <tr>
-                                <td>
-                                    <div class="mono">{{ alarm.task_id_display }}</div>
-                                    <div class="muted">Created: {{ alarm.created_at_display or 'not recorded' }}</div>
-                                    <div class="muted">Updated: {{ alarm.updated_at_display or 'not recorded' }}</div>
-                                    <div class="muted">Completed: {{ alarm.completed_at_display or 'not recorded' }}</div>
-                                </td>
-                                <td>
-                                    {% if alarm.status == 'completed' %}
-                                        <span class="badge badge-success">Completed</span>
-                                    {% elif alarm.status == 'failed' %}
-                                        <span class="badge badge-danger">Failed</span>
-                                    {% elif alarm.status == 'partial' %}
-                                        <span class="badge badge-warning">Partial</span>
-                                    {% else %}
-                                        <span class="badge">{{ alarm.status }}</span>
-                                    {% endif %}
-                                    <div class="muted">Type: {{ alarm.alarm_type }}</div>
-                                    <div class="muted">event_id: {{ alarm.event_id or 'none' }}</div>
-                                </td>
-                                <td>
-                                    <strong>{{ alarm.successful_sends }}</strong> success /
-                                    <strong>{{ alarm.failed_sends }}</strong> failed of
-                                    <strong>{{ alarm.total_recipients }}</strong>
-                                </td>
-                                <td>
-                                    <div><strong>Request:</strong> {{ alarm.request_summary or 'not recorded' }}</div>
-                                    <div><strong>Errors:</strong> {{ alarm.error_summary or 'not recorded' }}</div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="empty">No recent alarms found — notification diagnostics are empty.</div>
-                {% endif %}
-            </div>
-        </section>
-
-        <section class="section" data-testid="user-readiness-section">
-            <div class="section-header">
-                <div>
-                    <h2>사용자 readiness</h2>
-                    <p>active/alarm 상태, route 좌표 완성도, favorite_zone, marked_bus, language, last activity를 확인합니다.</p>
-                </div>
-                <span class="badge badge-muted">{{ pagination.total_users }} total users</span>
-            </div>
-            <div class="section-body">
-                {% if users %}
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>User Key / ID</th>
-                                <th>Status</th>
-                                <th>Route Info</th>
-                                <th>Preferences</th>
-                                <th>Activity</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        {% for user in users %}
-                            <tr>
-                                <td>
-                                    <div class="mono">{{ user.display_identifier }}</div>
-                                    <div class="muted">ID: {{ user.id }}</div>
-                                </td>
-                                <td>
-                                    {% if user.active %}
-                                        <span class="badge badge-success">Active</span>
-                                    {% else %}
-                                        <span class="badge badge-muted">Inactive</span>
-                                    {% endif %}
-                                    {% if user.is_alarm_on %}
-                                        <span class="badge">Subscribed</span>
-                                    {% else %}
-                                        <span class="badge badge-danger">Unsubscribed</span>
-                                    {% endif %}
-                                    {% if user.route_ready %}
-                                        <span class="badge badge-success">{{ user.readiness_label }}</span>
-                                    {% else %}
-                                        <span class="badge badge-warning">{{ user.readiness_label }}</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    {% if user.departure_name and user.arrival_name %}
-                                        <div><strong>From:</strong> {{ user.departure_name }}</div>
-                                        <div><strong>To:</strong> {{ user.arrival_name }}</div>
-                                    {% else %}
-                                        <span class="muted">Route not set</span>
-                                    {% endif %}
-                                    <div class="muted">route_updated_at: {{ user.route_updated_at_display or 'not recorded' }}</div>
-                                </td>
-                                <td>
-                                    <div>Bus: <strong>{{ user.marked_bus or 'not set' }}</strong></div>
-                                    <div>Zone: <strong>{{ user.favorite_zone or 'not set' }}</strong></div>
-                                    <div>Language: <strong>{{ user.language_display }}</strong></div>
-                                </td>
-                                <td>
-                                    <div>Msgs: <strong>{{ user.message_count }}</strong></div>
-                                    <div>Created: {{ user.created_at_display }}</div>
-                                    <div>Last: {{ user.last_message_at_display or 'not recorded' }}</div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="empty">No users found — readiness cannot be evaluated until users are registered.</div>
-                {% endif %}
-
-                {% if pagination.total_pages > 1 %}
-                <div class="kv-row" style="margin-top: 16px;">
-                    <span>Showing page {{ pagination.page }} of {{ pagination.total_pages }}</span>
-                    <span>
-                        {% if pagination.has_previous %}<a class="link" href="?page={{ pagination.previous_page }}&page_size={{ pagination.page_size }}">Previous</a>{% endif %}
-                        {% if pagination.has_next %}<a class="link" href="?page={{ pagination.next_page }}&page_size={{ pagination.page_size }}">Next</a>{% endif %}
-                    </span>
-                </div>
-                {% endif %}
-            </div>
-        </section>
 
         <section class="section" data-testid="action-section">
             <div class="section-header">
@@ -532,69 +718,6 @@
             </div>
         </section>
 
-        <section class="section" data-testid="event-explorer-section">
-            <div class="section-header">
-                <div>
-                    <h2>이벤트/집회 탐색</h2>
-                    <p>source, 기간, 장소, 참석자, 관할서, severity/status, 원문 링크, 수집/갱신 이력을 탐색합니다.</p>
-                </div>
-                <span class="badge badge-muted">{{ events|length }} recent rows</span>
-            </div>
-            <div class="section-body">
-                {% if events %}
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Event Details</th>
-                                <th>Period / Place</th>
-                                <th>People / Police</th>
-                                <th>Severity / Status</th>
-                                <th>Source History</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        {% for event in events %}
-                            <tr>
-                                <td>
-                                    <strong>{{ event.title }}</strong>
-                                    <div class="muted mono">#{{ event.id }}</div>
-                                </td>
-                                <td>
-                                    <div>{{ event.location_name }} • {{ event.start_date_display }}</div>
-                                    {% if event.end_date_display %}<div class="muted">Ends: {{ event.end_date_display }}</div>{% endif %}
-                                    {% if event.location_address %}<div class="muted">{{ event.location_address }}</div>{% endif %}
-                                </td>
-                                <td>
-                                    <div>Attendees: {{ event.attendees or '미상' }}</div>
-                                    <div>Police: {{ event.police_station or 'not recorded' }}</div>
-                                </td>
-                                <td>
-                                    {% if event.severity_level|int == 3 %}
-                                        <span class="badge badge-danger">High</span>
-                                    {% elif event.severity_level|int == 2 %}
-                                        <span class="badge badge-warning">Medium</span>
-                                    {% else %}
-                                        <span class="badge badge-success">Low</span>
-                                    {% endif %}
-                                    <span class="badge badge-muted">{{ event.status }}</span>
-                                </td>
-                                <td>
-                                    <div>Source: {{ event.source_label }}</div>
-                                    <div>Created: {{ event.created_at_display or 'not recorded' }}</div>
-                                    <div>Updated: {{ event.updated_at_display or 'not recorded' }}</div>
-                                </td>
-                            </tr>
-                        {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% else %}
-                <div class="empty">No recent events found — event exploration has no source records yet.</div>
-                {% endif %}
-            </div>
-        </section>
-
     </main>
 </div>
 
@@ -602,6 +725,88 @@
 
 <script>
     const ACTION_COOLDOWN_MS = 1000;
+
+    function getDashboardPanelButtons() {
+        return Array.from(document.querySelectorAll('[data-dashboard-panel-button]'));
+    }
+
+    function getDashboardPanels() {
+        return Array.from(document.querySelectorAll('[data-dashboard-panel]'));
+    }
+
+    function clearDashboardPanelVisibility(updateHash) {
+        getDashboardPanels().forEach((panel) => {
+            panel.hidden = true;
+        });
+        getDashboardPanelButtons().forEach((button) => {
+            button.setAttribute('aria-expanded', 'false');
+        });
+        if (updateHash) {
+            history.replaceState(null, '', window.location.href.replace(/#.*$/, ''));
+        }
+    }
+
+    function setDashboardPanelVisibility(panelId, updateHash) {
+        const selectedPanel = document.getElementById(panelId);
+        if (!selectedPanel) return;
+
+        getDashboardPanels().forEach((panel) => {
+            panel.hidden = panel.id !== panelId;
+        });
+        getDashboardPanelButtons().forEach((button) => {
+            const isSelected = button.getAttribute('aria-controls') === panelId;
+            button.setAttribute('aria-expanded', isSelected ? 'true' : 'false');
+            if (isSelected && updateHash) {
+                const panelHash = button.dataset.panelHash;
+                if (panelHash) history.replaceState(null, '', `#${panelHash}`);
+            }
+        });
+    }
+
+    function findDashboardPanelIdForHash(hashKey) {
+        const targetButton = getDashboardPanelButtons().find(
+            (button) => button.dataset.panelHash === hashKey
+        );
+        return targetButton ? targetButton.getAttribute('aria-controls') : null;
+    }
+
+    function restoreDashboardPanelFromHash() {
+        const hashKey = window.location.hash.replace('#', '');
+        const panelId = findDashboardPanelIdForHash(hashKey);
+        if (panelId) {
+            setDashboardPanelVisibility(panelId, false);
+            return;
+        }
+        clearDashboardPanelVisibility(false);
+    }
+
+    function initializeDashboardPanels() {
+        getDashboardPanelButtons().forEach((button) => {
+            button.addEventListener('click', () => {
+                const panelId = button.getAttribute('aria-controls');
+                if (!panelId) return;
+                if (button.getAttribute('aria-expanded') === 'true') {
+                    clearDashboardPanelVisibility(true);
+                    return;
+                }
+                setDashboardPanelVisibility(panelId, true);
+            });
+        });
+        document.querySelectorAll('[data-dashboard-pagination-link]').forEach((link) => {
+            link.addEventListener('click', (event) => {
+                const href = link.getAttribute('href');
+                if (!href || !window.location.hash) return;
+                event.preventDefault();
+                const targetUrl = new URL(href, window.location.href);
+                targetUrl.hash = window.location.hash;
+                window.location.href = targetUrl.toString();
+            });
+        });
+        restoreDashboardPanelFromHash();
+        window.addEventListener('hashchange', restoreDashboardPanelFromHash);
+    }
+
+    document.addEventListener('DOMContentLoaded', initializeDashboardPanels);
 
     async function triggerAction(endpoint, buttonElement) {
         if (buttonElement.disabled || buttonElement.dataset.cooldown === 'true') return;
