@@ -4,6 +4,7 @@ import pytest
 from playwright.sync_api import expect, sync_playwright
 
 from app.config.settings import settings
+from app.database.connection import get_db_connection
 
 
 ADMIN_USER = "admin"
@@ -46,7 +47,33 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
     monkeypatch.setattr(settings, "ADMIN_USER", ADMIN_USER)
     monkeypatch.setattr(settings, "ADMIN_PASS", ADMIN_PASS)
 
-    response = test_client.get(ADMIN_DASHBOARD_PATH, auth=ADMIN_AUTH)
+    with get_db_connection() as db:
+        db.executemany(
+            """
+            INSERT INTO users (
+                bot_user_key, first_message_at, last_message_at, message_count, active
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "playwright-pagination-1",
+                    "2026-05-20T00:00:00+00:00",
+                    "2026-05-20T00:00:00+00:00",
+                    1,
+                    1,
+                ),
+                (
+                    "playwright-pagination-2",
+                    "2026-05-20T00:01:00+00:00",
+                    "2026-05-20T00:01:00+00:00",
+                    1,
+                    1,
+                ),
+            ],
+        )
+        db.commit()
+
+    response = test_client.get(f"{ADMIN_DASHBOARD_PATH}?page=1&page_size=1", auth=ADMIN_AUTH)
     assert response.status_code == 200
 
     console_errors = []
@@ -115,6 +142,15 @@ def test_admin_dashboard_playwright_smoke_blocks_non_local_requests(test_client,
                 expect(page.get_by_test_id(test_id)).to_be_hidden()
 
         page.goto(f"http://testserver{ADMIN_DASHBOARD_PATH}#readiness", wait_until="domcontentloaded")
+        expect(page.get_by_test_id("user-readiness-section")).to_be_visible()
+        expect(page.get_by_test_id("dashboard-task-button-readiness")).to_have_attribute(
+            "aria-expanded",
+            "true",
+        )
+        page.get_by_role("link", name="Next").click()
+        expect(page).to_have_url(
+            f"http://testserver{ADMIN_DASHBOARD_PATH}?page=2&page_size=1#readiness"
+        )
         expect(page.get_by_test_id("user-readiness-section")).to_be_visible()
         expect(page.get_by_test_id("dashboard-task-button-readiness")).to_have_attribute(
             "aria-expanded",
