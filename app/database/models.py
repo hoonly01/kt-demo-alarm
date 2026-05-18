@@ -46,6 +46,7 @@ EVENTS_TABLE_SCHEMA = '''
         category TEXT,
         severity_level INTEGER DEFAULT 1,  -- 1: 낮음, 2: 보통, 3: 높음
         status TEXT DEFAULT 'active',     -- active, ended, cancelled
+        image_path TEXT,                  -- 집회 안내 원본 이미지 경로
         source TEXT NOT NULL DEFAULT 'SMPA',
         source_id TEXT,
         source_url TEXT,

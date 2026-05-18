@@ -68,10 +68,12 @@ class NotificationService:
     def _format_event_block(index: int, event: Dict[str, Any]) -> str:
         """단일 집회 정보를 사용자 알림용 번호 블록으로 포맷팅"""
         attendees = str(event.get("attendees") or "").strip() or "미상"
+        desc = event.get("description")
+        desc_text = f"\n상세 내용 : {desc}" if desc and str(desc).strip() else ""
         return (
             f"{index}.\n"
             f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
-            f"집회 장소 : {event['location']}\n"
+            f"집회 장소 : {event['location']}{desc_text}\n"
             f"신고 인원 : {attendees}"
         )
 
@@ -520,13 +522,23 @@ class NotificationService:
 
         message_text = NotificationService._format_event_message(events)
 
+        # 첫 번째 집회 정보에서 이미지 경로 추출 (SMPA 집회들은 동일한 PDF 이미지를 공유함)
+        image_url = None
+        for event in events:
+            if event.get("image_path"):
+                base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
+                image_url = f"{base_url}/{event['image_path']}"
+                break
+
         # 알림 전송
+        alarm_data = {"message": message_text}
+        if image_url:
+            alarm_data["image_url"] = image_url
+
         alarm_request = AlarmRequest(
             user_id=user_id,
             event_name="morning_demo_alarm",
-            data={
-                "message": message_text
-            }
+            data=alarm_data
         )
 
         return await NotificationService.send_individual_alarm(alarm_request, id_type=id_type)
@@ -543,13 +555,23 @@ class NotificationService:
 
         message_text = NotificationService._format_event_message(events_data)
 
+        # 이미지 URL 추출
+        image_url = None
+        for event in events_data:
+            if event.get("image_path"):
+                base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
+                image_url = f"{base_url}/{event['image_path']}"
+                break
+
+        alarm_data = {"message": message_text}
+        if image_url:
+            alarm_data["image_url"] = image_url
+
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(
             user_ids=user_ids,
             event_name="morning_demo_alarm",
-            data={
-                "message": message_text
-            },
+            data=alarm_data,
             id_type=id_type
         )
 

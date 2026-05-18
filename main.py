@@ -20,7 +20,7 @@ from app.routers import users, events, alarms, kakao, kakao_skills, admin
 from app.routers import scheduler as scheduler_router
 from app.routers.bus_notice import router as bus_router
 from app.config.settings import settings, setup_logging
-from app.services.crawling import crawl_and_sync_smpa_events
+from app.services.crawling_service import CrawlingService
 from app.services.bus_notice_service import BusNoticeService
 
 from app.models.responses import HealthCheckResponse
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
     from app.services.event_service import EventService
     from app.services.zone_alarm_service import ZoneAlarmService
     setup_scheduler(
-        crawling_func=crawl_and_sync_smpa_events,             # SMPA 집회 데이터 동기화
+        crawling_func=CrawlingService.crawl_and_sync_events,  # AI-driven SPATIC/SMPA 통합 동기화
         route_check_func=EventService.scheduled_route_check,
         bus_crawling_func=BusNoticeService.refresh,           # 버스 통제 공지 재크롤링
         zone_check_func=ZoneAlarmService.scheduled_zone_check,
@@ -93,9 +93,12 @@ app = FastAPI(
     }
 )
 
-# 정적 파일 마운트 (버스 노선 이미지 전용)
+# 정적 파일 마운트 (버스 노선 및 집회 이미지)
 os.makedirs("topis_attachments/route_images", exist_ok=True)
+attachment_dir = CrawlingService.get_attachment_dir()
+os.makedirs(os.path.join(attachment_dir, "protest_images"), exist_ok=True)
 app.mount("/static", StaticFiles(directory="topis_attachments/route_images"), name="static")
+app.mount("/attachments", StaticFiles(directory=attachment_dir), name="attachments")
 
 # 라우터 등록
 app.include_router(users.router)

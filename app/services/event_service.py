@@ -26,6 +26,7 @@ EVENT_RESPONSE_COLUMNS = (
     "category",
     "severity_level",
     "status",
+    "image_path",
     "created_at",
     "updated_at",
 )
@@ -50,7 +51,7 @@ class EventService:
             id=row["id"],
             title=row["title"],
             description=row["description"],
-            attendees=EventService._row_value(row, "attendees", "미상") or "미상",
+            attendees=str(EventService._row_value(row, "attendees") or "미상"),
             police_station=EventService._row_value(row, "police_station"),
             location_name=row["location_name"],
             location_address=row["location_address"],
@@ -61,6 +62,7 @@ class EventService:
             category=row["category"],
             severity_level=row["severity_level"],
             status=row["status"],
+            image_path=EventService._row_value(row, "image_path"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -151,7 +153,7 @@ class EventService:
                 SELECT id, title, description, attendees, police_station,
                        location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
+                       severity_level, status, image_path, created_at, updated_at
                 FROM events{where_clause}
                 ORDER BY start_date DESC
                 LIMIT ?
@@ -437,7 +439,7 @@ class EventService:
                 SELECT id, title, description, attendees, police_station,
                        location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
+                       severity_level, status, image_path, created_at, updated_at
                 FROM events
                 WHERE status = 'active' AND start_date >= ?
                 ORDER BY start_date ASC
@@ -479,7 +481,7 @@ class EventService:
                 SELECT id, title, description, attendees, police_station,
                        location_name, location_address,
                        latitude, longitude, start_date, end_date, category,
-                       severity_level, status, created_at, updated_at
+                       severity_level, status, image_path, created_at, updated_at
                 FROM events
                 WHERE status = 'active'
                   AND date(start_date) = ?
