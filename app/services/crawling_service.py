@@ -441,22 +441,24 @@ class CrawlingService:
         """PDF를 이미지로 변환하여 저장"""
         try:
             doc = fitz.open(pdf_path)
-            if len(doc) == 0:
-                return None
-            
-            # 첫 페이지만 이미지로 저장 (대부분의 집회 요약이 1페이지에 있음)
-            page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=150)
-            
-            image_dir = get_attachment_dir() / "protest_images"
-            ensure_dir(image_dir)
-            
-            image_path = image_dir / f"protest_{notice_seq}.png"
-            pix.save(str(image_path))
-            doc.close()
-            
-            # 절대 경로 대신 상대 경로 저장 (정적 파일 서빙용)
-            return f"attachments/protest_images/protest_{notice_seq}.png"
+            try:
+                if len(doc) == 0:
+                    return None
+                
+                # 첫 페이지만 이미지로 저장 (대부분의 집회 요약이 1페이지에 있음)
+                page = doc.load_page(0)
+                pix = page.get_pixmap(dpi=150)
+                
+                image_dir = get_attachment_dir() / "protest_images"
+                ensure_dir(image_dir)
+                
+                image_path = image_dir / f"protest_{notice_seq}.png"
+                pix.save(str(image_path))
+                
+                # 절대 경로 대신 상대 경로 저장 (정적 파일 서빙용)
+                return f"attachments/protest_images/protest_{notice_seq}.png"
+            finally:
+                doc.close()
         except Exception as e:
             logger.error(f"[PDF->Image] 변환 실패: {e}")
             return None
