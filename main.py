@@ -95,9 +95,10 @@ app = FastAPI(
 
 # 정적 파일 마운트 (버스 노선 및 집회 이미지)
 os.makedirs("topis_attachments/route_images", exist_ok=True)
-os.makedirs("attachments/protest_images", exist_ok=True)
+attachment_dir = CrawlingService.get_attachment_dir()
+os.makedirs(os.path.join(attachment_dir, "protest_images"), exist_ok=True)
 app.mount("/static", StaticFiles(directory="topis_attachments/route_images"), name="static")
-app.mount("/attachments", StaticFiles(directory="attachments"), name="attachments")
+app.mount("/attachments", StaticFiles(directory=attachment_dir), name="attachments")
 
 # 라우터 등록
 app.include_router(users.router)
