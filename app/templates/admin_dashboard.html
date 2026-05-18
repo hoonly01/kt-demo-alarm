@@ -67,7 +67,7 @@
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
             overflow: hidden;
         }
-        [hidden] { display: none !important; }
+        [data-dashboard-panel][hidden] { display: none !important; }
         .section-header {
             display: flex;
             justify-content: space-between;
@@ -734,6 +734,18 @@
         return Array.from(document.querySelectorAll('[data-dashboard-panel]'));
     }
 
+    function clearDashboardPanelVisibility(updateHash) {
+        getDashboardPanels().forEach((panel) => {
+            panel.hidden = true;
+        });
+        getDashboardPanelButtons().forEach((button) => {
+            button.setAttribute('aria-expanded', 'false');
+        });
+        if (updateHash) {
+            history.replaceState(null, '', window.location.href.replace(/#.*$/, ''));
+        }
+    }
+
     function setDashboardPanelVisibility(panelId, updateHash) {
         const selectedPanel = document.getElementById(panelId);
         if (!selectedPanel) return;
@@ -761,14 +773,23 @@
     function restoreDashboardPanelFromHash() {
         const hashKey = window.location.hash.replace('#', '');
         const panelId = findDashboardPanelIdForHash(hashKey);
-        if (panelId) setDashboardPanelVisibility(panelId, false);
+        if (panelId) {
+            setDashboardPanelVisibility(panelId, false);
+            return;
+        }
+        clearDashboardPanelVisibility(false);
     }
 
     function initializeDashboardPanels() {
         getDashboardPanelButtons().forEach((button) => {
             button.addEventListener('click', () => {
                 const panelId = button.getAttribute('aria-controls');
-                if (panelId) setDashboardPanelVisibility(panelId, true);
+                if (!panelId) return;
+                if (button.getAttribute('aria-expanded') === 'true') {
+                    clearDashboardPanelVisibility(true);
+                    return;
+                }
+                setDashboardPanelVisibility(panelId, true);
             });
         });
         restoreDashboardPanelFromHash();
