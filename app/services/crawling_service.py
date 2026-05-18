@@ -40,8 +40,11 @@ from playwright.sync_api import sync_playwright
 class LegacyTLSAdapter(HTTPAdapter):
     """SMPA 등 구형 TLS 설정을 사용하는 서버와의 호환성을 위한 어댑터"""
     def init_poolmanager(self, *args, **kwargs):
+        import ssl
         ctx = create_urllib3_context()
         ctx.set_ciphers("DEFAULT@SECLEVEL=1")
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
         kwargs["ssl_context"] = ctx
         super().init_poolmanager(*args, **kwargs)
 
