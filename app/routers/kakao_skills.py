@@ -19,6 +19,7 @@ def _to_notification_event_data(event: object) -> dict:
     return {
         "attendees": getattr(event, "attendees", "미상"),
         "location": getattr(event, "location_name"),
+        "description": getattr(event, "description", None),
         "start_date": getattr(event, "start_date"),
         "end_date": getattr(event, "end_date", None),
     }
