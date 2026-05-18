@@ -1,4 +1,5 @@
 """카카오톡 Skill Block 전용 라우터 (prefix 없음)"""
+# pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, BackgroundTasks
 import sqlite3
 import logging
@@ -61,16 +62,31 @@ async def get_upcoming_protests(
         [_to_notification_event_data(event) for event in events],
     )
 
+    image_url = None
+    for event in events:
+        if getattr(event, "image_path", None):
+            base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
+            image_url = f"{base_url}/{event.image_path}"
+            break
+
+    outputs = []
+    if image_url:
+        outputs.append({
+            "simpleImage": {
+                "imageUrl": image_url,
+                "altText": "예정된 집회 안내 공고문"
+            }
+        })
+    outputs.append({
+        "simpleText": {
+            "text": message_text
+        }
+    })
+
     return {
         "version": "2.0",
         "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
+            "outputs": outputs
         }
     }
 
@@ -106,16 +122,31 @@ async def get_today_protests(
         [_to_notification_event_data(event) for event in events],
     )
 
+    image_url = None
+    for event in events:
+        if getattr(event, "image_path", None):
+            base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
+            image_url = f"{base_url}/{event.image_path}"
+            break
+
+    outputs = []
+    if image_url:
+        outputs.append({
+            "simpleImage": {
+                "imageUrl": image_url,
+                "altText": "오늘의 집회 안내 공고문"
+            }
+        })
+    outputs.append({
+        "simpleText": {
+            "text": message_text
+        }
+    })
+
     return {
         "version": "2.0",
         "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
+            "outputs": outputs
         }
     }
 
@@ -169,16 +200,31 @@ async def check_user_route_events(
         [_to_notification_event_data(event) for event in result.events_found],
     )
 
+    image_url = None
+    for event in result.events_found:
+        if getattr(event, "image_path", None):
+            base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
+            image_url = f"{base_url}/{event.image_path}"
+            break
+
+    outputs = []
+    if image_url:
+        outputs.append({
+            "simpleImage": {
+                "imageUrl": image_url,
+                "altText": "집회 안내 공고문"
+            }
+        })
+    outputs.append({
+        "simpleText": {
+            "text": message_text
+        }
+    })
+
     return {
         "version": "2.0",
         "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
+            "outputs": outputs
         }
     }
 
