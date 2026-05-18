@@ -99,6 +99,14 @@ def init_db():
         if "duplicate column name" not in str(e).lower():
             logger.warning(f"favorite_zone 컬럼 갱신 실패 (무시됨): {str(e)}")
 
+    try:
+        cursor.execute("ALTER TABLE events ADD COLUMN image_path TEXT")
+        logger.info("✅ events 테이블 image_path 컬럼 추가 완료")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            logger.warning(f"events 테이블 image_path 컬럼 갱신 실패 (무시됨): {str(e)}")
+
+
     conn.commit()
     conn.close()
     print("✅ 데이터베이스 초기화 완료")
