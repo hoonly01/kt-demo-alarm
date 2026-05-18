@@ -36,11 +36,12 @@ class BusNoticeService:
                 cache_file="topis_cache/topis_cache.json"
             )
             
-            # 초기 데이터 로드 (동기 함수를 비동기로 실행)
-            cls.cached_notices, _ = await asyncio.to_thread(cls.crawler.crawl_notices)
+            # 서버 시작 시 실제 크롤링(crawl_notices)을 수행하지 않고 로컬 캐시만 메모리에 로드합니다.
+            # 진짜 크롤링 및 AI 분석은 EC2 스케줄러가 일정 시간마다 호출하는 refresh()에서만 수행합니다.
+            cls.cached_notices = cls.crawler.cache_data.get("notices", {})
             cls.last_update = datetime.now(KST)
             
-            logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 공지사항 로드됨")
+            logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 캐시 공지사항 로드됨")
             
             # 백그라운드 이미지 생성 시작 (참조 보관 → GC 방지 + 예외 로깅)
             def _log_task_error(task: asyncio.Task):
