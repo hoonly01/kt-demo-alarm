@@ -676,9 +676,13 @@ class CrawlingService:
 
             # 텍스트 추출
             text = ""
-            with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
-                    text += page.extract_text() or ""
+            if globals().get("PDFPLUMBER_AVAILABLE", False):
+                with pdfplumber.open(pdf_path) as pdf:
+                    for page in pdf.pages:
+                        text += page.extract_text() or ""
+            else:
+                logger.warning("[SMPA] pdfplumber 미설치 또는 비활성화 상태입니다. pdfminer로 텍스트 추출을 폴백합니다.")
+                text = extract_text(str(pdf_path), laparams=LAParams()) or ""
             
             # 이미지 변환
             image_path = cls._pdf_to_images(pdf_path, today_str)
