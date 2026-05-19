@@ -393,6 +393,11 @@ class CrawlingService:
     """크롤링 서비스 클래스"""
 
     @classmethod
+    def get_attachment_dir(cls) -> pathlib.Path:
+        """첨부파일 저장 디렉터리를 반환한다."""
+        return get_attachment_dir()
+
+    @classmethod
     async def crawl_and_sync_events(cls) -> Dict:
         """스케줄러 진입점"""
         logger.info("🔄 [스케줄러] 집회 정보 크롤링을 시작합니다.")
