@@ -68,10 +68,15 @@ class NotificationService:
     def _format_event_block(index: int, event: Dict[str, Any]) -> str:
         """단일 집회 정보를 사용자 알림용 번호 블록으로 포맷팅"""
         attendees = str(event.get("attendees") or "").strip() or "미상"
+        if attendees != "미상" and attendees.isdigit() and not attendees.endswith("명"):
+            attendees = f"{attendees}명"
+        desc = event.get("description")
+        desc_line = f"상세 내용 : {desc}\n" if desc and str(desc).strip() else ""
         return (
             f"{index}.\n"
             f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
             f"집회 장소 : {event['location']}\n"
+            f"{desc_line}"
             f"신고 인원 : {attendees}"
         )
 
