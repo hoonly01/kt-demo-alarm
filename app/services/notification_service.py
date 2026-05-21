@@ -71,11 +71,12 @@ class NotificationService:
         if attendees != "미상" and attendees.isdigit() and not attendees.endswith("명"):
             attendees = f"{attendees}명"
         desc = event.get("description")
-        desc_text = f"\n상세 내용 : {desc}" if desc and str(desc).strip() else ""
+        desc_line = f"상세 내용 : {desc}\n" if desc and str(desc).strip() else ""
         return (
             f"{index}.\n"
             f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
-            f"집회 장소 : {event['location']}{desc_text}\n"
+            f"집회 장소 : {event['location']}\n"
+            f"{desc_line}"
             f"신고 인원 : {attendees}"
         )
 
