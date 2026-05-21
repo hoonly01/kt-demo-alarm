@@ -292,8 +292,8 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
             """
             INSERT INTO events (
                 title, location_name, latitude, longitude, start_date,
-                severity_level, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                severity_level, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "KST 표시 검증 집회",
@@ -304,14 +304,15 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
                 1,
                 "active",
                 "2026-05-15 00:30:00",
+                "2026-05-15 00:30:00",
             ),
         )
         cursor.execute(
             """
             INSERT INTO alarm_tasks (
                 task_id, alarm_type, status, total_recipients,
-                successful_sends, failed_sends, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                successful_sends, failed_sends, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "task-kst-display",
@@ -321,14 +322,15 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
                 3,
                 0,
                 "2026-05-15T09:40:00",
+                "2026-05-15T09:40:00",
             ),
         )
         cursor.execute(
             """
             INSERT INTO alarm_tasks (
                 task_id, alarm_type, status, total_recipients,
-                successful_sends, failed_sends, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                successful_sends, failed_sends, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "task-utc-offset-display",
@@ -337,6 +339,7 @@ def test_admin_dashboard_displays_times_in_kst(test_client, monkeypatch):
                 2,
                 2,
                 0,
+                "2026-05-15T00:50:00+00:00",
                 "2026-05-15T00:50:00+00:00",
             ),
         )
