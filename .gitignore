@@ -160,6 +160,8 @@ backup_oldfiles/
 *.md
 !README.md
 !DEPLOYMENT.md
+!docs/jongno-server-handover-runbook.md
+!docs/native-linux-deploy-guide.md
 
 # Design files
 *.vuerd.json
