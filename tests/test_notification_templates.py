@@ -98,13 +98,13 @@ async def test_events_today_protests_uses_numbered_brief_template(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_kakao_skills_upcoming_protests_uses_numbered_brief_template(monkeypatch):
+async def test_kakao_skills_upcoming_protests_includes_description_and_attendees(monkeypatch):
     monkeypatch.setattr(
         kakao_skills.EventService,
         "get_upcoming_events",
         lambda limit, db: [
             SimpleNamespace(
-                description="legacy description must not be used",
+                description="집회 상세 안내",
                 attendees="300명",
                 location_name="광화문 월대 -> 舊)효자치안센터",
                 start_date="2026-05-14T14:30:00",
@@ -120,5 +120,6 @@ async def test_kakao_skills_upcoming_protests_uses_numbered_brief_template(monke
         "1.\n"
         "집회 일시 : 14:30 ~ 16:00\n"
         "집회 장소 : 광화문 월대 -> 舊)효자치안센터\n"
+        "상세 내용 : 집회 상세 안내\n"
         "신고 인원 : 300명"
     )

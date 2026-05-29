@@ -1,21 +1,21 @@
 from app.services.notification_service import NotificationService
 
 
-def test_notification_uses_attendees_not_description():
+def test_notification_includes_description_and_attendees():
     message = NotificationService._format_event_message(
         [
             {
                 "location": "교보빌딩 남측 -> 청진공원",
                 "start_date": "2026-05-15 11:00:00",
                 "end_date": "2026-05-15 13:00:00",
-                "description": "legacy description must not appear",
+                "description": "교통 통제 상세 안내",
                 "attendees": "100명",
             }
         ]
     )
 
+    assert "상세 내용 : 교통 통제 상세 안내" in message
     assert "신고 인원 : 100명" in message
-    assert "legacy description" not in message
 
 
 def test_notification_attendees_default_is_unknown():
