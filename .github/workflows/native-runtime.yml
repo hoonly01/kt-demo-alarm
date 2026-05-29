@@ -1,0 +1,89 @@
+name: Native Runtime Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      app-dir:
+        description: "Native application directory used when rendering the systemd unit"
+        required: false
+        default: "/opt/kt-demo-alarm"
+      port:
+        description: "Local service port used for preflight rendering"
+        required: false
+        default: "8000"
+
+concurrency:
+  group: native-runtime-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Static native runtime preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync production runtime dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Check shell syntax
+        run: bash -n scripts/native/*.sh
+
+      - name: Prepare native runtime without browser download
+        env:
+          KT_NATIVE_APP_DIR: ${{ github.workspace }}
+          KT_NATIVE_PORT: ${{ inputs.port }}
+          KT_NATIVE_DATA_DIR: ${{ runner.temp }}/kt-demo-alarm/data
+          KT_NATIVE_LOG_DIR: ${{ runner.temp }}/kt-demo-alarm/logs
+          KT_NATIVE_CACHE_DIR: ${{ runner.temp }}/kt-demo-alarm/topis_cache
+          KT_NATIVE_ATTACHMENT_DIR: ${{ runner.temp }}/kt-demo-alarm/topis_attachments
+          KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/kt-demo-alarm/ms-playwright
+          KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER: "1"
+        run: scripts/native/setup-runtime.sh --skip-playwright-browser
+
+      - name: Run non-mutating native preflight
+        env:
+          KT_NATIVE_APP_DIR: ${{ github.workspace }}
+          KT_NATIVE_PORT: ${{ inputs.port }}
+          KT_NATIVE_DATA_DIR: ${{ runner.temp }}/kt-demo-alarm/data
+          KT_NATIVE_LOG_DIR: ${{ runner.temp }}/kt-demo-alarm/logs
+          KT_NATIVE_CACHE_DIR: ${{ runner.temp }}/kt-demo-alarm/topis_cache
+          KT_NATIVE_ATTACHMENT_DIR: ${{ runner.temp }}/kt-demo-alarm/topis_attachments
+          KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/kt-demo-alarm/ms-playwright
+        run: scripts/native/preflight.sh --skip-port-check
+
+      - name: Render and inspect systemd unit
+        env:
+          KT_NATIVE_APP_DIR: ${{ inputs.app-dir }}
+          KT_NATIVE_PORT: ${{ inputs.port }}
+        run: |
+          set -euo pipefail
+          scripts/native/render-systemd-unit.sh > kt-demo-alarm.service
+          test -s kt-demo-alarm.service
+          ! grep -E '\\{\\{|\\}\\}' kt-demo-alarm.service
+          grep -F 'Type=exec' kt-demo-alarm.service
+          grep -F 'User=' kt-demo-alarm.service
+          grep -F 'Group=' kt-demo-alarm.service
+          grep -F 'WorkingDirectory=' kt-demo-alarm.service
+          grep -F 'EnvironmentFile=' kt-demo-alarm.service
+          grep -F '/.venv/bin/uvicorn main:app' kt-demo-alarm.service
+          grep -F 'Restart=on-failure' kt-demo-alarm.service
+          grep -F 'RestartSec=' kt-demo-alarm.service
+          grep -F 'NoNewPrivileges=true' kt-demo-alarm.service
+          grep -F 'ProtectSystem=strict' kt-demo-alarm.service
+          grep -F 'ReadWritePaths=' kt-demo-alarm.service
+
+      - name: Compile application sources
+        run: .venv/bin/python -m compileall -q app main.py

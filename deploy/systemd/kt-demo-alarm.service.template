@@ -1,0 +1,31 @@
+[Unit]
+Description=KT Demo Alarm native FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User={{KT_NATIVE_SERVICE_USER}}
+Group={{KT_NATIVE_SERVICE_GROUP}}
+WorkingDirectory={{KT_NATIVE_APP_DIR}}
+EnvironmentFile=-{{KT_NATIVE_ENV_FILE}}
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH={{KT_NATIVE_APP_DIR}}
+Environment=DATABASE_PATH={{KT_NATIVE_DATABASE_PATH}}
+Environment=CACHE_FILE={{KT_NATIVE_CACHE_FILE}}
+Environment=ATTACHMENT_FOLDER={{KT_NATIVE_ATTACHMENT_DIR}}
+Environment=PLAYWRIGHT_BROWSERS_PATH={{KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH}}
+Environment=PORT={{KT_NATIVE_PORT}}
+ExecStart={{KT_NATIVE_APP_DIR}}/.venv/bin/uvicorn {{KT_NATIVE_UVICORN_APP}} --host {{KT_NATIVE_HOST}} --port {{KT_NATIVE_PORT}}
+Restart=on-failure
+RestartSec={{KT_NATIVE_RESTART_SEC}}
+KillSignal=SIGINT
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{KT_NATIVE_DATA_DIR}} {{KT_NATIVE_LOG_DIR}} {{KT_NATIVE_CACHE_DIR}} {{KT_NATIVE_ATTACHMENT_DIR}} {{KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH}}
+
+[Install]
+WantedBy=multi-user.target
