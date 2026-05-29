@@ -8,6 +8,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "native-runtime.yml"
+DEPLOY_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
 SYSTEMD_TEMPLATE = REPO_ROOT / "deploy" / "systemd" / "kt-demo-alarm.service.template"
 
@@ -48,6 +49,18 @@ def test_native_workflow_is_manual_preflight_only() -> None:
     ]
     for pattern in forbidden_patterns:
         assert not re.search(pattern, workflow_text)
+
+
+def test_docker_deploy_workflow_is_manual_only_during_native_migration() -> None:
+    workflow = yaml.load(DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+
+    assert set(workflow["on"]) == {"workflow_dispatch"}
+
+    workflow_text = DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "Build Docker Image" in workflow_text
+    assert "docker compose up -d --no-build" in workflow_text
+    assert "# push:" in workflow_text
+    assert "#     - main" in workflow_text
 
 
 def test_native_scripts_are_syntax_valid_and_non_mutating_by_default() -> None:
