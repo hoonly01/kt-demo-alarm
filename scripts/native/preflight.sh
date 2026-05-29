@@ -67,6 +67,9 @@ for required_dir in \
   if [[ ! -d "${required_dir}" ]]; then
     native_fail "Required runtime directory is missing: ${required_dir}"
   fi
+  if [[ ! -w "${required_dir}" ]]; then
+    native_fail "Required runtime directory is not writable: ${required_dir}"
+  fi
 done
 
 if [[ "${skip_port_check}" != "1" ]]; then

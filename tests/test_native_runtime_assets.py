@@ -36,6 +36,9 @@ def test_native_workflow_is_manual_preflight_only() -> None:
     assert set(workflow["jobs"]) == {"preflight"}
 
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "${{ inputs['app-dir'] }}" in workflow_text
+    assert "${{ inputs.app-dir }}" not in workflow_text
+
     forbidden_patterns = [
         r"secrets\.EC2_SSH_KEY",
         r"\bssh\b",
@@ -76,12 +79,14 @@ def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
     assert "playwright install chromium --with-deps" in setup_text
     assert "playwright install chromium" in setup_text
     assert ".venv/bin/uvicorn" in setup_text
+    assert "may also install supported OS dependencies" in setup_text
 
 
 def test_preflight_reports_conflicts_without_stop_start_mutation() -> None:
     preflight_text = (SCRIPT_DIR / "preflight.sh").read_text(encoding="utf-8")
 
     assert "connect_ex" in preflight_text
+    assert "[[ ! -w \"${required_dir}\" ]]" in preflight_text
     assert "docker compose ps --status running --services" in preflight_text
     assert "systemctl is-active --quiet" in preflight_text
     assert "systemctl start" not in preflight_text

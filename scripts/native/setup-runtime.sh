@@ -23,7 +23,9 @@ Environment overrides:
   KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH
   KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS=1
 
-This script does not install OS packages and does not start or stop services.
+This script does not start or stop services.
+By default it installs Python packages and the Playwright browser only.
+If KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS=1, Playwright may also install supported OS dependencies.
 USAGE
 }
 
