@@ -1,11 +1,9 @@
-name: Deploy to AWS EC2
+name: Deploy native runtime to EC2
 
 on:
-  # Docker EC2 deploy is intentionally manual while the Docker-free
-  # native runtime migration is in progress.
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -15,239 +13,233 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  KT_NATIVE_APP_DIR: ${{ vars.KT_NATIVE_APP_DIR || '/opt/kt-demo-alarm' }}
+  KT_NATIVE_SERVICE_NAME: ${{ vars.KT_NATIVE_SERVICE_NAME || 'kt-demo-alarm' }}
+  KT_NATIVE_HOST: ${{ vars.KT_NATIVE_HOST || '127.0.0.1' }}
+  KT_NATIVE_PORT: ${{ vars.KT_NATIVE_PORT || '8000' }}
+  KT_NATIVE_UV_BIN: ${{ vars.KT_NATIVE_UV_BIN || 'uv' }}
+  KT_NATIVE_PYTHON_BIN: ${{ vars.KT_NATIVE_PYTHON_BIN || 'python3' }}
+  KT_NATIVE_HEALTH_RETRIES: ${{ vars.KT_NATIVE_HEALTH_RETRIES || '60' }}
+  KT_NATIVE_HEALTH_INTERVAL_SECONDS: ${{ vars.KT_NATIVE_HEALTH_INTERVAL_SECONDS || '5' }}
+  KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS: ${{ vars.KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS || '0' }}
+  KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER: ${{ vars.KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER || '0' }}
+  KT_NATIVE_REMOTE_TMP_DIR: ${{ vars.KT_NATIVE_REMOTE_TMP_DIR || '/tmp' }}
+
 jobs:
-  deploy-test-bypass:
+  # test:
+  #   name: Run Tests (temporarily disabled for native EC2 deploy)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.12"
+  #     - uses: astral-sh/setup-uv@v5
+  #     - run: uv sync --frozen
+  #     - run: uv run pytest
+
+  # build-docker:
+  #   name: Build Docker image (disabled; native EC2 deploy does not build images)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: docker/setup-buildx-action@v3
+  #     - uses: docker/build-push-action@v5
+
+  deploy-native:
+    # needs: test
     runs-on: ubuntu-latest
-    name: Deploy test gate bypass
+    name: Deploy native runtime to EC2
     steps:
-      - name: Record bypass notice
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create source artifact
         run: |
-          echo "::warning title=Run Tests bypassed::Deployment is proceeding without the pytest gate. Use the linked issue/PR rollback criteria if production health or notification contracts regress."
-          {
-            echo "## Run Tests bypassed"
-            echo ""
-            echo "Deployment is intentionally proceeding without the pytest gate."
-            echo "Use the linked issue/PR rollback criteria if production health or notification contracts regress."
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          git archive --format=tar.gz -o kt-demo-alarm-source.tar.gz HEAD
 
-  build:
-    needs: deploy-test-bypass
-    runs-on: ubuntu-latest
-    name: Build Docker Image
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          tags: kt-demo-alarm:latest,kt-demo-alarm:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          outputs: type=docker,dest=kt-demo-alarm-image.tar
-
-      - name: Compress Docker image
-        run: gzip kt-demo-alarm-image.tar
-
-      - name: Upload Docker image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: kt-demo-alarm-image.tar.gz
-          retention-days: 1
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    name: Deploy to EC2
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Docker image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: docker-image
-
-      - name: Deploy to EC2
+      - name: Deploy source to EC2 native runtime
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_SSH_HOST_KEY: ${{ secrets.EC2_SSH_HOST_KEY }}
           PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
-          KAKAO_EVENT_API_KEY: ${{ secrets.KAKAO_EVENT_API_KEY }}
-          KAKAO_LOCATION_API_KEY: ${{ secrets.KAKAO_LOCATION_API_KEY }}
-          BOT_ID: ${{ secrets.BOT_ID }}
-          API_KEY: ${{ secrets.API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SEOUL_BUS_API_KEY: ${{ secrets.SEOUL_BUS_API_KEY }}
-          ADMIN_USER: ${{ secrets.ADMIN_USER }}
-          ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
-          TMAP_APP_KEY: ${{ secrets.TMAP_APP_KEY }}
-          ALARM_SAVE_BLOCK_ID: ${{ secrets.ALARM_SAVE_BLOCK_ID }}
-          FAVORITE_ZONE_SAVE_BLOCK_ID: ${{ secrets.FAVORITE_ZONE_SAVE_BLOCK_ID }}
-          ROUTE_SETUP_BLOCK_ID: ${{ secrets.ROUTE_SETUP_BLOCK_ID }}
-          ROUTE_DELETE_BLOCK_ID: ${{ secrets.ROUTE_DELETE_BLOCK_ID }}
-          WORKS_AI_API_KEY: ${{ secrets.WORKS_AI_API_KEY }}
         run: |
           set -euo pipefail
 
-          # SSH key
-          echo "$EC2_SSH_KEY" > ec2-key.pem
-          chmod 600 ec2-key.pem
+          cleanup_runner() {
+            rm -f \
+              deploy-key.pem \
+              known_hosts \
+              kt-demo-alarm-source.tar.gz \
+              native-deploy-config.env
+          }
+          trap cleanup_runner EXIT
 
-          # PUBLIC_DOMAIN 설정 확인
-          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
-            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
-            exit 1
-          fi
-
-          # Create .env on runner (printf prevents shell injection from special chars in secret values)
-          # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
-          printf '%s\n' \
-            "KAKAO_EVENT_API_KEY=${KAKAO_EVENT_API_KEY}" \
-            "KAKAO_LOCATION_API_KEY=${KAKAO_LOCATION_API_KEY}" \
-            "BOT_ID=${BOT_ID}" \
-            "API_KEY=${API_KEY}" \
-            "GEMINI_API_KEY=${GEMINI_API_KEY}" \
-            "SEOUL_BUS_API_KEY=${SEOUL_BUS_API_KEY}" \
-            "TMAP_APP_KEY=${TMAP_APP_KEY}" \
-            "ALARM_SAVE_BLOCK_ID=${ALARM_SAVE_BLOCK_ID}" \
-            "FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}" \
-            "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
-            "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
-            "RENDER_EXTERNAL_URL=https://${PUBLIC_DOMAIN}" \
-            "WORKS_AI_API_KEY=${WORKS_AI_API_KEY}" \
-            "ADMIN_USER=${ADMIN_USER}" \
-            "ADMIN_PASS=${ADMIN_PASS}" \
-            > .env
-
-          # Upload artifacts/config to EC2
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            kt-demo-alarm-image.tar.gz \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
-
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            docker-compose.yml .env \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
-
-          # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
-          # /tmp 대신 예측 불가능한 임시 파일 사용
-          NGINX_TMP=$(mktemp)
-          sed "s|DOMAIN_PLACEHOLDER|${PUBLIC_DOMAIN}|g" nginx/nginx.conf > "${NGINX_TMP}"
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            "${NGINX_TMP}" \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/nginx-pending.conf
-          rm -f "${NGINX_TMP}"
-
-          # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
-          ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
-            ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
-            set -euo pipefail
-            cd /opt/kt-demo-alarm
-
-            echo "=== Disk usage (before) ==="
-            df -h
-            docker system df || true
-
-            # Make directory with sudo and change owner to $USER
-            sudo mkdir -p data logs topis_attachments topis_cache
-            sudo chown -R $USER:$USER data logs topis_attachments topis_cache
-            chmod -R 755 data logs topis_attachments topis_cache || true
-
-            # Stop old stack (ignore if not running)
-            docker compose down || true
-
-            # Remove all unused images before loading the new release image.
-            docker image prune -af || true
-
-            echo "=== Disk usage (after prune) ==="
-            df -h
-            docker system df || true
-
-            # Load new image (uploaded as gzip)
-            gunzip -c /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz | docker load
-            rm -f /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
-
-            # Protect env file (must succeed — failure means .env is readable by all users)
-            chmod 600 .env
-
-            # Start without building (important!)
-            docker compose up -d --no-build
-
-            # Nginx 설정 업데이트 (변경된 경우)
-            if [ -f /opt/kt-demo-alarm/nginx-pending.conf ]; then
-              sudo cp /opt/kt-demo-alarm/nginx-pending.conf /etc/nginx/conf.d/kt-demo-alarm.conf
-              sudo nginx -t && sudo systemctl reload nginx
-              rm -f /opt/kt-demo-alarm/nginx-pending.conf
-            fi
-
-            # Ensure appuser owns data and attachments inside container (don't fail deploy if container isn't ready yet)
-            docker compose exec -u root kt-demo-alarm \
-              chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache || true
-
-            echo "Waiting for service health..."
-            service_healthy=0
-            for i in {1..60}; do
-              if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
-                echo "✅ Service is healthy on localhost:8000"
-                service_healthy=1
-                break
-              fi
-              echo "Attempt $i: not ready yet..."
-              sleep 5
-            done
-
-            if [ "$service_healthy" -ne 1 ]; then
-              echo "❌ Service did not become healthy on localhost:8000 within 300 seconds"
-              echo "docker compose ps:"
-              docker compose ps
-              echo "Recent logs:"
-              docker compose logs --tail=100
+          required_env=(
+            EC2_HOST
+            EC2_USERNAME
+            EC2_SSH_KEY
+            EC2_SSH_HOST_KEY
+            PUBLIC_DOMAIN
+            KT_NATIVE_APP_DIR
+            KT_NATIVE_SERVICE_NAME
+            KT_NATIVE_HOST
+            KT_NATIVE_PORT
+            KT_NATIVE_UV_BIN
+            KT_NATIVE_PYTHON_BIN
+            KT_NATIVE_HEALTH_RETRIES
+            KT_NATIVE_HEALTH_INTERVAL_SECONDS
+            KT_NATIVE_REMOTE_TMP_DIR
+          )
+          for name in "${required_env[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "❌ Required deployment value is empty: ${name}"
               exit 1
             fi
+          done
 
-            echo "docker compose ps:"
-            docker compose ps
+          echo "${EC2_SSH_KEY}" > deploy-key.pem
+          chmod 600 deploy-key.pem
+          printf '%s\n' "${EC2_SSH_HOST_KEY}" > known_hosts
+          chmod 600 known_hosts
 
-            echo "Recent logs:"
-            docker compose logs --tail=100
+          ssh_options=(
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile=known_hosts
+            -i deploy-key.pem
+          )
 
-            echo "=== Disk usage (end) ==="
-            df -h
-            docker system df || true
+          remote_tmp_dir="${KT_NATIVE_REMOTE_TMP_DIR%/}"
+          remote_source_tgz="${remote_tmp_dir}/kt-demo-alarm-source-${GITHUB_RUN_ID}.tar.gz"
+          remote_config="${remote_tmp_dir}/kt-demo-alarm-native-deploy-${GITHUB_RUN_ID}.env"
+
+          write_shell_var() {
+            local name="$1"
+            printf '%s=%q\n' "${name}" "${!name}" >> native-deploy-config.env
+          }
+
+          : > native-deploy-config.env
+          config_names=(
+            KT_NATIVE_APP_DIR
+            KT_NATIVE_SERVICE_NAME
+            KT_NATIVE_HOST
+            KT_NATIVE_PORT
+            KT_NATIVE_UV_BIN
+            KT_NATIVE_PYTHON_BIN
+            KT_NATIVE_HEALTH_RETRIES
+            KT_NATIVE_HEALTH_INTERVAL_SECONDS
+            KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS
+            KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER
+          )
+          for name in "${config_names[@]}"; do
+            write_shell_var "${name}"
+          done
+          printf '%s=%q\n' KT_NATIVE_REMOTE_SOURCE_TGZ "${remote_source_tgz}" >> native-deploy-config.env
+          printf '%s=%q\n' KT_NATIVE_REMOTE_CONFIG "${remote_config}" >> native-deploy-config.env
+
+          ssh "${ssh_options[@]}" \
+            "${EC2_USERNAME}@${EC2_HOST}" \
+            "mkdir -p $(printf '%q' "${remote_tmp_dir}")"
+
+          scp "${ssh_options[@]}" \
+            kt-demo-alarm-source.tar.gz \
+            "${EC2_USERNAME}@${EC2_HOST}:${remote_source_tgz}"
+
+          scp "${ssh_options[@]}" \
+            native-deploy-config.env \
+            "${EC2_USERNAME}@${EC2_HOST}:${remote_config}"
+
+          ssh "${ssh_options[@]}" \
+            "${EC2_USERNAME}@${EC2_HOST}" \
+            "KT_NATIVE_REMOTE_CONFIG=$(printf '%q' "${remote_config}") bash -s" <<'ENDSSH'
+            set -euo pipefail
+
+            # shellcheck disable=SC1090
+            source "${KT_NATIVE_REMOTE_CONFIG}"
+
+            cleanup_remote() {
+              rm -f \
+                "${KT_NATIVE_REMOTE_SOURCE_TGZ}" \
+                "${KT_NATIVE_REMOTE_CONFIG}"
+            }
+            trap cleanup_remote EXIT
+
+            required_remote_env=(
+              KT_NATIVE_APP_DIR
+              KT_NATIVE_SERVICE_NAME
+              KT_NATIVE_HOST
+              KT_NATIVE_PORT
+              KT_NATIVE_UV_BIN
+              KT_NATIVE_PYTHON_BIN
+              KT_NATIVE_HEALTH_RETRIES
+              KT_NATIVE_HEALTH_INTERVAL_SECONDS
+              KT_NATIVE_REMOTE_SOURCE_TGZ
+            )
+            for name in "${required_remote_env[@]}"; do
+              if [[ -z "${!name}" ]]; then
+                echo "❌ Required remote deployment value is empty: ${name}"
+                exit 1
+              fi
+            done
+
+            [[ -d "${KT_NATIVE_APP_DIR}" ]] || {
+              echo "❌ Native app directory is missing: ${KT_NATIVE_APP_DIR}"
+              exit 1
+            }
+            [[ -w "${KT_NATIVE_APP_DIR}" ]] || {
+              echo "❌ Native app directory is not writable by deploy account: ${KT_NATIVE_APP_DIR}"
+              exit 1
+            }
+            sudo systemctl cat "${KT_NATIVE_SERVICE_NAME}" >/dev/null
+
+            tar -xzf "${KT_NATIVE_REMOTE_SOURCE_TGZ}" -C "${KT_NATIVE_APP_DIR}"
+
+            KT_NATIVE_APP_DIR="${KT_NATIVE_APP_DIR}" \
+            KT_NATIVE_SERVICE_NAME="${KT_NATIVE_SERVICE_NAME}" \
+            KT_NATIVE_HOST="${KT_NATIVE_HOST}" \
+            KT_NATIVE_PORT="${KT_NATIVE_PORT}" \
+            KT_NATIVE_UV_BIN="${KT_NATIVE_UV_BIN}" \
+            KT_NATIVE_PYTHON_BIN="${KT_NATIVE_PYTHON_BIN}" \
+            KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS="${KT_NATIVE_INSTALL_PLAYWRIGHT_DEPS}" \
+            KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER="${KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER}" \
+              bash -lc 'cd "${KT_NATIVE_APP_DIR}" && scripts/native/setup-runtime.sh'
+
+            KT_NATIVE_APP_DIR="${KT_NATIVE_APP_DIR}" \
+            KT_NATIVE_SERVICE_NAME="${KT_NATIVE_SERVICE_NAME}" \
+            KT_NATIVE_HOST="${KT_NATIVE_HOST}" \
+            KT_NATIVE_PORT="${KT_NATIVE_PORT}" \
+            KT_NATIVE_UV_BIN="${KT_NATIVE_UV_BIN}" \
+            KT_NATIVE_PYTHON_BIN="${KT_NATIVE_PYTHON_BIN}" \
+              bash -lc 'cd "${KT_NATIVE_APP_DIR}" && scripts/native/preflight.sh --skip-port-check --allow-active-systemd'
+
+            sudo systemctl restart "${KT_NATIVE_SERVICE_NAME}"
+
+            KT_NATIVE_APP_DIR="${KT_NATIVE_APP_DIR}" \
+            KT_NATIVE_HEALTH_HOST="127.0.0.1" \
+            KT_NATIVE_PORT="${KT_NATIVE_PORT}" \
+            KT_NATIVE_PYTHON_BIN="${KT_NATIVE_PYTHON_BIN}" \
+            KT_NATIVE_HEALTH_RETRIES="${KT_NATIVE_HEALTH_RETRIES}" \
+            KT_NATIVE_HEALTH_INTERVAL_SECONDS="${KT_NATIVE_HEALTH_INTERVAL_SECONDS}" \
+              bash -lc 'cd "${KT_NATIVE_APP_DIR}" && scripts/native/healthcheck.sh'
           ENDSSH
 
-          # Cleanup runner files
-          rm -f ec2-key.pem .env
-
-      - name: Verify deployment (public)
+      - name: Verify deployment through public endpoint
         env:
           PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
         run: |
           set -euo pipefail
           echo "Checking public health endpoint..."
-          for i in {1..60}; do
-            if curl -fsS https://${PUBLIC_DOMAIN}/ > /dev/null 2>&1; then
+          for attempt in $(seq 1 "${KT_NATIVE_HEALTH_RETRIES}"); do
+            if curl -fsS "https://${PUBLIC_DOMAIN}/" > /dev/null 2>&1; then
               echo "✅ Application is reachable: https://${PUBLIC_DOMAIN}/"
               exit 0
             fi
-            echo "Attempt $i: waiting..."
-            sleep 5
+            echo "Attempt ${attempt}: waiting..."
+            sleep "${KT_NATIVE_HEALTH_INTERVAL_SECONDS}"
           done
-          echo "❌ Public health check failed (verify Nginx + SSL + SG inbound 443 for ${PUBLIC_DOMAIN})"
+          echo "❌ Public health check failed for https://${PUBLIC_DOMAIN}/"
           exit 1
-
-      - name: Notify deployment status
-        if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Deployment successful!"
-          else
-            echo "❌ Deployment failed!"
-            exit 1
-          fi

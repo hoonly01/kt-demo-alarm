@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+APP_HEALTH_URL="${APP_HEALTH_URL:-http://localhost:8000/}"
+APP_SERVICE_NAME="${APP_SERVICE_NAME:-kt-demo-alarm}"
+
 echo "================================"
 echo "Cloudflare Tunnel Setup"
 echo "================================"
@@ -110,11 +113,11 @@ echo ""
 # Step 7: Test the tunnel
 echo "🧪 Step 7: Testing tunnel..."
 echo "Testing local application first..."
-if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
+if curl -fsS "${APP_HEALTH_URL}" > /dev/null 2>&1; then
     echo "✅ Local application is responding"
 else
-    echo "❌ Local application is not responding on port 8000"
-    echo "Please check: docker compose ps"
+    echo "❌ Local application is not responding: ${APP_HEALTH_URL}"
+    echo "Please check: systemctl status ${APP_SERVICE_NAME}"
     exit 1
 fi
 

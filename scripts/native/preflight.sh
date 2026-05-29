@@ -19,7 +19,7 @@ Checks:
   - port and active runtime conflict signals
   - Playwright package/browser dependency readiness notes
 
-This script does not stop/start Docker, systemd, or remote services.
+This script does not stop/start systemd or remote services.
 USAGE
 }
 
@@ -89,12 +89,6 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 if result == 0:
     raise SystemExit(f"Port already accepts connections: {host}:{port}")
 PY
-fi
-
-if command -v docker >/dev/null 2>&1; then
-  if docker compose ps --status running --services 2>/dev/null | grep -qx "${KT_NATIVE_SERVICE_NAME}"; then
-    native_fail "Docker compose service is already running: ${KT_NATIVE_SERVICE_NAME}"
-  fi
 fi
 
 if command -v systemctl >/dev/null 2>&1; then

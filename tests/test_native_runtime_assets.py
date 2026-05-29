@@ -11,6 +11,11 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "native-runtime.yml"
 DEPLOY_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
 SYSTEMD_TEMPLATE = REPO_ROOT / "deploy" / "systemd" / "kt-demo-alarm.service.template"
+REMOVED_DOCKER_ASSETS = (
+    REPO_ROOT / "Dockerfile",
+    REPO_ROOT / "docker-compose.yml",
+    REPO_ROOT / ".dockerignore",
+)
 
 
 def run_command(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -26,6 +31,12 @@ def run_command(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str
         check=True,
         env=env,
         **kwargs,
+    )
+
+
+def uncommented_lines(text: str) -> str:
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
 
 
@@ -51,16 +62,47 @@ def test_native_workflow_is_manual_preflight_only() -> None:
         assert not re.search(pattern, workflow_text)
 
 
-def test_docker_deploy_workflow_is_manual_only_during_native_migration() -> None:
+def test_deploy_workflow_runs_native_ec2_deploy_with_test_and_docker_build_commented() -> None:
     workflow = yaml.load(DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
-    assert set(workflow["on"]) == {"workflow_dispatch"}
+    triggers = workflow["on"]
+    assert set(triggers) == {"push", "workflow_dispatch"}
+    assert triggers["push"]["branches"] == ["main"]
+    assert set(workflow["jobs"]) == {"deploy-native"}
+    assert "needs" not in workflow["jobs"]["deploy-native"]
 
     workflow_text = DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "Build Docker Image" in workflow_text
-    assert "docker compose up -d --no-build" in workflow_text
-    assert "# push:" in workflow_text
-    assert "#     - main" in workflow_text
+    active_workflow_text = uncommented_lines(workflow_text)
+
+    assert "# test:" in workflow_text
+    assert "# build-docker:" in workflow_text
+    assert "#     - run: uv run pytest" in workflow_text
+    assert "#     - uses: docker/setup-buildx-action@v3" in workflow_text
+    assert "#     - uses: docker/build-push-action@v5" in workflow_text
+
+    assert "uv run pytest" not in active_workflow_text
+    assert "docker" not in active_workflow_text.lower()
+    assert "git archive --format=tar.gz" in active_workflow_text
+    assert 'ssh "${ssh_options[@]}"' in active_workflow_text
+    assert 'scp "${ssh_options[@]}"' in active_workflow_text
+    assert "scripts/native/setup-runtime.sh" in active_workflow_text
+    assert "scripts/native/preflight.sh --skip-port-check --allow-active-systemd" in active_workflow_text
+    assert "sudo systemctl restart" in active_workflow_text
+    assert "scripts/native/healthcheck.sh" in active_workflow_text
+
+
+def test_docker_runtime_assets_are_removed() -> None:
+    for path in REMOVED_DOCKER_ASSETS:
+        assert not path.exists()
+
+    runtime_paths = [
+        REPO_ROOT / "scripts" / "setup-ec2.sh",
+        REPO_ROOT / "legacy" / "cloudflare-setup.sh",
+        *SCRIPT_DIR.glob("*.sh"),
+    ]
+    for path in runtime_paths:
+        text = path.read_text(encoding="utf-8")
+        assert "docker" not in text.lower(), path
 
 
 def test_native_scripts_are_syntax_valid_and_non_mutating_by_default() -> None:
@@ -78,7 +120,7 @@ def test_native_scripts_are_syntax_valid_and_non_mutating_by_default() -> None:
     combined = "\n".join(script.read_text(encoding="utf-8") for script in scripts)
     forbidden_patterns = [
         r"\bsudo\b",
-        r"docker\s+compose\s+(down|up)",
+        r"\bdocker\b",
         r"systemctl\s+(start|stop|restart|reload)",
     ]
     for pattern in forbidden_patterns:
@@ -100,12 +142,10 @@ def test_preflight_reports_conflicts_without_stop_start_mutation() -> None:
 
     assert "connect_ex" in preflight_text
     assert "[[ ! -w \"${required_dir}\" ]]" in preflight_text
-    assert "docker compose ps --status running --services" in preflight_text
     assert "systemctl is-active --quiet" in preflight_text
     assert "systemctl start" not in preflight_text
     assert "systemctl stop" not in preflight_text
-    assert "docker compose down" not in preflight_text
-    assert "docker compose up" not in preflight_text
+    assert "docker" not in preflight_text.lower()
 
 
 def test_rendered_systemd_unit_has_required_directives() -> None:
