@@ -1,9 +1,11 @@
 name: Deploy to AWS EC2
 
 on:
-  push:
-    branches:
-      - main
+  # Docker EC2 deploy is intentionally manual while the Docker-free
+  # native runtime migration is in progress.
+  # push:
+  #   branches:
+  #     - main
   workflow_dispatch:
 
 concurrency:
