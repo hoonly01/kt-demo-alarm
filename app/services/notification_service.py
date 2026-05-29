@@ -4,7 +4,7 @@ import logging
 import httpx
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Iterator, Tuple
-from app.models.alarm import AlarmRequest, FilteredAlarmRequest
+from app.models.alarm import AlarmRequest
 from app.models.kakao import EventAPIRequest, Event, EventUser
 from app.config.settings import settings
 
@@ -70,13 +70,10 @@ class NotificationService:
         attendees = str(event.get("attendees") or "").strip() or "미상"
         if attendees != "미상" and attendees.isdigit() and not attendees.endswith("명"):
             attendees = f"{attendees}명"
-        desc = event.get("description")
-        desc_line = f"상세 내용 : {desc}\n" if desc and str(desc).strip() else ""
         return (
             f"{index}.\n"
             f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
             f"집회 장소 : {event['location']}\n"
-            f"{desc_line}"
             f"신고 인원 : {attendees}"
         )
 
