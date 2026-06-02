@@ -26,7 +26,7 @@
 
 | Phase | Expected behavior |
 |---|---|
-| Phase 1 — merge-ready | `blocking-tests`, `package-native-release`, `advisory-template-regression`, `deploy-native-preflight`만 기본 수행 |
+| Phase 1 — merge-ready | `blocking-tests`, `package-native-release`, `deploy-native-preflight`만 기본 수행 |
 | Phase 2 — activation | `deploy-native-live`는 guard가 열렸을 때만 실행 |
 | Phase 3 — post-activation | `public-health`는 live success 뒤에만 blocking 수행 |
 
