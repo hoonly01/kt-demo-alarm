@@ -8,7 +8,14 @@ OUTPUT_DIR="${1:-${REPO_ROOT}/release-artifact}"
 BUNDLE_NAME="${BUNDLE_NAME:-source-bundle.tar.gz}"
 CHECKSUM_NAME="${CHECKSUM_NAME:-source-bundle.sha256}"
 
+if [[ "${OUTPUT_DIR}" != /* ]]; then
+  OUTPUT_DIR="$(pwd)/${OUTPUT_DIR}"
+fi
+
 mkdir -p "${OUTPUT_DIR}"
+OUTPUT_DIR="$(cd "${OUTPUT_DIR}" && pwd)"
+BUNDLE_PATH="${OUTPUT_DIR}/${BUNDLE_NAME}"
+CHECKSUM_PATH="${OUTPUT_DIR}/${CHECKSUM_NAME}"
 
 staging_dir="$(mktemp -d)"
 trap 'rm -rf -- "${staging_dir}"' EXIT
@@ -67,15 +74,15 @@ fi
   find . -mindepth 1 \( -type f -o -type l \) \
     | sed 's#^\./##' \
     | sort > bundle-manifest.txt
-  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${OUTPUT_DIR}/${BUNDLE_NAME}" .
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${BUNDLE_PATH}" .
 )
 
-sha256sum "${OUTPUT_DIR}/${BUNDLE_NAME}" > "${OUTPUT_DIR}/${CHECKSUM_NAME}"
+sha256sum "${BUNDLE_PATH}" > "${CHECKSUM_PATH}"
 
-if ! tar -tzf "${OUTPUT_DIR}/${BUNDLE_NAME}" | sed 's#^\./##' | grep -Fxq bundle-manifest.txt; then
+if ! tar -tzf "${BUNDLE_PATH}" | sed 's#^\./##' | grep -Fxq bundle-manifest.txt; then
   echo "bundle-manifest.txt is missing from ${BUNDLE_NAME}" >&2
   exit 1
 fi
 
-echo "Created ${OUTPUT_DIR}/${BUNDLE_NAME}"
-echo "Created ${OUTPUT_DIR}/${CHECKSUM_NAME}"
+echo "Created ${BUNDLE_PATH}"
+echo "Created ${CHECKSUM_PATH}"

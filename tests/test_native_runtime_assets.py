@@ -236,6 +236,21 @@ def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
         assert all(name != denied and not name.startswith(f"{denied}/") for name in names)
 
 
+def test_package_source_bundle_accepts_relative_output_dir(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifact"
+    relative_output_dir = os.path.relpath(artifact_dir, REPO_ROOT)
+
+    _ = run_command("bash", str(PACKAGE_SCRIPT), relative_output_dir)
+
+    bundle_path = artifact_dir / "source-bundle.tar.gz"
+    checksum_path = artifact_dir / "source-bundle.sha256"
+
+    assert bundle_path.exists()
+    assert checksum_path.exists()
+
+    _ = run_command("bash", str(VERIFY_SCRIPT), str(bundle_path), str(checksum_path))
+
+
 def test_deploy_release_script_contains_required_preflight_and_rollback_guards() -> None:
     deploy_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
