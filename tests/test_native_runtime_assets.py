@@ -23,6 +23,8 @@ LEGACY_DOCKER_DIR = REPO_ROOT / "legacy" / "docker-deploy"
 LEGACY_BOOTSTRAP_README = REPO_ROOT / "legacy" / "bootstrap" / "README.md"
 SETUP_EC2_SCRIPT = REPO_ROOT / "scripts" / "setup-ec2.sh"
 ADVISORY_SCRIPT = REPO_ROOT / "scripts" / "ci" / "advisory_contract.py"
+PLANS_DIR = REPO_ROOT / ".omx" / "plans"
+ADVISORY_CONTRACT_GLOB = "advisory-contract-docker-free-next-action-*.md"
 CONTRACT_ID = "template-only-advisory-v1"
 YamlScalar: TypeAlias = str | int | float | bool | None
 YamlValue: TypeAlias = YamlScalar | list["YamlValue"] | dict[str, "YamlValue"]
@@ -53,6 +55,12 @@ def advisory_selectors() -> list[str]:
     selectors = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     assert len(selectors) == 2
     return selectors
+
+
+def advisory_contract_path() -> Path:
+    matches = sorted(PLANS_DIR.glob(ADVISORY_CONTRACT_GLOB))
+    assert len(matches) == 1
+    return matches[0]
 
 
 def workflow() -> WorkflowDocument:
@@ -91,6 +99,19 @@ def test_advisory_contract_script_stays_narrow() -> None:
         "test_notification_attendees.py",
         "test_notification_templates.py",
     }
+
+
+def test_advisory_contract_plan_is_repo_tracked() -> None:
+    contract_path = advisory_contract_path()
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", str(contract_path.relative_to(REPO_ROOT))],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_deploy_workflow_matches_guarded_native_graph() -> None:
