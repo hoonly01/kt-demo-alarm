@@ -44,6 +44,9 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install Playwright browser for blocking smoke test
+        run: uv run --no-dev playwright install chromium
+
       - name: Check lockfile freshness
         run: uv lock --check
 
