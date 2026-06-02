@@ -18,7 +18,8 @@ BUNDLE_PATH="${OUTPUT_DIR}/${BUNDLE_NAME}"
 CHECKSUM_PATH="${OUTPUT_DIR}/${CHECKSUM_NAME}"
 
 staging_dir="$(mktemp -d)"
-trap 'rm -rf -- "${staging_dir}"' EXIT
+bundle_tmp_dir="$(mktemp -d)"
+trap 'rm -rf -- "${staging_dir}" "${bundle_tmp_dir}"' EXIT
 
 source_paths=(
   app
@@ -74,9 +75,10 @@ fi
   find . -mindepth 1 \( -type f -o -type l \) \
     | sed 's#^\./##' \
     | sort > bundle-manifest.txt
-  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${BUNDLE_PATH}" .
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${bundle_tmp_dir}/${BUNDLE_NAME}" .
 )
 
+mv "${bundle_tmp_dir}/${BUNDLE_NAME}" "${BUNDLE_PATH}"
 sha256sum "${BUNDLE_PATH}" > "${CHECKSUM_PATH}"
 
 if ! tar -tzf "${BUNDLE_PATH}" | sed 's#^\./##' | grep -Fxq bundle-manifest.txt; then

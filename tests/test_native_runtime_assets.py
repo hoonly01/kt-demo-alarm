@@ -251,6 +251,27 @@ def test_package_source_bundle_accepts_relative_output_dir(tmp_path: Path) -> No
     _ = run_command("bash", str(VERIFY_SCRIPT), str(bundle_path), str(checksum_path))
 
 
+def test_package_source_bundle_accepts_repo_local_relative_output_dir() -> None:
+    artifact_dir = REPO_ROOT / ".pytest-package-artifact"
+
+    if artifact_dir.exists():
+        shutil.rmtree(artifact_dir)
+
+    try:
+        _ = run_command("bash", str(PACKAGE_SCRIPT), artifact_dir.name)
+
+        bundle_path = artifact_dir / "source-bundle.tar.gz"
+        checksum_path = artifact_dir / "source-bundle.sha256"
+
+        assert bundle_path.exists()
+        assert checksum_path.exists()
+
+        _ = run_command("bash", str(VERIFY_SCRIPT), str(bundle_path), str(checksum_path))
+    finally:
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
+
+
 def test_deploy_release_script_contains_required_preflight_and_rollback_guards() -> None:
     deploy_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
