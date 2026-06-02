@@ -7,7 +7,6 @@
 ```text
 blocking-tests
   -> package-native-release
-  -> advisory-template-regression
   -> deploy-native-preflight
   -> deploy-native-live [guarded]
   -> public-health
@@ -16,7 +15,7 @@ blocking-tests
 | 항목 | 결정 |
 |---|---|
 | Canonical deploy path | source bundle → server-side `uv sync --frozen --no-dev` → systemd-managed `uvicorn main:app` |
-| Advisory contract | `template-only-advisory-v1` |
+| Pytest policy | full `uv run pytest -q` blocking green |
 | Live activation gate | `native-live-activation-gate-v1` |
 | Runtime config ownership | server-owned `${APP_ROOT}/shared/.env` only |
 | Legacy Docker | `legacy/docker-deploy/` 아래에 보존하되 active workflow path에서는 사용하지 않음 |
@@ -25,8 +24,7 @@ blocking-tests
 
 | Job | 역할 | Blocking 여부 |
 |---|---|---|
-| `blocking-tests` | lockfile freshness + advisory selector를 제외한 pytest | **Blocking** |
-| `advisory-template-regression` | `template-only-advisory-v1` selector 2건만 별도 증빙 | Non-blocking evidence |
+| `blocking-tests` | lockfile freshness + full pytest | **Blocking** |
 | `package-native-release` | allowlisted source bundle + checksum 생성 | **Blocking** |
 | `deploy-native-preflight` | bundle verify, native static tests, non-mutating preflight | **Blocking** |
 | `deploy-native-live` | source bundle 업로드 + remote release deploy | Guarded |
@@ -126,8 +124,5 @@ The deploy script recreates compatibility symlinks inside each release:
 ```bash
 bash -n deploy/native/*.sh scripts/native/*.sh
 uv run pytest tests/test_native_runtime_assets.py -q
-python scripts/ci/advisory_contract.py run-blocking-pytest -- -q
-python scripts/ci/advisory_contract.py run-advisory-pytest -- -q
+uv run pytest -q
 ```
-
-`uv run pytest -q` full suite는 현재 advisory selector 2건 때문에 여전히 red일 수 있다.

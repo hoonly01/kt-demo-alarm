@@ -23,7 +23,6 @@ env:
   RELEASE_KEEP: "5"
   BUNDLE_NAME: source-bundle.tar.gz
   CHECKSUM_NAME: source-bundle.sha256
-  ADVISORY_CONTRACT_ID: template-only-advisory-v1
   NATIVE_LIVE_GATE_ID: native-live-activation-gate-v1
 
 jobs:
@@ -50,43 +49,8 @@ jobs:
       - name: Check lockfile freshness
         run: uv lock --check
 
-      - name: Run blocking pytest
-        run: python scripts/ci/advisory_contract.py run-blocking-pytest -- -q
-
-  advisory-template-regression:
-    needs: blocking-tests
-    runs-on: ubuntu-latest
-    name: Advisory template regression
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version-file: .python-version
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Run advisory selectors and record evidence
-        env:
-          ADVISORY_CONTRACT_ID: ${{ env.ADVISORY_CONTRACT_ID }}
-        run: |
-          set +e
-          python scripts/ci/advisory_contract.py run-advisory-pytest -- -q
-          advisory_exit_code=$?
-          set -e
-
-          python scripts/ci/advisory_contract.py write-summary \
-            --exit-code "${advisory_exit_code}" \
-            --output "${GITHUB_STEP_SUMMARY}"
-
-          if [[ "${advisory_exit_code}" -gt 1 ]]; then
-            exit "${advisory_exit_code}"
-          fi
+      - name: Run full pytest
+        run: uv run pytest -q
 
   package-native-release:
     needs: blocking-tests
@@ -111,7 +75,6 @@ jobs:
   deploy-native-preflight:
     needs:
       - package-native-release
-      - advisory-template-regression
     runs-on: ubuntu-latest
     name: Native deploy preflight
     steps:
@@ -197,7 +160,7 @@ jobs:
               echo "- \`deploy-native-live\` will still wait for protected \`native-live\` environment approval."
             else
               echo "- Repository variable \`KT_NATIVE_DEPLOY_ENABLED\` is not enabled."
-              echo "- Workflow stops at blocking tests, package, advisory evidence, and native preflight."
+              echo "- Workflow stops at blocking tests, package, and native preflight."
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 

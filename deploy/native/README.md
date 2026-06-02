@@ -43,7 +43,7 @@ The live job is not the default behavior of the first pass.
 | protected `native-live` environment approval | operator-owned cutover gate |
 
 Without both, the workflow should stop after blocking tests, package, advisory
-evidence, and deploy preflight.
+and deploy preflight.
 
 ## Secret ownership
 
@@ -65,8 +65,7 @@ evidence, and deploy preflight.
 ```bash
 bash -n deploy/native/*.sh scripts/native/*.sh
 uv run pytest tests/test_native_runtime_assets.py -q
-python scripts/ci/advisory_contract.py run-blocking-pytest -- -q
-python scripts/ci/advisory_contract.py run-advisory-pytest -- -q
+uv run pytest -q
 ```
 
 Do not re-enable the legacy Docker graph from workflow comments without a new PRD

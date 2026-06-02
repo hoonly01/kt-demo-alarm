@@ -18,14 +18,13 @@ VERIFY_SCRIPT = REPO_ROOT / "deploy" / "native" / "verify-source-bundle.sh"
 DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "native" / "deploy-release.sh"
 TEMPLATE_PATH = REPO_ROOT / "deploy" / "native" / "kt-demo-alarm.service.template"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
+NATIVE_GUIDE_PATH = REPO_ROOT / "docs" / "native-linux-deploy-guide.md"
+RUNBOOK_PATH = REPO_ROOT / "docs" / "docker-free-fastapi-deploy-runbook.md"
+NATIVE_ASSET_README_PATH = REPO_ROOT / "deploy" / "native" / "README.md"
 ROOT_README_PATH = REPO_ROOT / "README.md"
 LEGACY_DOCKER_DIR = REPO_ROOT / "legacy" / "docker-deploy"
 LEGACY_BOOTSTRAP_README = REPO_ROOT / "legacy" / "bootstrap" / "README.md"
 SETUP_EC2_SCRIPT = REPO_ROOT / "scripts" / "setup-ec2.sh"
-ADVISORY_SCRIPT = REPO_ROOT / "scripts" / "ci" / "advisory_contract.py"
-PLANS_DIR = REPO_ROOT / ".omx" / "plans"
-ADVISORY_CONTRACT_GLOB = "advisory-contract-docker-free-next-action-*.md"
-CONTRACT_ID = "template-only-advisory-v1"
 YamlScalar: TypeAlias = str | int | float | bool | None
 YamlValue: TypeAlias = YamlScalar | list["YamlValue"] | dict[str, "YamlValue"]
 WorkflowJob: TypeAlias = dict[str, YamlValue]
@@ -48,19 +47,6 @@ def run_command(
         check=True,
         env=env,
     )
-
-
-def advisory_selectors() -> list[str]:
-    result = run_command(sys.executable, str(ADVISORY_SCRIPT), "selectors", "--format", "newline")
-    selectors = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-    assert len(selectors) == 2
-    return selectors
-
-
-def advisory_contract_path() -> Path:
-    matches = sorted(PLANS_DIR.glob(ADVISORY_CONTRACT_GLOB))
-    assert len(matches) == 1
-    return matches[0]
 
 
 def workflow() -> WorkflowDocument:
@@ -91,35 +77,11 @@ def uncommented_workflow_text() -> str:
     )
 
 
-def test_advisory_contract_script_stays_narrow() -> None:
-    selectors = advisory_selectors()
-
-    assert len(selectors) == 2
-    assert {Path(selector.split("::", maxsplit=1)[0]).name for selector in selectors} == {
-        "test_notification_attendees.py",
-        "test_notification_templates.py",
-    }
-
-
-def test_advisory_contract_plan_is_repo_tracked() -> None:
-    contract_path = advisory_contract_path()
-    result = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", str(contract_path.relative_to(REPO_ROOT))],
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-
-
 def test_deploy_workflow_matches_guarded_native_graph() -> None:
     jobs = workflow_jobs()
 
     assert set(jobs) == {
         "blocking-tests",
-        "advisory-template-regression",
         "package-native-release",
         "deploy-native-preflight",
         "deploy-native-live",
@@ -127,11 +89,7 @@ def test_deploy_workflow_matches_guarded_native_graph() -> None:
     }
 
     assert normalize_needs(jobs["package-native-release"]["needs"]) == ["blocking-tests"]
-    assert normalize_needs(jobs["advisory-template-regression"]["needs"]) == ["blocking-tests"]
-    assert set(normalize_needs(jobs["deploy-native-preflight"]["needs"])) == {
-        "package-native-release",
-        "advisory-template-regression",
-    }
+    assert normalize_needs(jobs["deploy-native-preflight"]["needs"]) == ["package-native-release"]
     assert normalize_needs(jobs["deploy-native-live"]["needs"]) == ["deploy-native-preflight"]
     assert normalize_needs(jobs["public-health"]["needs"]) == ["deploy-native-live"]
 
@@ -150,19 +108,17 @@ def test_blocking_workflow_installs_playwright_browser_for_smoke_test() -> None:
     run_text = "\n".join(str(step.get("run", "")) for step in blocking_steps)
 
     assert "playwright install chromium" in run_text
+    assert "uv run pytest -q" in run_text
+    assert "advisory_contract.py" not in run_text
 
 
-def test_active_workflow_uses_contract_id_without_raw_selector_duplication() -> None:
+def test_active_workflow_retires_advisory_contract_lane() -> None:
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
     active_text = uncommented_workflow_text()
-    selectors = advisory_selectors()
 
-    assert CONTRACT_ID in workflow_text
-    for selector in selectors:
-        assert selector not in workflow_text
-
-    assert "scripts/ci/advisory_contract.py run-blocking-pytest" in active_text
-    assert "scripts/ci/advisory_contract.py run-advisory-pytest" in active_text
+    assert "ADVISORY_CONTRACT_ID" not in workflow_text
+    assert "advisory-template-regression" not in active_text
+    assert "scripts/ci/advisory_contract.py" not in active_text
 
 
 def test_active_workflow_removes_docker_runtime_and_runner_env_rendering() -> None:
@@ -358,6 +314,18 @@ def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
     assert "playwright install chromium" in setup_text
     assert ".venv/bin/uvicorn" in setup_text
     assert "may also install supported OS dependencies" in setup_text
+
+
+def test_active_native_docs_retire_advisory_lane() -> None:
+    docs_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (NATIVE_GUIDE_PATH, RUNBOOK_PATH, NATIVE_ASSET_README_PATH)
+    )
+
+    assert "template-only-advisory-v1" not in docs_text
+    assert "advisory-template-regression" not in docs_text
+    assert "scripts/ci/advisory_contract.py" not in docs_text
+    assert "uv run pytest -q" in docs_text
 
 
 def test_preflight_can_run_in_non_mutating_test_mode(tmp_path: Path) -> None:
