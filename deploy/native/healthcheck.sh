@@ -22,14 +22,32 @@ deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
 attempt=1
 
 while (( SECONDS <= deadline )); do
-  if "${CURL_BIN}" -fsS "${HEALTH_URL}" >/dev/null; then
+  remaining_time=$((deadline - SECONDS))
+  if (( remaining_time < 1 )); then
+    break
+  fi
+
+  if "${CURL_BIN}" \
+    --connect-timeout "${remaining_time}" \
+    --max-time "${remaining_time}" \
+    -fsS "${HEALTH_URL}" >/dev/null; then
     echo "Local health check succeeded: ${HEALTH_URL}"
     exit 0
   fi
 
   echo "Health attempt ${attempt} failed; retrying in ${HEALTH_INTERVAL_SECONDS}s"
   attempt=$((attempt + 1))
-  sleep "${HEALTH_INTERVAL_SECONDS}"
+
+  remaining_time=$((deadline - SECONDS))
+  if (( remaining_time < 1 )); then
+    break
+  fi
+
+  sleep_seconds="${HEALTH_INTERVAL_SECONDS}"
+  if (( sleep_seconds > remaining_time )); then
+    sleep_seconds="${remaining_time}"
+  fi
+  sleep "${sleep_seconds}"
 done
 
 echo "Local health check failed within ${HEALTH_TIMEOUT_SECONDS}s: ${HEALTH_URL}" >&2

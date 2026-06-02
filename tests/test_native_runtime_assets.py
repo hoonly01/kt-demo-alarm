@@ -1,9 +1,12 @@
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TypeAlias, cast
@@ -16,6 +19,7 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "deploy.yml"
 PACKAGE_SCRIPT = REPO_ROOT / "deploy" / "native" / "package-source-bundle.sh"
 VERIFY_SCRIPT = REPO_ROOT / "deploy" / "native" / "verify-source-bundle.sh"
 DEPLOY_SCRIPT = REPO_ROOT / "deploy" / "native" / "deploy-release.sh"
+HEALTHCHECK_SCRIPT = REPO_ROOT / "deploy" / "native" / "healthcheck.sh"
 TEMPLATE_PATH = REPO_ROOT / "deploy" / "native" / "kt-demo-alarm.service.template"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
 NATIVE_GUIDE_PATH = REPO_ROOT / "docs" / "native-linux-deploy-guide.md"
@@ -35,16 +39,18 @@ WorkflowDocument: TypeAlias = dict[str, YamlValue]
 def run_command(
     *args: str,
     env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     if env is not None:
         env = {**os.environ, **env}
 
     return subprocess.run(
         args,
-        cwd=REPO_ROOT,
+        cwd=cwd or REPO_ROOT,
         text=True,
         capture_output=True,
-        check=True,
+        check=check,
         env=env,
     )
 
@@ -73,6 +79,14 @@ def uncommented_workflow_text() -> str:
     return "\n".join(
         line
         for line in WORKFLOW_PATH.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def uncommented_text(path: Path) -> str:
+    return "\n".join(
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
     )
 
@@ -122,21 +136,16 @@ def test_active_workflow_retires_advisory_contract_lane() -> None:
 
 
 def test_active_workflow_removes_docker_runtime_and_runner_env_rendering() -> None:
-    active_text = uncommented_workflow_text()
+    for job in workflow_jobs().values():
+        steps = cast(list[dict[str, YamlValue]], job.get("steps", []))
+        for step in steps:
+            uses = str(step.get("uses", ""))
+            run = str(step.get("run", ""))
 
-    forbidden_patterns = [
-        r"docker/setup-buildx-action",
-        r"docker/build-push-action",
-        r"docker\s+compose\s+(down|up|exec)",
-        r"docker\s+load",
-        r"gunzip\s+-c\s+.+image",
-        r"printf '%s\\n'.+> \.env",
-    ]
-    for pattern in forbidden_patterns:
-        assert not re.search(pattern, active_text, flags=re.MULTILINE | re.DOTALL)
-
-    assert "docker-compose.yml .env" not in active_text
-    assert "docker-compose.yml" not in active_text
+            assert not re.search(r"(?i)^docker/", uses)
+            assert not re.search(r"(?i)(^|\s)docker(?:\s+compose|[-_/][\w-]+|\b)", run)
+            assert not re.search(r"docker-compose\.yml", run)
+            assert not re.search(r">\s*\.env\b", run)
 
 
 def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
@@ -154,13 +163,16 @@ def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
     _ = run_command("bash", str(VERIFY_SCRIPT), str(bundle_path), str(checksum_path))
 
     with tarfile.open(bundle_path, "r:gz") as bundle:
+        members = bundle.getmembers()
         names = sorted(
             (
                 member.name[2:] if member.name.startswith("./") else member.name
             ).rstrip("/")
-            for member in bundle.getmembers()
+            for member in members
             if member.name not in {".", "./"}
         )
+
+    assert not any(member.issym() or member.islnk() for member in members)
 
     required_entries = {
         "bundle-manifest.txt",
@@ -190,6 +202,64 @@ def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
     ]
     for denied in denied_patterns:
         assert all(name != denied and not name.startswith(f"{denied}/") for name in names)
+
+
+def test_verify_source_bundle_accepts_relocated_artifact(tmp_path: Path) -> None:
+    artifact_dir = tmp_path / "artifact"
+    relocated_dir = tmp_path / "relocated"
+    artifact_dir.mkdir()
+    relocated_dir.mkdir()
+
+    _ = run_command("bash", str(PACKAGE_SCRIPT), str(artifact_dir))
+
+    bundle_path = artifact_dir / "source-bundle.tar.gz"
+    checksum_path = artifact_dir / "source-bundle.sha256"
+    relocated_bundle = relocated_dir / bundle_path.name
+    relocated_checksum = relocated_dir / checksum_path.name
+
+    shutil.move(bundle_path, relocated_bundle)
+    shutil.move(checksum_path, relocated_checksum)
+
+    _ = run_command("bash", str(VERIFY_SCRIPT), str(relocated_bundle), str(relocated_checksum))
+
+
+def test_package_source_bundle_rejects_symlinks(tmp_path: Path) -> None:
+    temp_repo = tmp_path / "repo"
+    artifact_dir = tmp_path / "artifact"
+    (temp_repo / "app").mkdir(parents=True)
+    (temp_repo / "deploy" / "native").mkdir(parents=True)
+    (temp_repo / "docs").mkdir(parents=True)
+
+    shutil.copy2(PACKAGE_SCRIPT, temp_repo / "deploy" / "native" / PACKAGE_SCRIPT.name)
+    (temp_repo / "app" / "__init__.py").write_text("", encoding="utf-8")
+    (temp_repo / "main.py").write_text("app = None\n", encoding="utf-8")
+    (temp_repo / "pyproject.toml").write_text(
+        "[project]\nname = \"tmp-native-bundle\"\nversion = \"0.0.0\"\nrequires-python = \">=3.12\"\n",
+        encoding="utf-8",
+    )
+    (temp_repo / "uv.lock").write_text("version = 1\nrevision = 1\n", encoding="utf-8")
+    (temp_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (temp_repo / "docs" / "native-linux-deploy-guide.md").write_text("# guide\n", encoding="utf-8")
+    (temp_repo / "docs" / "docker-free-fastapi-deploy-runbook.md").write_text(
+        "# runbook\n",
+        encoding="utf-8",
+    )
+
+    outside_target = tmp_path / "outside.txt"
+    outside_target.write_text("outside\n", encoding="utf-8")
+    os.symlink(outside_target, temp_repo / "app" / "external-link")
+
+    result = run_command(
+        "bash",
+        str(temp_repo / "deploy" / "native" / PACKAGE_SCRIPT.name),
+        str(artifact_dir),
+        cwd=temp_repo,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Symlinks are not allowed in source bundle staging area:" in result.stderr
+    assert "app/external-link" in result.stderr
 
 
 def test_package_source_bundle_accepts_relative_output_dir(tmp_path: Path) -> None:
@@ -229,15 +299,27 @@ def test_package_source_bundle_accepts_repo_local_relative_output_dir() -> None:
 
 
 def test_deploy_release_script_contains_required_preflight_and_rollback_guards() -> None:
-    deploy_text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    deploy_text = uncommented_text(DEPLOY_SCRIPT)
 
-    assert "ALLOW_PORT_TAKEOVER" in deploy_text
-    assert "ALLOW_DOCKER_CUTOVER" in deploy_text
-    assert "verify-source-bundle.sh" in deploy_text
-    assert 'sync --frozen --no-dev' in deploy_text
-    assert "systemd-analyze" in deploy_text
-    assert "No previous current symlink exists; first native deploy rollback is limited." in deploy_text
-    assert "Restoring previous current symlink" in deploy_text
+    assert re.search(r'^\s*elif is_truthy "\$\{ALLOW_PORT_TAKEOVER\}"; then$', deploy_text, re.MULTILINE)
+    assert re.search(r'^\s*if is_truthy "\$\{ALLOW_DOCKER_CUTOVER\}"; then$', deploy_text, re.MULTILINE)
+    assert re.search(
+        r'^\s*bash "\$\{VERIFY_SOURCE_BUNDLE_BIN\}" "\$\{BUNDLE_PATH\}" "\$\{CHECKSUM_PATH\}"$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev$', deploy_text, re.MULTILINE)
+    assert re.search(r'^\s*"\$\{SYSTEMD_ANALYZE_BIN\}" verify "\$\{UNIT_CANDIDATE\}"$', deploy_text, re.MULTILINE)
+    assert re.search(
+        r'^\s*log "No previous current symlink exists; first native deploy rollback is limited\."$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*log "Restoring previous current symlink: \$\{PREVIOUS_CURRENT\}"$',
+        deploy_text,
+        re.MULTILINE,
+    )
 
 
 def test_rendered_systemd_unit_has_required_directives() -> None:
@@ -293,12 +375,25 @@ def test_native_preflight_scripts_are_syntax_valid_and_non_mutating_by_default()
 
 
 def test_preflight_reports_conflicts_without_service_mutation() -> None:
-    preflight_text = (SCRIPT_DIR / "preflight.sh").read_text(encoding="utf-8")
+    preflight_text = uncommented_text(SCRIPT_DIR / "preflight.sh")
 
     assert "connect_ex" in preflight_text
     assert "[[ ! -w \"${required_dir}\" ]]" in preflight_text
-    assert "docker compose ps --status running --services" in preflight_text
-    assert "systemctl is-active --quiet" in preflight_text
+    assert re.search(
+        r'^\s*if docker compose ps --status running --services 2>/dev/null \| grep -qx "\$\{KT_NATIVE_SERVICE_NAME\}"; then$',
+        preflight_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*if systemctl is-active --quiet "\$\{KT_NATIVE_SERVICE_NAME\}" 2>/dev/null; then$',
+        preflight_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'''^\s*"\$\{KT_NATIVE_UV_BIN\}" run --no-sync --no-dev python - <<'PY'$''',
+        preflight_text,
+        re.MULTILINE,
+    )
     assert "systemctl start" not in preflight_text
     assert "systemctl stop" not in preflight_text
     assert "systemctl restart" not in preflight_text
@@ -307,12 +402,20 @@ def test_preflight_reports_conflicts_without_service_mutation() -> None:
 
 
 def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
-    setup_text = (SCRIPT_DIR / "setup-runtime.sh").read_text(encoding="utf-8")
+    setup_text = uncommented_text(SCRIPT_DIR / "setup-runtime.sh")
 
-    assert "sync --frozen --no-dev" in setup_text
-    assert "playwright install chromium --with-deps" in setup_text
-    assert "playwright install chromium" in setup_text
-    assert ".venv/bin/uvicorn" in setup_text
+    assert re.search(r'^\s*"\$\{KT_NATIVE_UV_BIN\}" sync --frozen --no-dev$', setup_text, re.MULTILINE)
+    assert re.search(
+        r'^\s*"\$\{KT_NATIVE_UV_BIN\}" run --no-dev playwright install chromium --with-deps$',
+        setup_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*"\$\{KT_NATIVE_UV_BIN\}" run --no-dev playwright install chromium$',
+        setup_text,
+        re.MULTILINE,
+    )
+    assert re.search(r'^\s*\[\[ -x \.venv/bin/uvicorn \]\] \|\| native_fail ', setup_text, re.MULTILINE)
     assert "may also install supported OS dependencies" in setup_text
 
 
@@ -355,6 +458,54 @@ def test_preflight_can_run_in_non_mutating_test_mode(tmp_path: Path) -> None:
         "--skip-port-check",
         env=runtime_dirs,
     )
+
+
+def test_healthcheck_bounds_each_curl_attempt_to_remaining_deadline() -> None:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    listener.settimeout(0.2)
+    port = listener.getsockname()[1]
+
+    stop_event = threading.Event()
+    accepted_connections: list[socket.socket] = []
+
+    def serve() -> None:
+        try:
+            while not stop_event.is_set():
+                try:
+                    connection, _ = listener.accept()
+                except TimeoutError:
+                    continue
+                accepted_connections.append(connection)
+        finally:
+            for connection in accepted_connections:
+                connection.close()
+            listener.close()
+
+    server_thread = threading.Thread(target=serve, daemon=True)
+    server_thread.start()
+
+    try:
+        start = time.monotonic()
+        result = run_command(
+            "bash",
+            str(HEALTHCHECK_SCRIPT),
+            env={
+                "HEALTH_URL": f"http://127.0.0.1:{port}/",
+                "HEALTH_TIMEOUT_SECONDS": "2",
+                "HEALTH_INTERVAL_SECONDS": "1",
+            },
+            check=False,
+        )
+        elapsed = time.monotonic() - start
+    finally:
+        stop_event.set()
+        server_thread.join(timeout=1)
+
+    assert result.returncode == 1
+    assert elapsed < 6
+    assert f"Local health check failed within 2s: http://127.0.0.1:{port}/" in result.stderr
 
 
 def test_required_docs_are_not_gitignored() -> None:
