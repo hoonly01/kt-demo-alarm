@@ -104,7 +104,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 native_info "Checking Playwright Python package import"
-"${KT_NATIVE_UV_BIN}" run --no-dev python - <<'PY'
+"${KT_NATIVE_UV_BIN}" run --no-sync --no-dev python - <<'PY'
 from playwright.sync_api import sync_playwright
 
 assert sync_playwright

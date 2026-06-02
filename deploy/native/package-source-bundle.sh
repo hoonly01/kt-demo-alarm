@@ -70,16 +70,31 @@ if [[ -n "${denied_paths}" ]]; then
   exit 1
 fi
 
+symlink_paths="$(
+  cd "${staging_dir}"
+  find . -mindepth 1 -type l \
+    | sed 's#^\./##' \
+    | sort
+)"
+if [[ -n "${symlink_paths}" ]]; then
+  echo "Symlinks are not allowed in source bundle staging area:" >&2
+  echo "${symlink_paths}" >&2
+  exit 1
+fi
+
 (
   cd "${staging_dir}"
-  find . -mindepth 1 \( -type f -o -type l \) \
+  find . -mindepth 1 -type f \
     | sed 's#^\./##' \
     | sort > bundle-manifest.txt
   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${bundle_tmp_dir}/${BUNDLE_NAME}" .
 )
 
 mv "${bundle_tmp_dir}/${BUNDLE_NAME}" "${BUNDLE_PATH}"
-sha256sum "${BUNDLE_PATH}" > "${CHECKSUM_PATH}"
+(
+  cd "${OUTPUT_DIR}"
+  sha256sum "${BUNDLE_NAME}" > "${CHECKSUM_NAME}"
+)
 
 if ! tar -tzf "${BUNDLE_PATH}" | sed 's#^\./##' | grep -Fxq bundle-manifest.txt; then
   echo "bundle-manifest.txt is missing from ${BUNDLE_NAME}" >&2

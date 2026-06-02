@@ -42,8 +42,8 @@ The live job is not the default behavior of the first pass.
 | `KT_NATIVE_DEPLOY_ENABLED=1` repository variable | explicit repository-side activation |
 | protected `native-live` environment approval | operator-owned cutover gate |
 
-Without both, the workflow should stop after blocking tests, package, advisory
-and deploy preflight.
+Without both, the workflow should stop after blocking tests, package, and
+native preflight.
 
 ## Secret ownership
 
