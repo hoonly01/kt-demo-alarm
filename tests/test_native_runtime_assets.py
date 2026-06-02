@@ -144,6 +144,14 @@ def test_deploy_workflow_matches_guarded_native_graph() -> None:
     assert public_health["if"] == "${{ needs.deploy-native-live.result == 'success' }}"
 
 
+def test_blocking_workflow_installs_playwright_browser_for_smoke_test() -> None:
+    jobs = workflow_jobs()
+    blocking_steps = cast(list[dict[str, YamlValue]], jobs["blocking-tests"]["steps"])
+    run_text = "\n".join(str(step.get("run", "")) for step in blocking_steps)
+
+    assert "playwright install chromium" in run_text
+
+
 def test_active_workflow_uses_contract_id_without_raw_selector_duplication() -> None:
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
     active_text = uncommented_workflow_text()
