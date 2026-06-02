@@ -13,239 +13,325 @@ concurrency:
 permissions:
   contents: read
 
-jobs:
-  deploy-test-bypass:
-    runs-on: ubuntu-latest
-    name: Deploy test gate bypass
-    steps:
-      - name: Record bypass notice
-        run: |
-          echo "::warning title=Run Tests bypassed::Deployment is proceeding without the pytest gate. Use the linked issue/PR rollback criteria if production health or notification contracts regress."
-          {
-            echo "## Run Tests bypassed"
-            echo ""
-            echo "Deployment is intentionally proceeding without the pytest gate."
-            echo "Use the linked issue/PR rollback criteria if production health or notification contracts regress."
-          } >> "$GITHUB_STEP_SUMMARY"
+env:
+  APP_NAME: kt-demo-alarm
+  APP_ROOT: /opt/kt-demo-alarm
+  APP_BIND_HOST: 127.0.0.1
+  APP_PORT: "8000"
+  HEALTH_TIMEOUT_SECONDS: "180"
+  HEALTH_INTERVAL_SECONDS: "3"
+  RELEASE_KEEP: "5"
+  BUNDLE_NAME: source-bundle.tar.gz
+  CHECKSUM_NAME: source-bundle.sha256
+  ADVISORY_CONTRACT_ID: template-only-advisory-v1
+  NATIVE_LIVE_GATE_ID: native-live-activation-gate-v1
 
-  build:
-    needs: deploy-test-bypass
+jobs:
+  blocking-tests:
     runs-on: ubuntu-latest
-    name: Build Docker Image
+    name: Blocking tests
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          context: .
-          tags: kt-demo-alarm:latest,kt-demo-alarm:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          outputs: type=docker,dest=kt-demo-alarm-image.tar
+          python-version-file: .python-version
 
-      - name: Compress Docker image
-        run: gzip kt-demo-alarm-image.tar
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
-      - name: Upload Docker image artifact
+      - name: Check lockfile freshness
+        run: uv lock --check
+
+      - name: Run blocking pytest
+        run: python scripts/ci/advisory_contract.py run-blocking-pytest -- -q
+
+  advisory-template-regression:
+    needs: blocking-tests
+    runs-on: ubuntu-latest
+    name: Advisory template regression
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run advisory selectors and record evidence
+        env:
+          ADVISORY_CONTRACT_ID: ${{ env.ADVISORY_CONTRACT_ID }}
+        run: |
+          set +e
+          python scripts/ci/advisory_contract.py run-advisory-pytest -- -q
+          advisory_exit_code=$?
+          set -e
+
+          python scripts/ci/advisory_contract.py write-summary \
+            --exit-code "${advisory_exit_code}" \
+            --output "${GITHUB_STEP_SUMMARY}"
+
+          if [[ "${advisory_exit_code}" -gt 1 ]]; then
+            exit "${advisory_exit_code}"
+          fi
+
+  package-native-release:
+    needs: blocking-tests
+    runs-on: ubuntu-latest
+    name: Package native release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build allowlisted source bundle
+        run: bash deploy/native/package-source-bundle.sh release-artifact
+
+      - name: Upload source bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image
-          path: kt-demo-alarm-image.tar.gz
+          name: source-bundle
+          path: |
+            release-artifact/${{ env.BUNDLE_NAME }}
+            release-artifact/${{ env.CHECKSUM_NAME }}
           retention-days: 1
 
-  deploy:
-    needs: build
+  deploy-native-preflight:
+    needs:
+      - package-native-release
+      - advisory-template-regression
     runs-on: ubuntu-latest
-    name: Deploy to EC2
+    name: Native deploy preflight
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download Docker image artifact
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Download source bundle artifact
         uses: actions/download-artifact@v4
         with:
-          name: docker-image
+          name: source-bundle
+          path: release-artifact
 
-      - name: Deploy to EC2
+      - name: Check shell syntax
+        run: bash -n deploy/native/*.sh scripts/native/*.sh
+
+      - name: Verify packaged source bundle
+        run: |
+          bash deploy/native/verify-source-bundle.sh \
+            "release-artifact/${BUNDLE_NAME}" \
+            "release-artifact/${CHECKSUM_NAME}"
+
+      - name: Prepare native runtime without browser download
+        env:
+          KT_NATIVE_APP_ROOT: ${{ runner.temp }}/kt-demo-alarm
+          KT_NATIVE_SHARED_DIR: ${{ runner.temp }}/kt-demo-alarm/shared
+          KT_NATIVE_DATA_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/data
+          KT_NATIVE_LOG_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/logs
+          KT_NATIVE_CACHE_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/topis_cache
+          KT_NATIVE_ATTACHMENT_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/topis_attachments
+          KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/kt-demo-alarm/shared/ms-playwright
+          KT_NATIVE_SKIP_PLAYWRIGHT_BROWSER: "1"
+        run: bash scripts/native/setup-runtime.sh --skip-playwright-browser
+
+      - name: Run non-mutating native preflight
+        env:
+          KT_NATIVE_APP_ROOT: ${{ runner.temp }}/kt-demo-alarm
+          KT_NATIVE_SHARED_DIR: ${{ runner.temp }}/kt-demo-alarm/shared
+          KT_NATIVE_DATA_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/data
+          KT_NATIVE_LOG_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/logs
+          KT_NATIVE_CACHE_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/topis_cache
+          KT_NATIVE_ATTACHMENT_DIR: ${{ runner.temp }}/kt-demo-alarm/shared/topis_attachments
+          KT_NATIVE_PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/kt-demo-alarm/shared/ms-playwright
+        run: bash scripts/native/preflight.sh --skip-port-check
+
+      - name: Render and inspect systemd unit
+        env:
+          KT_NATIVE_CURRENT_LINK: /opt/kt-demo-alarm/current
+          KT_NATIVE_SHARED_DIR: /opt/kt-demo-alarm/shared
+          KT_NATIVE_ENV_FILE: /opt/kt-demo-alarm/shared/.env
+          KT_NATIVE_PORT: ${{ env.APP_PORT }}
+        run: |
+          set -euo pipefail
+          bash scripts/native/render-systemd-unit.sh > kt-demo-alarm.service
+          test -s kt-demo-alarm.service
+          ! grep -E '__[A-Z_]+__' kt-demo-alarm.service
+          grep -F 'Type=exec' kt-demo-alarm.service
+          grep -F 'EnvironmentFile=' kt-demo-alarm.service
+          grep -F 'ProtectSystem=strict' kt-demo-alarm.service
+          grep -F 'ReadWritePaths=' kt-demo-alarm.service
+
+      - name: Run native asset tests
+        run: uv run pytest tests/test_native_runtime_assets.py -q
+
+      - name: Record activation gate state
+        env:
+          KT_NATIVE_DEPLOY_ENABLED: ${{ vars.KT_NATIVE_DEPLOY_ENABLED }}
+          NATIVE_LIVE_GATE_ID: ${{ env.NATIVE_LIVE_GATE_ID }}
+        run: |
+          {
+            echo "## ${NATIVE_LIVE_GATE_ID}"
+            if [[ "${KT_NATIVE_DEPLOY_ENABLED:-}" == "1" ]]; then
+              echo "- Repository variable \`KT_NATIVE_DEPLOY_ENABLED=1\` is enabled."
+              echo "- \`deploy-native-live\` will still wait for protected \`native-live\` environment approval."
+            else
+              echo "- Repository variable \`KT_NATIVE_DEPLOY_ENABLED\` is not enabled."
+              echo "- Workflow stops at blocking tests, package, advisory evidence, and native preflight."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy-native-live:
+    needs: deploy-native-preflight
+    if: ${{ vars.KT_NATIVE_DEPLOY_ENABLED == '1' }}
+    runs-on: ubuntu-latest
+    name: Deploy native live
+    environment:
+      name: native-live
+    steps:
+      - name: Checkout deploy scripts
+        uses: actions/checkout@v4
+
+      - name: Download source bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: source-bundle
+          path: release-artifact
+
+      - name: Deploy source bundle to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USERNAME: ${{ secrets.EC2_USERNAME }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
-          PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
-          KAKAO_EVENT_API_KEY: ${{ secrets.KAKAO_EVENT_API_KEY }}
-          KAKAO_LOCATION_API_KEY: ${{ secrets.KAKAO_LOCATION_API_KEY }}
-          BOT_ID: ${{ secrets.BOT_ID }}
-          API_KEY: ${{ secrets.API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SEOUL_BUS_API_KEY: ${{ secrets.SEOUL_BUS_API_KEY }}
-          ADMIN_USER: ${{ secrets.ADMIN_USER }}
-          ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
-          TMAP_APP_KEY: ${{ secrets.TMAP_APP_KEY }}
-          ALARM_SAVE_BLOCK_ID: ${{ secrets.ALARM_SAVE_BLOCK_ID }}
-          FAVORITE_ZONE_SAVE_BLOCK_ID: ${{ secrets.FAVORITE_ZONE_SAVE_BLOCK_ID }}
-          ROUTE_SETUP_BLOCK_ID: ${{ secrets.ROUTE_SETUP_BLOCK_ID }}
-          ROUTE_DELETE_BLOCK_ID: ${{ secrets.ROUTE_DELETE_BLOCK_ID }}
-          WORKS_AI_API_KEY: ${{ secrets.WORKS_AI_API_KEY }}
+          APP_NAME: ${{ env.APP_NAME }}
+          APP_ROOT: ${{ env.APP_ROOT }}
+          APP_BIND_HOST: ${{ env.APP_BIND_HOST }}
+          APP_PORT: ${{ env.APP_PORT }}
+          HEALTH_TIMEOUT_SECONDS: ${{ env.HEALTH_TIMEOUT_SECONDS }}
+          HEALTH_INTERVAL_SECONDS: ${{ env.HEALTH_INTERVAL_SECONDS }}
+          RELEASE_KEEP: ${{ env.RELEASE_KEEP }}
+          BUNDLE_NAME: ${{ env.BUNDLE_NAME }}
+          CHECKSUM_NAME: ${{ env.CHECKSUM_NAME }}
+          RELEASE_ID: ${{ github.run_id }}-${{ github.sha }}
         run: |
           set -euo pipefail
 
-          # SSH key
-          echo "$EC2_SSH_KEY" > ec2-key.pem
-          chmod 600 ec2-key.pem
-
-          # PUBLIC_DOMAIN 설정 확인
-          if [[ -z "${PUBLIC_DOMAIN}" ]]; then
-            echo "❌ PUBLIC_DOMAIN secret이 설정되지 않았습니다."
-            exit 1
-          fi
-
-          # Create .env on runner (printf prevents shell injection from special chars in secret values)
-          # 주의: 이 워크플로는 민감한 앱 설정만 .env로 전달하며, DATABASE_PATH 등 일부 기본/인프라 설정은 별도 설정(예: docker-compose.yml 또는 애플리케이션 기본값)에서 관리합니다.
-          printf '%s\n' \
-            "KAKAO_EVENT_API_KEY=${KAKAO_EVENT_API_KEY}" \
-            "KAKAO_LOCATION_API_KEY=${KAKAO_LOCATION_API_KEY}" \
-            "BOT_ID=${BOT_ID}" \
-            "API_KEY=${API_KEY}" \
-            "GEMINI_API_KEY=${GEMINI_API_KEY}" \
-            "SEOUL_BUS_API_KEY=${SEOUL_BUS_API_KEY}" \
-            "TMAP_APP_KEY=${TMAP_APP_KEY}" \
-            "ALARM_SAVE_BLOCK_ID=${ALARM_SAVE_BLOCK_ID}" \
-            "FAVORITE_ZONE_SAVE_BLOCK_ID=${FAVORITE_ZONE_SAVE_BLOCK_ID}" \
-            "ROUTE_SETUP_BLOCK_ID=${ROUTE_SETUP_BLOCK_ID}" \
-            "ROUTE_DELETE_BLOCK_ID=${ROUTE_DELETE_BLOCK_ID}" \
-            "RENDER_EXTERNAL_URL=https://${PUBLIC_DOMAIN}" \
-            "WORKS_AI_API_KEY=${WORKS_AI_API_KEY}" \
-            "ADMIN_USER=${ADMIN_USER}" \
-            "ADMIN_PASS=${ADMIN_PASS}" \
-            > .env
-
-          # Upload artifacts/config to EC2
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            kt-demo-alarm-image.tar.gz \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
-
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            docker-compose.yml .env \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/
-
-          # DOMAIN_PLACEHOLDER를 실제 도메인으로 치환한 뒤 EC2로 전송
-          # /tmp 대신 예측 불가능한 임시 파일 사용
-          NGINX_TMP=$(mktemp)
-          sed "s|DOMAIN_PLACEHOLDER|${PUBLIC_DOMAIN}|g" nginx/nginx.conf > "${NGINX_TMP}"
-          scp -o StrictHostKeyChecking=no -i ec2-key.pem \
-            "${NGINX_TMP}" \
-            ${EC2_USERNAME}@${EC2_HOST}:/opt/kt-demo-alarm/nginx-pending.conf
-          rm -f "${NGINX_TMP}"
-
-          # Remote deploy (improved: pre-prune + disk diagnostics + safer perms)
-          ssh -o StrictHostKeyChecking=no -i ec2-key.pem \
-            ${EC2_USERNAME}@${EC2_HOST} << 'ENDSSH'
-            set -euo pipefail
-            cd /opt/kt-demo-alarm
-
-            echo "=== Disk usage (before) ==="
-            df -h
-            docker system df || true
-
-            # Make directory with sudo and change owner to $USER
-            sudo mkdir -p data logs topis_attachments topis_cache
-            sudo chown -R $USER:$USER data logs topis_attachments topis_cache
-            chmod -R 755 data logs topis_attachments topis_cache || true
-
-            # Stop old stack (ignore if not running)
-            docker compose down || true
-
-            # Remove all unused images before loading the new release image.
-            docker image prune -af || true
-
-            echo "=== Disk usage (after prune) ==="
-            df -h
-            docker system df || true
-
-            # Load new image (uploaded as gzip)
-            gunzip -c /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz | docker load
-            rm -f /opt/kt-demo-alarm/kt-demo-alarm-image.tar.gz
-
-            # Protect env file (must succeed — failure means .env is readable by all users)
-            chmod 600 .env
-
-            # Start without building (important!)
-            docker compose up -d --no-build
-
-            # Nginx 설정 업데이트 (변경된 경우)
-            if [ -f /opt/kt-demo-alarm/nginx-pending.conf ]; then
-              sudo cp /opt/kt-demo-alarm/nginx-pending.conf /etc/nginx/conf.d/kt-demo-alarm.conf
-              sudo nginx -t && sudo systemctl reload nginx
-              rm -f /opt/kt-demo-alarm/nginx-pending.conf
-            fi
-
-            # Ensure appuser owns data and attachments inside container (don't fail deploy if container isn't ready yet)
-            docker compose exec -u root kt-demo-alarm \
-              chown -R appuser:appuser /app/data /app/topis_attachments /app/topis_cache || true
-
-            echo "Waiting for service health..."
-            service_healthy=0
-            for i in {1..60}; do
-              if curl -fsS http://localhost:8000/ > /dev/null 2>&1; then
-                echo "✅ Service is healthy on localhost:8000"
-                service_healthy=1
-                break
-              fi
-              echo "Attempt $i: not ready yet..."
-              sleep 5
-            done
-
-            if [ "$service_healthy" -ne 1 ]; then
-              echo "❌ Service did not become healthy on localhost:8000 within 300 seconds"
-              echo "docker compose ps:"
-              docker compose ps
-              echo "Recent logs:"
-              docker compose logs --tail=100
+          required_env=(EC2_HOST EC2_USERNAME EC2_SSH_KEY APP_NAME APP_ROOT RELEASE_ID)
+          for name in "${required_env[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error title=Missing deploy input::${name} is required"
               exit 1
             fi
+          done
 
-            echo "docker compose ps:"
-            docker compose ps
+          ssh_key_file="$(mktemp)"
+          trap 'rm -f -- "${ssh_key_file}"' EXIT
+          printf '%s\n' "${EC2_SSH_KEY}" > "${ssh_key_file}"
+          chmod 600 "${ssh_key_file}"
 
-            echo "Recent logs:"
-            docker compose logs --tail=100
+          ssh_options=(
+            -o StrictHostKeyChecking=no
+            -o IdentitiesOnly=yes
+            -i "${ssh_key_file}"
+          )
 
-            echo "=== Disk usage (end) ==="
-            df -h
-            docker system df || true
-          ENDSSH
+          quote_remote() {
+            printf '%q' "$1"
+          }
 
-          # Cleanup runner files
-          rm -f ec2-key.pem .env
+          remote_incoming_dir="${APP_ROOT}/incoming/${RELEASE_ID}"
+          remote_incoming_dir_q="$(quote_remote "${remote_incoming_dir}")"
+          ssh "${ssh_options[@]}" "${EC2_USERNAME}@${EC2_HOST}" \
+            "mkdir -p ${remote_incoming_dir_q} && chmod 700 ${remote_incoming_dir_q}"
 
-      - name: Verify deployment (public)
+          scp "${ssh_options[@]}" \
+            "release-artifact/${BUNDLE_NAME}" \
+            "release-artifact/${CHECKSUM_NAME}" \
+            deploy/native/deploy-release.sh \
+            deploy/native/verify-source-bundle.sh \
+            "${EC2_USERNAME}@${EC2_HOST}:${remote_incoming_dir}/"
+
+          remote_deploy_command="$(
+            printf 'APP_NAME=%q APP_ROOT=%q APP_BIND_HOST=%q APP_PORT=%q HEALTH_TIMEOUT_SECONDS=%q HEALTH_INTERVAL_SECONDS=%q RELEASE_KEEP=%q RELEASE_ID=%q BUNDLE_PATH=%q CHECKSUM_PATH=%q VERIFY_SOURCE_BUNDLE_BIN=%q bash %q' \
+              "${APP_NAME}" \
+              "${APP_ROOT}" \
+              "${APP_BIND_HOST}" \
+              "${APP_PORT}" \
+              "${HEALTH_TIMEOUT_SECONDS}" \
+              "${HEALTH_INTERVAL_SECONDS}" \
+              "${RELEASE_KEEP}" \
+              "${RELEASE_ID}" \
+              "${remote_incoming_dir}/${BUNDLE_NAME}" \
+              "${remote_incoming_dir}/${CHECKSUM_NAME}" \
+              "${remote_incoming_dir}/verify-source-bundle.sh" \
+              "${remote_incoming_dir}/deploy-release.sh"
+          )"
+          ssh "${ssh_options[@]}" "${EC2_USERNAME}@${EC2_HOST}" \
+            "${remote_deploy_command}"
+
+  public-health:
+    needs: deploy-native-live
+    if: ${{ needs.deploy-native-live.result == 'success' }}
+    runs-on: ubuntu-latest
+    name: Public health
+    steps:
+      - name: Verify deployment public health
         env:
           PUBLIC_DOMAIN: ${{ secrets.PUBLIC_DOMAIN }}
         run: |
           set -euo pipefail
+          if [[ -z "${PUBLIC_DOMAIN:-}" ]]; then
+            echo "::error title=Missing deploy input::PUBLIC_DOMAIN is required when native live deploy is enabled"
+            exit 1
+          fi
+
           echo "Checking public health endpoint..."
           for i in {1..60}; do
-            if curl -fsS https://${PUBLIC_DOMAIN}/ > /dev/null 2>&1; then
+            if curl -fsS "https://${PUBLIC_DOMAIN}/" > /dev/null 2>&1; then
               echo "✅ Application is reachable: https://${PUBLIC_DOMAIN}/"
               exit 0
             fi
-            echo "Attempt $i: waiting..."
+            echo "Attempt ${i}: waiting..."
             sleep 5
           done
+
           echo "❌ Public health check failed (verify Nginx + SSL + SG inbound 443 for ${PUBLIC_DOMAIN})"
           exit 1
 
-      - name: Notify deployment status
-        if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Deployment successful!"
-          else
-            echo "❌ Deployment failed!"
-            exit 1
-          fi
+# ---------------------------------------------------------------------------
+# Inactive legacy Docker deploy path retained for audit/handover only.
+# Do not uncomment without a new PRD and explicit operator approval.
+#
+# Previous active graph:
+#   deploy-test-bypass -> build -> deploy
+#
+# Previous Docker responsibilities:
+#   - docker/setup-buildx-action
+#   - docker/build-push-action with tags kt-demo-alarm:latest and kt-demo-alarm:${{ github.sha }}
+#   - gzip kt-demo-alarm-image.tar
+#   - upload/download Docker image artifact named docker-image
+#   - create runner-side app .env from GitHub secrets
+#   - scp kt-demo-alarm-image.tar.gz, docker-compose.yml, and .env to /opt/kt-demo-alarm
+#   - remote docker compose down
+#   - remote docker image prune
+#   - remote gunzip ... | docker load
+#   - remote docker compose up -d --no-build
+#   - public curl health check
+# ---------------------------------------------------------------------------
