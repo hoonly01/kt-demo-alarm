@@ -173,6 +173,7 @@ erd.json
 # Claude AI
 .claude/
 CLAUDE.md
+.omx/
 
 # User Test
 user_test.py

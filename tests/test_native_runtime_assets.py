@@ -30,6 +30,8 @@ ROOT_README_PATH = REPO_ROOT / "README.md"
 LEGACY_DOCKER_DIR = REPO_ROOT / "legacy" / "docker-deploy"
 LEGACY_BOOTSTRAP_README = REPO_ROOT / "legacy" / "bootstrap" / "README.md"
 SETUP_EC2_SCRIPT = REPO_ROOT / "scripts" / "setup-ec2.sh"
+GITIGNORE_PATH = REPO_ROOT / ".gitignore"
+ADVISORY_CONTRACT_SCRIPT = REPO_ROOT / "scripts" / "ci" / "advisory_contract.py"
 YamlScalar: TypeAlias = str | int | float | bool | None
 YamlValue: TypeAlias = YamlScalar | list["YamlValue"] | dict[str, "YamlValue"]
 WorkflowJob: TypeAlias = dict[str, YamlValue]
@@ -457,6 +459,15 @@ def test_active_native_docs_retire_advisory_lane() -> None:
     assert "advisory-template-regression" not in docs_text
     assert "scripts/ci/advisory_contract.py" not in docs_text
     assert "uv run pytest -q" in docs_text
+
+
+def test_repo_does_not_track_omx_runtime_state() -> None:
+    tracked_omx = run_command("git", "ls-files", ".omx").stdout.splitlines()
+    gitignore_text = GITIGNORE_PATH.read_text(encoding="utf-8")
+
+    assert tracked_omx == []
+    assert re.search(r"(?m)^\.omx/$", gitignore_text)
+    assert not ADVISORY_CONTRACT_SCRIPT.exists()
 
 
 def test_preflight_can_run_in_non_mutating_test_mode(tmp_path: Path) -> None:
