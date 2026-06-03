@@ -342,6 +342,18 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         deploy_text,
         re.MULTILINE,
     )
+    assert re.search(r'^\s*PYTHON_REQUEST="\$\{PYTHON_BIN\}"$', deploy_text, re.MULTILINE)
+    assert re.search(r'^\s*PYTHON_MODE="system"$', deploy_text, re.MULTILINE)
+    assert re.search(
+        r'^\s*MANAGED_PYTHON_VERSION="\$\{MANAGED_PYTHON_VERSION:-3\.12\}"$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*MANAGED_PYTHON_INSTALL_DIR="\$\{UV_PYTHON_INSTALL_DIR:-\$\{SHARED_DIR\}/uv/python\}"$',
+        deploy_text,
+        re.MULTILINE,
+    )
     assert re.search(
         r'^\s*UNIT_CANDIDATE="\$\{RELEASE_DIR\}/\$\{APP_NAME\}\.candidate\.service"$',
         deploy_text,
@@ -361,17 +373,17 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     assert re.search(r"^\s*python_path_satisfies_contract\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*resolve_python_candidate_path\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*log_python_candidate_details\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*prepare_managed_python_install_dir\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*normalize_managed_python_install_permissions\(\) \{$", deploy_text, re.MULTILINE)
     assert 'location = "user-home"' in deploy_text
     assert 'candidates+=("python3.12")' in deploy_text
     assert 'Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}' in deploy_text
     assert 'Using system Python binary ${PYTHON_BIN}' in deploy_text
     assert 'log_python_candidate_details "python3.12"' in deploy_text
+    assert 'PYTHON_REQUEST="${MANAGED_PYTHON_VERSION}"' in deploy_text
+    assert 'log "Falling back to uv-managed Python ${MANAGED_PYTHON_VERSION} under ${MANAGED_PYTHON_INSTALL_DIR}"' in deploy_text
+    assert 'Managed Python install dir must not live under HOME: ${MANAGED_PYTHON_INSTALL_DIR}' in deploy_text
     assert "Python 3.12 or newer is required" in deploy_text
-    assert re.search(
-        r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev --python "\$\{PYTHON_BIN\}" --no-managed-python --no-python-downloads$',
-        deploy_text,
-        re.MULTILINE,
-    )
     assert re.search(r'^\s*"\$\{SYSTEMD_ANALYZE_BIN\}" verify "\$\{UNIT_CANDIDATE\}"$', deploy_text, re.MULTILINE)
     assert "resolve_runtime_uv_bin" not in deploy_text
     assert re.search(
@@ -407,6 +419,7 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         '"${CURRENT_LINK}/.venv/bin/uvicorn"',
         '"${RELEASE_DIR}"',
         '"${SHARED_DIR}"',
+        '"${MANAGED_PYTHON_INSTALL_DIR}"',
         '"${ENV_FILE}"',
         '"${DATABASE_PATH}"',
         '"${LOG_DIR}"',
@@ -429,10 +442,17 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
+    assert 'run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chmod g+r {} +' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
 
     prepare_match = re.search(r"prepare_release_dirs\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert prepare_match is not None
     assert "normalize_release_root_permissions" in prepare_match.group("body")
+    assert "prepare_managed_python_install_dir" in prepare_match.group("body")
 
     unpack_match = re.search(r"unpack_release\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert unpack_match is not None
@@ -444,9 +464,10 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     sync_match = re.search(r"sync_dependencies\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert sync_match is not None
     sync_body = sync_match.group("body")
-    assert sync_body.index(
-        '"${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_BIN}" --no-managed-python --no-python-downloads'
-    ) < sync_body.index(
+    assert 'UV_PYTHON_INSTALL_DIR="${MANAGED_PYTHON_INSTALL_DIR}" \\' in sync_body
+    assert '"${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --managed-python' in sync_body
+    assert '"${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --no-managed-python --no-python-downloads' in sync_body
+    assert sync_body.index("normalize_managed_python_install_permissions") < sync_body.index(
         "normalize_release_tree_permissions"
     )
 
@@ -647,6 +668,74 @@ def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -
     assert Path(runtime_info["base_executable"]).is_relative_to(managed_python_root) is False
 
 
+def test_uv_sync_can_use_custom_managed_python_install_dir_for_project_venv(tmp_path: Path) -> None:
+    uv_bin = shutil.which("uv")
+    assert uv_bin is not None
+
+    project_dir = tmp_path / "uv-managed-python-check"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "uv-managed-python-check"',
+                'version = "0.0.0"',
+                'requires-python = ">=3.12"',
+                "dependencies = []",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    managed_python_root = tmp_path / "shared-python"
+    env = {"UV_PYTHON_INSTALL_DIR": str(managed_python_root)}
+
+    _ = run_command(
+        uv_bin,
+        "lock",
+        "--python",
+        "3.12",
+        "--managed-python",
+        cwd=project_dir,
+        env=env,
+    )
+    _ = run_command(
+        uv_bin,
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--python",
+        "3.12",
+        "--managed-python",
+        cwd=project_dir,
+        env=env,
+    )
+
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    assert venv_python.exists()
+
+    inspect = run_command(
+        str(venv_python),
+        "-c",
+        (
+            "import json, pathlib, sys; "
+            "print(json.dumps({"
+            "'executable': str(pathlib.Path(sys.executable).resolve()), "
+            "'base_executable': str(pathlib.Path(getattr(sys, '_base_executable', sys.executable)).resolve()), "
+            "'prefix': str(pathlib.Path(sys.prefix).resolve())"
+            "}))"
+        ),
+        cwd=project_dir,
+    )
+    runtime_info = json.loads(inspect.stdout)
+    base_executable = Path(runtime_info["base_executable"])
+    assert Path(runtime_info["prefix"]) == (project_dir / ".venv").resolve()
+    assert managed_python_root.exists()
+    assert base_executable.is_relative_to(managed_python_root.resolve())
+    assert base_executable.is_relative_to(Path.home() / ".local" / "share" / "uv" / "python") is False
+
+
 def test_deploy_release_preflight_prefers_python312_candidate_when_default_python3_fails(
     tmp_path: Path,
 ) -> None:
@@ -660,7 +749,7 @@ def test_deploy_release_preflight_prefers_python312_candidate_when_default_pytho
     fake_python3.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     fake_python3.chmod(0o755)
     (fake_bin / "python3.12").symlink_to(Path(system_python).resolve())
-    for helper in ("bash", "date", "dirname"):
+    for helper in ("bash", "date", "dirname", "id"):
         helper_path = shutil.which(helper)
         assert helper_path is not None
         (fake_bin / helper).symlink_to(Path(helper_path).resolve())
@@ -684,6 +773,51 @@ def test_deploy_release_preflight_prefers_python312_candidate_when_default_pytho
     assert "Using compatible system Python candidate python3.12 instead of default python3" in result.stdout
     assert f"Using system Python binary {fake_bin / 'python3.12'}" in result.stdout
     assert f"selected={fake_bin / 'python3.12'}" in result.stdout
+
+
+def test_deploy_release_preflight_falls_back_to_shared_managed_python_when_no_system_candidate(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    fake_python3 = fake_bin / "python3"
+    fake_python3.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    fake_python3.chmod(0o755)
+    for helper in ("bash", "date", "dirname", "id"):
+        helper_path = shutil.which(helper)
+        assert helper_path is not None
+        (fake_bin / helper).symlink_to(Path(helper_path).resolve())
+
+    script_copy = tmp_path / "deploy-release-preflight-managed.sh"
+    script_copy.write_text(
+        DEPLOY_SCRIPT.read_text(encoding="utf-8").replace(
+            'main "$@"',
+            (
+                'preflight_python\n'
+                'printf "mode=%s\\nrequest=%s\\ndir=%s\\n" '
+                '"${PYTHON_MODE}" "${PYTHON_REQUEST}" "${MANAGED_PYTHON_INSTALL_DIR}"'
+            ),
+        ),
+        encoding="utf-8",
+    )
+    script_copy.chmod(0o755)
+
+    shared_dir = tmp_path / "shared"
+    result = run_command(
+        "bash",
+        str(script_copy),
+        env={
+            "PATH": str(fake_bin),
+            "HOME": str(tmp_path / "home"),
+            "SHARED_DIR": str(shared_dir),
+        },
+    )
+
+    assert f"Falling back to uv-managed Python 3.12 under {shared_dir / 'uv' / 'python'}" in result.stdout
+    assert "mode=managed" in result.stdout
+    assert "request=3.12" in result.stdout
+    assert f"dir={shared_dir / 'uv' / 'python'}" in result.stdout
 
 
 def test_active_native_docs_retire_advisory_lane() -> None:

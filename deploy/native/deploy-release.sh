@@ -37,6 +37,11 @@ if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then
   PYTHON_BIN_WAS_EXPLICIT=1
 fi
 PYTHON_BIN="${PYTHON_BIN:-${KT_NATIVE_PYTHON_BIN:-python3}}"
+PYTHON_REQUEST="${PYTHON_BIN}"
+PYTHON_MODE="system"
+MANAGED_PYTHON_VERSION="${MANAGED_PYTHON_VERSION:-3.12}"
+MANAGED_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${SHARED_DIR}/uv/python}"
+MANAGED_PYTHON_INSTALL_OWNER="${MANAGED_PYTHON_INSTALL_OWNER:-$(id -un)}"
 ENV_BIN="${ENV_BIN:-/usr/bin/env}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMD_ANALYZE_BIN="${SYSTEMD_ANALYZE_BIN:-systemd-analyze}"
@@ -122,6 +127,7 @@ validate_inputs() {
 }
 
 preflight_commands() {
+  require_command install
   require_command tar
   require_command find
   require_command stat
@@ -224,6 +230,8 @@ preflight_python() {
   local candidate
   local resolved_python_bin=""
   local -a candidates=("${PYTHON_BIN}")
+  PYTHON_MODE="system"
+  PYTHON_REQUEST="${PYTHON_BIN}"
   if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
     candidates+=("python3.12")
   fi
@@ -241,10 +249,30 @@ preflight_python() {
   done
 
   log_python_candidate_details "${PYTHON_BIN}"
-  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
-    log_python_candidate_details "python3.12"
+  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" == "1" ]]; then
+    fail "Python 3.12 or newer is required"
   fi
-  fail "Python 3.12 or newer is required"
+
+  log_python_candidate_details "python3.12"
+  PYTHON_MODE="managed"
+  PYTHON_REQUEST="${MANAGED_PYTHON_VERSION}"
+  log "Falling back to uv-managed Python ${MANAGED_PYTHON_VERSION} under ${MANAGED_PYTHON_INSTALL_DIR}"
+}
+
+prepare_managed_python_install_dir() {
+  [[ "${PYTHON_MODE}" == "managed" ]] || return 0
+  [[ "${MANAGED_PYTHON_INSTALL_DIR}" != "${HOME}/"* ]] \
+    || fail "Managed Python install dir must not live under HOME: ${MANAGED_PYTHON_INSTALL_DIR}"
+  run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"
+}
+
+normalize_managed_python_install_permissions() {
+  [[ "${PYTHON_MODE}" == "managed" ]] || return 0
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chmod g+r {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -perm /111 -exec chmod g+rx {} +
 }
 
 native_service_active() {
@@ -288,6 +316,7 @@ prepare_release_dirs() {
   if is_truthy "${CHOWN_SHARED_DIRS}"; then
     run_privileged chown -R "${APP_USER}:${APP_GROUP}" "${SHARED_DIR}"
   fi
+  prepare_managed_python_install_dir
 }
 
 normalize_release_root_permissions() {
@@ -351,8 +380,14 @@ check_env_file() {
 sync_dependencies() {
   (
     cd "${RELEASE_DIR}"
-    "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_BIN}" --no-managed-python --no-python-downloads
+    if [[ "${PYTHON_MODE}" == "managed" ]]; then
+      UV_PYTHON_INSTALL_DIR="${MANAGED_PYTHON_INSTALL_DIR}" \
+        "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --managed-python
+    else
+      "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --no-managed-python --no-python-downloads
+    fi
   )
+  normalize_managed_python_install_permissions
   normalize_release_tree_permissions
 }
 
@@ -425,6 +460,7 @@ capture_runtime_diagnostics() {
     "${CURRENT_LINK}/.venv/bin/uvicorn"
     "${RELEASE_DIR}"
     "${SHARED_DIR}"
+    "${MANAGED_PYTHON_INSTALL_DIR}"
     "${ENV_FILE}"
     "${DATABASE_PATH}"
     "${LOG_DIR}"
