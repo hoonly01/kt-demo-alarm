@@ -222,10 +222,22 @@ jobs:
             printf '%q' "$1"
           }
 
-          remote_incoming_dir="${APP_ROOT}/incoming/${RELEASE_ID}"
+          resolved_app_user="${APP_USER:-${APP_NAME}}"
+          resolved_app_group="${APP_GROUP:-${resolved_app_user}}"
+          remote_incoming_root="${APP_ROOT}/incoming"
+          remote_incoming_dir="${remote_incoming_root}/${RELEASE_ID}"
+          resolved_app_group_q="$(quote_remote "${resolved_app_group}")"
+          remote_incoming_root_q="$(quote_remote "${remote_incoming_root}")"
           remote_incoming_dir_q="$(quote_remote "${remote_incoming_dir}")"
           ssh "${ssh_options[@]}" "${EC2_USERNAME}@${EC2_HOST}" \
-            "mkdir -p ${remote_incoming_dir_q} && chmod 700 ${remote_incoming_dir_q}"
+            "set -euo pipefail
+            resolved_app_group=${resolved_app_group_q}
+            remote_incoming_root=${remote_incoming_root_q}
+            remote_incoming_dir=${remote_incoming_dir_q}
+            sudo mkdir -p \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
+            sudo chgrp \"\${resolved_app_group}\" \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
+            sudo chmod g+rx \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
+            sudo chmod g+s \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\""
 
           scp "${ssh_options[@]}" \
             "release-artifact/${BUNDLE_NAME}" \
@@ -235,8 +247,10 @@ jobs:
             "${EC2_USERNAME}@${EC2_HOST}:${remote_incoming_dir}/"
 
           remote_deploy_command="$(
-            printf 'APP_NAME=%q APP_ROOT=%q APP_BIND_HOST=%q APP_PORT=%q HEALTH_TIMEOUT_SECONDS=%q HEALTH_INTERVAL_SECONDS=%q RELEASE_KEEP=%q RELEASE_ID=%q BUNDLE_PATH=%q CHECKSUM_PATH=%q VERIFY_SOURCE_BUNDLE_BIN=%q bash %q' \
+            printf 'APP_NAME=%q APP_USER=%q APP_GROUP=%q APP_ROOT=%q APP_BIND_HOST=%q APP_PORT=%q HEALTH_TIMEOUT_SECONDS=%q HEALTH_INTERVAL_SECONDS=%q RELEASE_KEEP=%q RELEASE_ID=%q BUNDLE_PATH=%q CHECKSUM_PATH=%q VERIFY_SOURCE_BUNDLE_BIN=%q bash %q' \
               "${APP_NAME}" \
+              "${resolved_app_user}" \
+              "${resolved_app_group}" \
               "${APP_ROOT}" \
               "${APP_BIND_HOST}" \
               "${APP_PORT}" \

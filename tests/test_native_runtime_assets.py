@@ -151,6 +151,31 @@ def test_active_workflow_removes_docker_runtime_and_runner_env_rendering() -> No
             assert not re.search(r">\s*\.env\b", run)
 
 
+def test_deploy_workflow_normalizes_incoming_permissions_for_service_group() -> None:
+    workflow_text = uncommented_workflow_text()
+
+    assert 'chmod 700 ${remote_incoming_dir_q}' not in workflow_text
+    assert 'resolved_app_user="${APP_USER:-${APP_NAME}}"' in workflow_text
+    assert 'resolved_app_group="${APP_GROUP:-${resolved_app_user}}"' in workflow_text
+    assert 'remote_incoming_root="${APP_ROOT}/incoming"' in workflow_text
+    assert re.search(
+        r"^\s*sudo chgrp .*resolved_app_group.*remote_incoming_root.*remote_incoming_dir.*$",
+        workflow_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\s*sudo chmod g\+rx .*remote_incoming_root.*remote_incoming_dir.*$",
+        workflow_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\s*sudo chmod g\+s .*remote_incoming_root.*remote_incoming_dir.*$",
+        workflow_text,
+        re.MULTILINE,
+    )
+    assert "APP_NAME=%q APP_USER=%q APP_GROUP=%q APP_ROOT=%q" in workflow_text
+
+
 def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
@@ -327,6 +352,38 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         r'^\s*log "Restoring previous current symlink: \$\{PREVIOUS_CURRENT\}"$',
         deploy_text,
         re.MULTILINE,
+    )
+
+
+def test_deploy_release_script_normalizes_release_permissions_for_service_group() -> None:
+    deploy_text = uncommented_text(DEPLOY_SCRIPT)
+
+    assert re.search(r"^\s*normalize_release_root_permissions\(\) \{$", deploy_text, re.MULTILINE)
+    assert 'run_privileged chgrp "${APP_GROUP}" "${RELEASES_DIR}" "${RELEASE_DIR}"' in deploy_text
+    assert 'run_privileged chmod g+rx "${RELEASES_DIR}" "${RELEASE_DIR}"' in deploy_text
+    assert 'run_privileged chmod g+s "${RELEASES_DIR}" "${RELEASE_DIR}"' in deploy_text
+    assert re.search(r"^\s*normalize_release_tree_permissions\(\) \{$", deploy_text, re.MULTILINE)
+    assert 'run_privileged find -P "${RELEASE_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +' in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +' in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +' in deploy_text
+
+    prepare_match = re.search(r"prepare_release_dirs\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
+    assert prepare_match is not None
+    assert "normalize_release_root_permissions" in prepare_match.group("body")
+
+    unpack_match = re.search(r"unpack_release\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
+    assert unpack_match is not None
+    unpack_body = unpack_match.group("body")
+    assert unpack_body.index('tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"') < unpack_body.index(
+        "normalize_release_tree_permissions"
+    )
+
+    sync_match = re.search(r"sync_dependencies\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
+    assert sync_match is not None
+    sync_body = sync_match.group("body")
+    assert sync_body.index('"${UV_BIN}" sync --frozen --no-dev') < sync_body.index(
+        "normalize_release_tree_permissions"
     )
 
 

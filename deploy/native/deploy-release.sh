@@ -164,10 +164,24 @@ prepare_release_dirs() {
   mkdir -p "${RELEASES_DIR}" "${SHARED_DIR}" "${DATA_DIR}" "${LOG_DIR}" "${CACHE_DIR}" "${ATTACHMENT_DIR}" "${DATA_DIR}/attachments"
   [[ ! -e "${RELEASE_DIR}" ]] || fail "Release directory already exists: ${RELEASE_DIR}"
   mkdir -p "${RELEASE_DIR}"
+  normalize_release_root_permissions
 
   if is_truthy "${CHOWN_SHARED_DIRS}"; then
     run_privileged chown -R "${APP_USER}:${APP_GROUP}" "${SHARED_DIR}"
   fi
+}
+
+normalize_release_root_permissions() {
+  run_privileged chgrp "${APP_GROUP}" "${RELEASES_DIR}" "${RELEASE_DIR}"
+  run_privileged chmod g+rx "${RELEASES_DIR}" "${RELEASE_DIR}"
+  run_privileged chmod g+s "${RELEASES_DIR}" "${RELEASE_DIR}"
+}
+
+normalize_release_tree_permissions() {
+  run_privileged find -P "${RELEASE_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +
 }
 
 verify_bundle_contract() {
@@ -176,6 +190,7 @@ verify_bundle_contract() {
 
 unpack_release() {
   tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
+  normalize_release_tree_permissions
 }
 
 create_compat_symlinks() {
@@ -218,6 +233,7 @@ sync_dependencies() {
     cd "${RELEASE_DIR}"
     "${UV_BIN}" sync --frozen --no-dev
   )
+  normalize_release_tree_permissions
 }
 
 render_systemd_unit() {
