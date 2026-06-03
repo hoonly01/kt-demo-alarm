@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TypeAlias, cast
 
+import pytest
 import yaml
 
 
@@ -301,6 +302,11 @@ def test_package_source_bundle_accepts_repo_local_relative_output_dir() -> None:
 def test_deploy_release_script_contains_required_preflight_and_rollback_guards() -> None:
     deploy_text = uncommented_text(DEPLOY_SCRIPT)
 
+    assert re.search(
+        r'^\s*UNIT_CANDIDATE="\$\{RELEASE_DIR\}/\$\{APP_NAME\}\.candidate\.service"$',
+        deploy_text,
+        re.MULTILINE,
+    )
     assert re.search(r'^\s*elif is_truthy "\$\{ALLOW_PORT_TAKEOVER\}"; then$', deploy_text, re.MULTILINE)
     assert re.search(r'^\s*if is_truthy "\$\{ALLOW_DOCKER_CUTOVER\}"; then$', deploy_text, re.MULTILINE)
     assert re.search(
@@ -347,6 +353,28 @@ def test_rendered_systemd_unit_has_required_directives() -> None:
     assert "Restart=on-failure" in unit
     assert "ProtectSystem=strict" in unit
     assert "ReadWritePaths=/srv/kt-demo-alarm/shared" in unit
+
+
+def test_systemd_analyze_can_verify_a_valid_service_filename(tmp_path: Path) -> None:
+    if shutil.which("systemd-analyze") is None:
+        pytest.skip("systemd-analyze is required for unit verification")
+
+    unit_path = tmp_path / "kt-demo-alarm.candidate.service"
+    unit_path.write_text(
+        "\n".join(
+            [
+                "[Unit]",
+                "Description=KT Demo Alarm verification fixture",
+                "[Service]",
+                "Type=oneshot",
+                "ExecStart=/bin/true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    _ = run_command("systemd-analyze", "verify", str(unit_path))
 
 
 def test_native_preflight_scripts_are_syntax_valid_and_non_mutating_by_default() -> None:
