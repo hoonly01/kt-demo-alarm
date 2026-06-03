@@ -64,7 +64,7 @@ PY
 [[ -f uv.lock ]] || native_fail "uv.lock not found in ${repo_root}"
 
 native_info "Syncing production dependencies from uv.lock"
-"${KT_NATIVE_UV_BIN}" sync --frozen --no-dev
+"${KT_NATIVE_UV_BIN}" sync --frozen --no-dev --python "${KT_NATIVE_PYTHON_BIN}" --no-managed-python --no-python-downloads
 
 native_info "Preparing runtime directories"
 mkdir -p \

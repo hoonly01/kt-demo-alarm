@@ -337,6 +337,11 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     deploy_text = uncommented_text(DEPLOY_SCRIPT)
 
     assert re.search(
+        r'^\s*PYTHON_BIN="\$\{PYTHON_BIN:-\$\{KT_NATIVE_PYTHON_BIN:-python3\}\}"$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(
         r'^\s*UNIT_CANDIDATE="\$\{RELEASE_DIR\}/\$\{APP_NAME\}\.candidate\.service"$',
         deploy_text,
         re.MULTILINE,
@@ -348,7 +353,14 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         deploy_text,
         re.MULTILINE,
     )
-    assert re.search(r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev$', deploy_text, re.MULTILINE)
+    assert re.search(r'^\s*require_command "\$\{PYTHON_BIN\}"$', deploy_text, re.MULTILINE)
+    assert re.search(r'''^\s*"\$\{PYTHON_BIN\}" - <<'PY'$''', deploy_text, re.MULTILINE)
+    assert "Python 3.12 or newer is required" in deploy_text
+    assert re.search(
+        r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev --python "\$\{PYTHON_BIN\}" --no-managed-python --no-python-downloads$',
+        deploy_text,
+        re.MULTILINE,
+    )
     assert re.search(r'^\s*"\$\{SYSTEMD_ANALYZE_BIN\}" verify "\$\{UNIT_CANDIDATE\}"$', deploy_text, re.MULTILINE)
     assert "resolve_runtime_uv_bin" not in deploy_text
     assert re.search(
@@ -421,7 +433,9 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     sync_match = re.search(r"sync_dependencies\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert sync_match is not None
     sync_body = sync_match.group("body")
-    assert sync_body.index('"${UV_BIN}" sync --frozen --no-dev') < sync_body.index(
+    assert sync_body.index(
+        '"${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_BIN}" --no-managed-python --no-python-downloads'
+    ) < sync_body.index(
         "normalize_release_tree_permissions"
     )
 
@@ -535,7 +549,11 @@ def test_preflight_reports_conflicts_without_service_mutation() -> None:
 def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
     setup_text = uncommented_text(SCRIPT_DIR / "setup-runtime.sh")
 
-    assert re.search(r'^\s*"\$\{KT_NATIVE_UV_BIN\}" sync --frozen --no-dev$', setup_text, re.MULTILINE)
+    assert re.search(
+        r'^\s*"\$\{KT_NATIVE_UV_BIN\}" sync --frozen --no-dev --python "\$\{KT_NATIVE_PYTHON_BIN\}" --no-managed-python --no-python-downloads$',
+        setup_text,
+        re.MULTILINE,
+    )
     assert re.search(
         r'^\s*"\$\{KT_NATIVE_UV_BIN\}" run --no-dev playwright install chromium --with-deps$',
         setup_text,

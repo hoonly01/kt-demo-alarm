@@ -32,6 +32,7 @@ ALLOW_PORT_TAKEOVER="${ALLOW_PORT_TAKEOVER:-false}"
 ALLOW_DOCKER_CUTOVER="${ALLOW_DOCKER_CUTOVER:-false}"
 CHOWN_SHARED_DIRS="${CHOWN_SHARED_DIRS:-true}"
 UV_BIN="${UV_BIN:-uv}"
+PYTHON_BIN="${PYTHON_BIN:-${KT_NATIVE_PYTHON_BIN:-python3}}"
 ENV_BIN="${ENV_BIN:-/usr/bin/env}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMD_ANALYZE_BIN="${SYSTEMD_ANALYZE_BIN:-systemd-analyze}"
@@ -122,6 +123,7 @@ preflight_commands() {
   require_command stat
   require_command sed
   require_command "${UV_BIN}"
+  require_command "${PYTHON_BIN}"
   require_command "${ENV_BIN}"
   require_command "${SYSTEMCTL_BIN}"
   require_command "${SYSTEMD_ANALYZE_BIN}"
@@ -129,6 +131,15 @@ preflight_commands() {
   if [[ "$(id -u)" -ne 0 ]]; then
     require_command "${SUDO_BIN}"
   fi
+}
+
+preflight_python() {
+  "${PYTHON_BIN}" - <<'PY'
+import sys
+
+if sys.version_info < (3, 12):
+    raise SystemExit("Python 3.12 or newer is required")
+PY
 }
 
 native_service_active() {
@@ -235,7 +246,7 @@ check_env_file() {
 sync_dependencies() {
   (
     cd "${RELEASE_DIR}"
-    "${UV_BIN}" sync --frozen --no-dev
+    "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_BIN}" --no-managed-python --no-python-downloads
   )
   normalize_release_tree_permissions
 }
@@ -398,6 +409,7 @@ prune_old_releases() {
 main() {
   validate_inputs
   preflight_commands
+  preflight_python
   preflight_runtime
   prepare_release_dirs
   verify_bundle_contract
