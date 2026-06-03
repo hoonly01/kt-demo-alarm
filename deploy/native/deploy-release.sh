@@ -32,10 +32,23 @@ ALLOW_PORT_TAKEOVER="${ALLOW_PORT_TAKEOVER:-false}"
 ALLOW_DOCKER_CUTOVER="${ALLOW_DOCKER_CUTOVER:-false}"
 CHOWN_SHARED_DIRS="${CHOWN_SHARED_DIRS:-true}"
 UV_BIN="${UV_BIN:-uv}"
+PYTHON_BIN_WAS_EXPLICIT=0
+if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN_WAS_EXPLICIT=1
+fi
+PYTHON_BIN="${PYTHON_BIN:-${KT_NATIVE_PYTHON_BIN:-python3}}"
+PYTHON_REQUEST="${PYTHON_BIN}"
+PYTHON_MODE="system"
+MANAGED_PYTHON_VERSION="${MANAGED_PYTHON_VERSION:-3.12}"
+MANAGED_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${SHARED_DIR}/uv/python}"
+MANAGED_PYTHON_INSTALL_OWNER="${MANAGED_PYTHON_INSTALL_OWNER:-$(id -un)}"
 ENV_BIN="${ENV_BIN:-/usr/bin/env}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMD_ANALYZE_BIN="${SYSTEMD_ANALYZE_BIN:-systemd-analyze}"
+JOURNALCTL_BIN="${JOURNALCTL_BIN:-journalctl}"
+NAMEI_BIN="${NAMEI_BIN:-namei}"
 SUDO_BIN="${SUDO_BIN:-sudo}"
+DIAGNOSTIC_JOURNAL_LINES="${DIAGNOSTIC_JOURNAL_LINES:-80}"
 BUNDLE_PATH="${BUNDLE_PATH:-}"
 CHECKSUM_PATH="${CHECKSUM_PATH:-}"
 VERIFY_SOURCE_BUNDLE_BIN="${VERIFY_SOURCE_BUNDLE_BIN:-${SCRIPT_DIR}/verify-source-bundle.sh}"
@@ -114,6 +127,7 @@ validate_inputs() {
 }
 
 preflight_commands() {
+  require_command install
   require_command tar
   require_command find
   require_command stat
@@ -126,6 +140,149 @@ preflight_commands() {
   if [[ "$(id -u)" -ne 0 ]]; then
     require_command "${SUDO_BIN}"
   fi
+}
+
+python_candidate_paths() {
+  local candidate="$1"
+  local path_dir
+  local candidate_path
+  local -a path_dirs=()
+
+  if [[ "${candidate}" == */* ]]; then
+    [[ -x "${candidate}" && ! -d "${candidate}" ]] && printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  IFS=':' read -r -a path_dirs <<< "${PATH}"
+  for path_dir in "${path_dirs[@]}"; do
+    if [[ -z "${path_dir}" ]]; then
+      candidate_path="./${candidate}"
+    else
+      candidate_path="${path_dir%/}/${candidate}"
+    fi
+    [[ -x "${candidate_path}" && ! -d "${candidate_path}" ]] && printf '%s\n' "${candidate_path}"
+  done
+}
+
+python_path_probe() {
+  local candidate_path="$1"
+  "${candidate_path}" - <<'PY'
+import pathlib
+import sys
+
+print(sys.version_info[0])
+print(sys.version_info[1])
+print(pathlib.Path(sys.executable).resolve())
+PY
+}
+
+path_is_under_home() {
+  local path="$1"
+  local home_prefix="${HOME:-}"
+  [[ -n "${home_prefix}" ]] || return 1
+  [[ "${path}" == "${home_prefix}/"* ]]
+}
+
+python_path_satisfies_contract() {
+  local candidate_path="$1"
+  local -a probe=()
+  local candidate_executable
+  mapfile -t probe < <(python_path_probe "${candidate_path}" 2>/dev/null) || return 1
+
+  candidate_executable="${probe[2]:-}"
+  [[ -n "${candidate_executable}" ]] || return 1
+  (( ${probe[0]:-0} == 3 )) || return 1
+  (( ${probe[1]:-0} >= 12 )) || return 1
+  path_is_under_home "${candidate_executable}" && return 1
+  return 0
+}
+
+resolve_python_candidate_path() {
+  local candidate="$1"
+  local candidate_path
+  while IFS= read -r candidate_path; do
+    [[ -n "${candidate_path}" ]] || continue
+    if python_path_satisfies_contract "${candidate_path}"; then
+      printf '%s\n' "${candidate_path}"
+      return 0
+    fi
+  done < <(python_candidate_paths "${candidate}")
+}
+
+log_python_candidate_details() {
+  local candidate="$1"
+  local candidate_path
+  local -a candidate_paths=()
+  local candidate_summary
+  mapfile -t candidate_paths < <(python_candidate_paths "${candidate}")
+  if (( ${#candidate_paths[@]} == 0 )); then
+    log "Python candidate not found: ${candidate}"
+    return 0
+  fi
+
+  for candidate_path in "${candidate_paths[@]}"; do
+    candidate_summary="$("${candidate_path}" - <<'PY'
+import pathlib
+import sys
+
+resolved = pathlib.Path(sys.executable).resolve()
+location = "user-home" if str(resolved).startswith(str(pathlib.Path.home()) + "/") else "system"
+print(f"version={sys.version.split()[0]} executable={resolved} location={location}")
+PY
+)" || candidate_summary="probe failed"
+    log "Python candidate ${candidate} path ${candidate_path} (${candidate_summary})"
+  done
+}
+
+preflight_python() {
+  local candidate
+  local resolved_python_bin=""
+  local -a candidates=("${PYTHON_BIN}")
+  PYTHON_MODE="system"
+  PYTHON_REQUEST="${PYTHON_BIN}"
+  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
+    candidates+=("python3.12")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    resolved_python_bin="$(resolve_python_candidate_path "${candidate}" || true)"
+    if [[ -n "${resolved_python_bin}" ]]; then
+      if [[ "${candidate}" != "${PYTHON_BIN}" ]]; then
+        log "Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}"
+      fi
+      PYTHON_BIN="${resolved_python_bin}"
+      PYTHON_REQUEST="${PYTHON_BIN}"
+      log "Using system Python binary ${PYTHON_BIN}"
+      return 0
+    fi
+  done
+
+  log_python_candidate_details "${PYTHON_BIN}"
+  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" == "1" ]]; then
+    fail "Python 3.12 or newer is required"
+  fi
+
+  log_python_candidate_details "python3.12"
+  PYTHON_MODE="managed"
+  PYTHON_REQUEST="${MANAGED_PYTHON_VERSION}"
+  log "Falling back to uv-managed Python ${MANAGED_PYTHON_VERSION} under ${MANAGED_PYTHON_INSTALL_DIR}"
+}
+
+prepare_managed_python_install_dir() {
+  [[ "${PYTHON_MODE}" == "managed" ]] || return 0
+  ! path_is_under_home "${MANAGED_PYTHON_INSTALL_DIR}" \
+    || fail "Managed Python install dir must not live under HOME: ${MANAGED_PYTHON_INSTALL_DIR}"
+  run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"
+}
+
+normalize_managed_python_install_permissions() {
+  [[ "${PYTHON_MODE}" == "managed" ]] || return 0
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" \( -type d -o -type f \) -exec chmod g-w {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chmod g+r {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -perm /111 -exec chmod g+rx {} +
 }
 
 native_service_active() {
@@ -164,10 +321,27 @@ prepare_release_dirs() {
   mkdir -p "${RELEASES_DIR}" "${SHARED_DIR}" "${DATA_DIR}" "${LOG_DIR}" "${CACHE_DIR}" "${ATTACHMENT_DIR}" "${DATA_DIR}/attachments"
   [[ ! -e "${RELEASE_DIR}" ]] || fail "Release directory already exists: ${RELEASE_DIR}"
   mkdir -p "${RELEASE_DIR}"
+  normalize_release_root_permissions
 
   if is_truthy "${CHOWN_SHARED_DIRS}"; then
     run_privileged chown -R "${APP_USER}:${APP_GROUP}" "${SHARED_DIR}"
   fi
+  prepare_managed_python_install_dir
+}
+
+normalize_release_root_permissions() {
+  run_privileged chgrp "${APP_GROUP}" "${RELEASES_DIR}" "${RELEASE_DIR}"
+  run_privileged chmod g+rx "${RELEASES_DIR}" "${RELEASE_DIR}"
+  run_privileged chmod g+s "${RELEASES_DIR}" "${RELEASE_DIR}"
+}
+
+normalize_release_tree_permissions() {
+  run_privileged find -P "${RELEASE_DIR}" \( -type d -o -type f \) -exec chmod g-w {} +
+  run_privileged find -P "${RELEASE_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +
 }
 
 verify_bundle_contract() {
@@ -176,6 +350,7 @@ verify_bundle_contract() {
 
 unpack_release() {
   tar -xzf "${BUNDLE_PATH}" -C "${RELEASE_DIR}"
+  normalize_release_tree_permissions
 }
 
 create_compat_symlinks() {
@@ -216,8 +391,15 @@ check_env_file() {
 sync_dependencies() {
   (
     cd "${RELEASE_DIR}"
-    "${UV_BIN}" sync --frozen --no-dev
+    if [[ "${PYTHON_MODE}" == "managed" ]]; then
+      UV_PYTHON_INSTALL_DIR="${MANAGED_PYTHON_INSTALL_DIR}" \
+        "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --managed-python
+    else
+      "${UV_BIN}" sync --frozen --no-dev --python "${PYTHON_REQUEST}" --no-managed-python --no-python-downloads
+    fi
   )
+  normalize_managed_python_install_permissions
+  normalize_release_tree_permissions
 }
 
 render_systemd_unit() {
@@ -281,9 +463,46 @@ restart_service() {
   fi
 }
 
+capture_runtime_diagnostics() {
+  local path
+  local -a diagnostic_paths=(
+    "${CURRENT_LINK}"
+    "${CURRENT_LINK}/.venv/bin/python"
+    "${CURRENT_LINK}/.venv/bin/uvicorn"
+    "${RELEASE_DIR}"
+    "${SHARED_DIR}"
+    "${MANAGED_PYTHON_INSTALL_DIR}"
+    "${ENV_FILE}"
+    "${DATABASE_PATH}"
+    "${LOG_DIR}"
+    "${CACHE_FILE}"
+    "${ATTACHMENT_FOLDER}"
+  )
+
+  log "Capturing post-switch diagnostics for ${APP_NAME}"
+
+  run_privileged "${SYSTEMCTL_BIN}" --no-pager --full status "${APP_NAME}" || true
+
+  if command -v "${JOURNALCTL_BIN}" >/dev/null 2>&1; then
+    run_privileged "${JOURNALCTL_BIN}" --no-pager -u "${APP_NAME}" -n "${DIAGNOSTIC_JOURNAL_LINES}" || true
+  else
+    log "Skipping journal diagnostics because ${JOURNALCTL_BIN} is unavailable."
+  fi
+
+  if command -v "${NAMEI_BIN}" >/dev/null 2>&1; then
+    for path in "${diagnostic_paths[@]}"; do
+      log "namei -om ${path}"
+      "${NAMEI_BIN}" -om "${path}" || true
+    done
+  else
+    log "Skipping path diagnostics because ${NAMEI_BIN} is unavailable."
+  fi
+}
+
 rollback_after_switch() {
   local reason="$1"
   log "Post-switch failure: ${reason}"
+  capture_runtime_diagnostics
 
   if [[ -n "${PREVIOUS_CURRENT}" && -d "${PREVIOUS_CURRENT}" ]]; then
     log "Restoring previous current symlink: ${PREVIOUS_CURRENT}"
@@ -342,6 +561,7 @@ prune_old_releases() {
 main() {
   validate_inputs
   preflight_commands
+  preflight_python
   preflight_runtime
   prepare_release_dirs
   verify_bundle_contract
