@@ -160,6 +160,11 @@ backup_oldfiles/
 *.md
 !README.md
 !DEPLOYMENT.md
+!docs/
+!docs/*.md
+!docs/**/*.md
+!legacy/
+!legacy/**/README.md
 
 # Design files
 *.vuerd.json

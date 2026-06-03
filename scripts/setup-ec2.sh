@@ -1,5 +1,7 @@
 #!/bin/bash
-# EC2 초기 설정 스크립트 (Amazon Linux 2023 / Ubuntu 22.04+)
+# Legacy EC2 Docker bootstrap 스크립트 (Amazon Linux 2023 / Ubuntu 22.04+)
+# Canonical native deploy path: docs/native-linux-deploy-guide.md
+# 이 스크립트는 history/audit용 legacy bootstrap이며 active GitHub Actions deploy path가 사용하지 않습니다.
 # 사용법: bash scripts/setup-ec2.sh <도메인> <이메일>
 # 예시:   bash scripts/setup-ec2.sh example.com admin@example.com
 #
@@ -15,6 +17,7 @@ EMAIL="${2:-}"
 if [[ -z "$DOMAIN" || -z "$EMAIL" ]]; then
   echo "사용법: bash setup-ec2.sh <도메인> <이메일>"
   echo "예시:   bash setup-ec2.sh example.com admin@example.com"
+  echo "참고: 현재 canonical deploy path는 docs/native-linux-deploy-guide.md 입니다."
   exit 1
 fi
 
@@ -23,6 +26,10 @@ if ! [[ "$DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2
   echo "❌ 유효하지 않은 도메인 형식: $DOMAIN"
   exit 1
 fi
+
+echo "⚠️  scripts/setup-ec2.sh 는 legacy Docker bootstrap 입니다."
+echo "⚠️  active native deploy path는 docs/native-linux-deploy-guide.md 와 docs/docker-free-fastapi-deploy-runbook.md 를 따릅니다."
+echo ""
 
 # OS 감지
 if [ -f /etc/os-release ]; then
@@ -113,11 +120,9 @@ sudo nginx -t && sudo systemctl reload nginx
 echo ""
 echo "✅ 설정 완료!"
 echo ""
-echo "다음 단계:"
-echo "  1. /opt/kt-demo-alarm/.env 파일 생성 (.env.example 참고)"
-echo "  2. GitHub Secrets의 EC2_USERNAME을 ${USER}로 확인"
-echo "  3. GitHub main 브랜치 push로 자동 배포"
-echo "  4. 배포 확인: curl https://$DOMAIN/"
+echo "이 스크립트는 legacy Docker bootstrap inventory 입니다."
+echo "canonical native deploy path는 docs/native-linux-deploy-guide.md 를 확인하세요."
+echo "legacy Docker path를 다시 활성화하려면 새 PRD와 운영 승인이 필요합니다."
 echo ""
 echo "⚠️  docker 그룹 반영을 위해 SSH 재접속 필요:"
 echo "  exit → ssh ${USER}@<EC2_HOST_또는_IP>"

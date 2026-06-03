@@ -5,11 +5,20 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![KakaoTalk](https://img.shields.io/badge/KakaoTalk-FFCD00?style=flat-square&logo=kakaotalk&logoColor=black)](https://developers.kakao.com)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![Status](https://img.shields.io/badge/Status-ClosedBeta-orange?style=flat-square)]()
 
 KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 집회 알리미 서비스의 개발 저장소입니다.
 > 🔗 Link: [카카오톡 채널 추가하기](https://pf.kakao.com/_gmJNn)
+
+## 🚦 운영/배포 상태
+
+| 표면 | 현재 상태 | 참고 |
+|---|---|---|
+| Canonical deploy path | native source bundle → `uv sync --frozen --no-dev` → systemd-managed `uvicorn main:app` | `docs/native-linux-deploy-guide.md` |
+| Legacy Docker assets | history 보존용으로 `legacy/docker-deploy/` 아래에 격리 | `legacy/docker-deploy/README.md` |
+| Legacy bootstrap | `scripts/setup-ec2.sh`는 historical Docker bootstrap이며 active workflow가 사용하지 않음 | `legacy/bootstrap/README.md` |
+
+현재 운영 경로는 Docker가 아니라 native deploy 기준입니다. Docker 관련 파일은 rollback planning과 audit용으로만 보존하며, 재활성화에는 새 PRD와 운영 승인이 필요합니다.
 
 
 <br />
