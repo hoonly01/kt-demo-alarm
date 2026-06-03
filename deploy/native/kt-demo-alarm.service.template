@@ -19,7 +19,7 @@ Environment=ATTACHMENT_FOLDER=__ATTACHMENT_FOLDER__
 Environment=LOG_DIR=__LOG_DIR__
 Environment=PLAYWRIGHT_BROWSERS_PATH=__PLAYWRIGHT_BROWSERS_PATH__
 Environment=TZ=__TZ__
-ExecStart=__ENV_BIN__ __UV_BIN__ run --no-sync --no-dev uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}
+ExecStart=__CURRENT_LINK__/.venv/bin/uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT

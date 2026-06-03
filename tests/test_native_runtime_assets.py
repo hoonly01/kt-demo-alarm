@@ -350,6 +350,7 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     )
     assert re.search(r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev$', deploy_text, re.MULTILINE)
     assert re.search(r'^\s*"\$\{SYSTEMD_ANALYZE_BIN\}" verify "\$\{UNIT_CANDIDATE\}"$', deploy_text, re.MULTILINE)
+    assert "resolve_runtime_uv_bin" not in deploy_text
     assert re.search(
         r'^\s*log "No previous current symlink exists; first native deploy rollback is limited\."$',
         deploy_text,
@@ -443,7 +444,11 @@ def test_rendered_systemd_unit_has_required_directives() -> None:
     assert "Group=demo-group" in unit
     assert "WorkingDirectory=/srv/kt-demo-alarm/current" in unit
     assert "EnvironmentFile=/srv/kt-demo-alarm/shared/.env" in unit
-    assert "ExecStart=/usr/bin/env uv run --no-sync --no-dev uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}" in unit
+    assert (
+        "ExecStart=/srv/kt-demo-alarm/current/.venv/bin/uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}"
+        in unit
+    )
+    assert "uv run --no-sync --no-dev" not in unit
     assert "Restart=on-failure" in unit
     assert "ProtectSystem=strict" in unit
     assert "ReadWritePaths=/srv/kt-demo-alarm/shared" in unit
