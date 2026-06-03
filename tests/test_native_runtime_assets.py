@@ -158,8 +158,14 @@ def test_deploy_workflow_normalizes_incoming_permissions_for_service_group() -> 
     assert 'resolved_app_user="${APP_USER:-${APP_NAME}}"' in workflow_text
     assert 'resolved_app_group="${APP_GROUP:-${resolved_app_user}}"' in workflow_text
     assert 'remote_incoming_root="${APP_ROOT}/incoming"' in workflow_text
+    assert 'remote_incoming_owner_q="$(quote_remote "${EC2_USERNAME}:${resolved_app_group}")"' in workflow_text
     assert re.search(
         r"^\s*sudo chgrp .*resolved_app_group.*remote_incoming_root.*remote_incoming_dir.*$",
+        workflow_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r"^\s*sudo chown .*remote_incoming_owner.*remote_incoming_dir.*$",
         workflow_text,
         re.MULTILINE,
     )
@@ -168,6 +174,7 @@ def test_deploy_workflow_normalizes_incoming_permissions_for_service_group() -> 
         workflow_text,
         re.MULTILINE,
     )
+    assert re.search(r"^\s*sudo chmod u\+rwx .*remote_incoming_dir.*$", workflow_text, re.MULTILINE)
     assert re.search(
         r"^\s*sudo chmod g\+s .*remote_incoming_root.*remote_incoming_dir.*$",
         workflow_text,

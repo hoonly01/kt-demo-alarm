@@ -226,17 +226,21 @@ jobs:
           resolved_app_group="${APP_GROUP:-${resolved_app_user}}"
           remote_incoming_root="${APP_ROOT}/incoming"
           remote_incoming_dir="${remote_incoming_root}/${RELEASE_ID}"
+          remote_incoming_owner_q="$(quote_remote "${EC2_USERNAME}:${resolved_app_group}")"
           resolved_app_group_q="$(quote_remote "${resolved_app_group}")"
           remote_incoming_root_q="$(quote_remote "${remote_incoming_root}")"
           remote_incoming_dir_q="$(quote_remote "${remote_incoming_dir}")"
           ssh "${ssh_options[@]}" "${EC2_USERNAME}@${EC2_HOST}" \
             "set -euo pipefail
+            remote_incoming_owner=${remote_incoming_owner_q}
             resolved_app_group=${resolved_app_group_q}
             remote_incoming_root=${remote_incoming_root_q}
             remote_incoming_dir=${remote_incoming_dir_q}
             sudo mkdir -p \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
             sudo chgrp \"\${resolved_app_group}\" \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
+            sudo chown \"\${remote_incoming_owner}\" \"\${remote_incoming_dir}\"
             sudo chmod g+rx \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
+            sudo chmod u+rwx \"\${remote_incoming_dir}\"
             sudo chmod g+s \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\""
 
           scp "${ssh_options[@]}" \
