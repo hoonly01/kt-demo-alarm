@@ -380,6 +380,7 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     diagnostics_body = diagnostics_match.group("body")
     for required_path in (
         '"${CURRENT_LINK}"',
+        '"${CURRENT_LINK}/.venv/bin/uvicorn"',
         '"${RELEASE_DIR}"',
         '"${SHARED_DIR}"',
         '"${ENV_FILE}"',
@@ -403,6 +404,7 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     assert 'run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +' in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
 
     prepare_match = re.search(r"prepare_release_dirs\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert prepare_match is not None

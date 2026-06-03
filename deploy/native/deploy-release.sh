@@ -185,6 +185,7 @@ normalize_release_tree_permissions() {
   run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +
   run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
   run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +
+  run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +
 }
 
 verify_bundle_contract() {
@@ -304,6 +305,7 @@ capture_runtime_diagnostics() {
   local path
   local -a diagnostic_paths=(
     "${CURRENT_LINK}"
+    "${CURRENT_LINK}/.venv/bin/uvicorn"
     "${RELEASE_DIR}"
     "${SHARED_DIR}"
     "${ENV_FILE}"
