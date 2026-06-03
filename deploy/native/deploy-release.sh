@@ -136,51 +136,106 @@ preflight_commands() {
   fi
 }
 
-python_candidate_satisfies_contract() {
+python_candidate_paths() {
   local candidate="$1"
-  command -v "${candidate}" >/dev/null 2>&1 || return 1
-  "${candidate}" - <<'PY' >/dev/null 2>&1
+  local path_dir
+  local candidate_path
+  local -a path_dirs=()
+
+  if [[ "${candidate}" == */* ]]; then
+    [[ -x "${candidate}" && ! -d "${candidate}" ]] && printf '%s\n' "${candidate}"
+    return 0
+  fi
+
+  IFS=':' read -r -a path_dirs <<< "${PATH}"
+  for path_dir in "${path_dirs[@]}"; do
+    if [[ -z "${path_dir}" ]]; then
+      candidate_path="./${candidate}"
+    else
+      candidate_path="${path_dir%/}/${candidate}"
+    fi
+    [[ -x "${candidate_path}" && ! -d "${candidate_path}" ]] && printf '%s\n' "${candidate_path}"
+  done
+}
+
+python_path_probe() {
+  local candidate_path="$1"
+  "${candidate_path}" - <<'PY'
+import pathlib
 import sys
 
-if sys.version_info < (3, 12):
-    raise SystemExit(1)
+print(sys.version_info[0])
+print(sys.version_info[1])
+print(pathlib.Path(sys.executable).resolve())
 PY
+}
+
+python_path_satisfies_contract() {
+  local candidate_path="$1"
+  local -a probe=()
+  local candidate_executable
+  mapfile -t probe < <(python_path_probe "${candidate_path}" 2>/dev/null) || return 1
+
+  candidate_executable="${probe[2]:-}"
+  [[ -n "${candidate_executable}" ]] || return 1
+  (( ${probe[0]:-0} == 3 )) || return 1
+  (( ${probe[1]:-0} >= 12 )) || return 1
+  [[ "${candidate_executable}" != "${HOME}/"* ]] || return 1
+}
+
+resolve_python_candidate_path() {
+  local candidate="$1"
+  local candidate_path
+  while IFS= read -r candidate_path; do
+    [[ -n "${candidate_path}" ]] || continue
+    if python_path_satisfies_contract "${candidate_path}"; then
+      printf '%s\n' "${candidate_path}"
+      return 0
+    fi
+  done < <(python_candidate_paths "${candidate}")
 }
 
 log_python_candidate_details() {
   local candidate="$1"
   local candidate_path
+  local -a candidate_paths=()
   local candidate_summary
-  if ! command -v "${candidate}" >/dev/null 2>&1; then
+  mapfile -t candidate_paths < <(python_candidate_paths "${candidate}")
+  if (( ${#candidate_paths[@]} == 0 )); then
     log "Python candidate not found: ${candidate}"
     return 0
   fi
 
-  candidate_path="$(command -v "${candidate}")"
-  candidate_summary="$("${candidate}" - <<'PY'
+  for candidate_path in "${candidate_paths[@]}"; do
+    candidate_summary="$("${candidate_path}" - <<'PY'
 import pathlib
 import sys
 
-print(f"version={sys.version.split()[0]} executable={pathlib.Path(sys.executable).resolve()}")
+resolved = pathlib.Path(sys.executable).resolve()
+location = "user-home" if str(resolved).startswith(str(pathlib.Path.home()) + "/") else "system"
+print(f"version={sys.version.split()[0]} executable={resolved} location={location}")
 PY
-)" || candidate_summary="version-check failed"
-  log "Python candidate ${candidate} resolved to ${candidate_path} (${candidate_summary})"
+)" || candidate_summary="probe failed"
+    log "Python candidate ${candidate} path ${candidate_path} (${candidate_summary})"
+  done
 }
 
 preflight_python() {
   local candidate
+  local resolved_python_bin=""
   local -a candidates=("${PYTHON_BIN}")
   if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
     candidates+=("python3.12")
   fi
 
   for candidate in "${candidates[@]}"; do
-    if python_candidate_satisfies_contract "${candidate}"; then
+    resolved_python_bin="$(resolve_python_candidate_path "${candidate}" || true)"
+    if [[ -n "${resolved_python_bin}" ]]; then
       if [[ "${candidate}" != "${PYTHON_BIN}" ]]; then
         log "Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}"
       fi
-      PYTHON_BIN="${candidate}"
-      log "Using system Python binary ${PYTHON_BIN} ($(command -v "${PYTHON_BIN}"))"
+      PYTHON_BIN="${resolved_python_bin}"
+      log "Using system Python binary ${PYTHON_BIN}"
       return 0
     fi
   done

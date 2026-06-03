@@ -356,12 +356,15 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     )
     assert "PYTHON_BIN_WAS_EXPLICIT=0" in deploy_text
     assert 'if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then' in deploy_text
-    assert re.search(r"^\s*python_candidate_satisfies_contract\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*python_candidate_paths\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*python_path_probe\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*python_path_satisfies_contract\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*resolve_python_candidate_path\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*log_python_candidate_details\(\) \{$", deploy_text, re.MULTILINE)
-    assert '"${candidate}" - <<\'PY\'' in deploy_text
+    assert 'location = "user-home"' in deploy_text
     assert 'candidates+=("python3.12")' in deploy_text
     assert 'Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}' in deploy_text
-    assert 'Using system Python binary ${PYTHON_BIN} ($(command -v "${PYTHON_BIN}"))' in deploy_text
+    assert 'Using system Python binary ${PYTHON_BIN}' in deploy_text
     assert 'log_python_candidate_details "python3.12"' in deploy_text
     assert "Python 3.12 or newer is required" in deploy_text
     assert re.search(
@@ -647,13 +650,20 @@ def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -
 def test_deploy_release_preflight_prefers_python312_candidate_when_default_python3_fails(
     tmp_path: Path,
 ) -> None:
+    system_python = shutil.which("python3")
+    assert system_python is not None
+
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
 
     fake_python3 = fake_bin / "python3"
     fake_python3.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     fake_python3.chmod(0o755)
-    (fake_bin / "python3.12").symlink_to(Path(sys.executable).resolve())
+    (fake_bin / "python3.12").symlink_to(Path(system_python).resolve())
+    for helper in ("bash", "date", "dirname"):
+        helper_path = shutil.which(helper)
+        assert helper_path is not None
+        (fake_bin / helper).symlink_to(Path(helper_path).resolve())
 
     script_copy = tmp_path / "deploy-release-preflight.sh"
     script_copy.write_text(
@@ -668,12 +678,12 @@ def test_deploy_release_preflight_prefers_python312_candidate_when_default_pytho
     result = run_command(
         "bash",
         str(script_copy),
-        env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        env={"PATH": str(fake_bin)},
     )
 
     assert "Using compatible system Python candidate python3.12 instead of default python3" in result.stdout
-    assert "Using system Python binary python3.12" in result.stdout
-    assert "selected=python3.12" in result.stdout
+    assert f"Using system Python binary {fake_bin / 'python3.12'}" in result.stdout
+    assert f"selected={fake_bin / 'python3.12'}" in result.stdout
 
 
 def test_active_native_docs_retire_advisory_lane() -> None:
