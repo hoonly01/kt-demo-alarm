@@ -360,6 +360,34 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         deploy_text,
         re.MULTILINE,
     )
+    assert re.search(
+        r'^\s*run_privileged "\$\{SYSTEMCTL_BIN\}" --no-pager --full status "\$\{APP_NAME\}" \|\| true$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(
+        r'^\s*run_privileged "\$\{JOURNALCTL_BIN\}" --no-pager -u "\$\{APP_NAME\}" -n "\$\{DIAGNOSTIC_JOURNAL_LINES\}" \|\| true$',
+        deploy_text,
+        re.MULTILINE,
+    )
+    assert re.search(r'^\s*"\$\{NAMEI_BIN\}" -om "\$\{path\}" \|\| true$', deploy_text, re.MULTILINE)
+    rollback_match = re.search(r"rollback_after_switch\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
+    assert rollback_match is not None
+    assert "capture_runtime_diagnostics" in rollback_match.group("body")
+    diagnostics_match = re.search(r"capture_runtime_diagnostics\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
+    assert diagnostics_match is not None
+    diagnostics_body = diagnostics_match.group("body")
+    for required_path in (
+        '"${CURRENT_LINK}"',
+        '"${RELEASE_DIR}"',
+        '"${SHARED_DIR}"',
+        '"${ENV_FILE}"',
+        '"${DATABASE_PATH}"',
+        '"${LOG_DIR}"',
+        '"${CACHE_FILE}"',
+        '"${ATTACHMENT_FOLDER}"',
+    ):
+        assert required_path in diagnostics_body
 
 
 def test_deploy_release_script_normalizes_release_permissions_for_service_group() -> None:

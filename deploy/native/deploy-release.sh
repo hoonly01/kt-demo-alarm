@@ -35,7 +35,10 @@ UV_BIN="${UV_BIN:-uv}"
 ENV_BIN="${ENV_BIN:-/usr/bin/env}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
 SYSTEMD_ANALYZE_BIN="${SYSTEMD_ANALYZE_BIN:-systemd-analyze}"
+JOURNALCTL_BIN="${JOURNALCTL_BIN:-journalctl}"
+NAMEI_BIN="${NAMEI_BIN:-namei}"
 SUDO_BIN="${SUDO_BIN:-sudo}"
+DIAGNOSTIC_JOURNAL_LINES="${DIAGNOSTIC_JOURNAL_LINES:-80}"
 BUNDLE_PATH="${BUNDLE_PATH:-}"
 CHECKSUM_PATH="${CHECKSUM_PATH:-}"
 VERIFY_SOURCE_BUNDLE_BIN="${VERIFY_SOURCE_BUNDLE_BIN:-${SCRIPT_DIR}/verify-source-bundle.sh}"
@@ -297,9 +300,43 @@ restart_service() {
   fi
 }
 
+capture_runtime_diagnostics() {
+  local path
+  local -a diagnostic_paths=(
+    "${CURRENT_LINK}"
+    "${RELEASE_DIR}"
+    "${SHARED_DIR}"
+    "${ENV_FILE}"
+    "${DATABASE_PATH}"
+    "${LOG_DIR}"
+    "${CACHE_FILE}"
+    "${ATTACHMENT_FOLDER}"
+  )
+
+  log "Capturing post-switch diagnostics for ${APP_NAME}"
+
+  run_privileged "${SYSTEMCTL_BIN}" --no-pager --full status "${APP_NAME}" || true
+
+  if command -v "${JOURNALCTL_BIN}" >/dev/null 2>&1; then
+    run_privileged "${JOURNALCTL_BIN}" --no-pager -u "${APP_NAME}" -n "${DIAGNOSTIC_JOURNAL_LINES}" || true
+  else
+    log "Skipping journal diagnostics because ${JOURNALCTL_BIN} is unavailable."
+  fi
+
+  if command -v "${NAMEI_BIN}" >/dev/null 2>&1; then
+    for path in "${diagnostic_paths[@]}"; do
+      log "namei -om ${path}"
+      "${NAMEI_BIN}" -om "${path}" || true
+    done
+  else
+    log "Skipping path diagnostics because ${NAMEI_BIN} is unavailable."
+  fi
+}
+
 rollback_after_switch() {
   local reason="$1"
   log "Post-switch failure: ${reason}"
+  capture_runtime_diagnostics
 
   if [[ -n "${PREVIOUS_CURRENT}" && -d "${PREVIOUS_CURRENT}" ]]; then
     log "Restoring previous current symlink: ${PREVIOUS_CURRENT}"
