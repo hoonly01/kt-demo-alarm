@@ -305,6 +305,7 @@ capture_runtime_diagnostics() {
   local path
   local -a diagnostic_paths=(
     "${CURRENT_LINK}"
+    "${CURRENT_LINK}/.venv/bin/python"
     "${CURRENT_LINK}/.venv/bin/uvicorn"
     "${RELEASE_DIR}"
     "${SHARED_DIR}"

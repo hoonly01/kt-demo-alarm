@@ -380,6 +380,7 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     diagnostics_body = diagnostics_match.group("body")
     for required_path in (
         '"${CURRENT_LINK}"',
+        '"${CURRENT_LINK}/.venv/bin/python"',
         '"${CURRENT_LINK}/.venv/bin/uvicorn"',
         '"${RELEASE_DIR}"',
         '"${SHARED_DIR}"',
@@ -447,9 +448,10 @@ def test_rendered_systemd_unit_has_required_directives() -> None:
     assert "WorkingDirectory=/srv/kt-demo-alarm/current" in unit
     assert "EnvironmentFile=/srv/kt-demo-alarm/shared/.env" in unit
     assert (
-        "ExecStart=/srv/kt-demo-alarm/current/.venv/bin/uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}"
+        "ExecStart=/srv/kt-demo-alarm/current/.venv/bin/python -m uvicorn main:app --host ${APP_BIND_HOST} --port ${APP_PORT}"
         in unit
     )
+    assert "/.venv/bin/uvicorn main:app" not in unit
     assert "uv run --no-sync --no-dev" not in unit
     assert "Restart=on-failure" in unit
     assert "ProtectSystem=strict" in unit
