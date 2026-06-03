@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import shutil
@@ -566,6 +567,74 @@ def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
     )
     assert re.search(r'^\s*\[\[ -x \.venv/bin/uvicorn \]\] \|\| native_fail ', setup_text, re.MULTILINE)
     assert "may also install supported OS dependencies" in setup_text
+
+
+def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -> None:
+    uv_bin = shutil.which("uv")
+    python_bin = shutil.which("python3")
+    assert uv_bin is not None
+    assert python_bin is not None
+
+    project_dir = tmp_path / "uv-system-python-check"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[project]",
+                'name = "uv-system-python-check"',
+                'version = "0.0.0"',
+                'requires-python = ">=3.12"',
+                "dependencies = []",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    requested_python = Path(python_bin).resolve()
+    managed_python_root = Path.home() / ".local" / "share" / "uv" / "python"
+
+    _ = run_command(
+        uv_bin,
+        "lock",
+        "--python",
+        str(requested_python),
+        "--no-managed-python",
+        "--no-python-downloads",
+        cwd=project_dir,
+    )
+    _ = run_command(
+        uv_bin,
+        "sync",
+        "--frozen",
+        "--no-dev",
+        "--python",
+        str(requested_python),
+        "--no-managed-python",
+        "--no-python-downloads",
+        cwd=project_dir,
+    )
+
+    venv_python = project_dir / ".venv" / "bin" / "python"
+    assert venv_python.exists()
+
+    inspect = run_command(
+        str(venv_python),
+        "-c",
+        (
+            "import json, pathlib, sys; "
+            "print(json.dumps({"
+            "'executable': str(pathlib.Path(sys.executable).resolve()), "
+            "'base_executable': str(pathlib.Path(getattr(sys, '_base_executable', sys.executable)).resolve()), "
+            "'prefix': str(pathlib.Path(sys.prefix).resolve())"
+            "}))"
+        ),
+        cwd=project_dir,
+    )
+    runtime_info = json.loads(inspect.stdout)
+    assert Path(runtime_info["prefix"]) == (project_dir / ".venv").resolve()
+    assert Path(runtime_info["base_executable"]) == requested_python
+    assert Path(runtime_info["base_executable"]).is_relative_to(managed_python_root) is False
 
 
 def test_active_native_docs_retire_advisory_lane() -> None:
