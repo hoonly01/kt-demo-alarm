@@ -176,6 +176,13 @@ print(pathlib.Path(sys.executable).resolve())
 PY
 }
 
+path_is_under_home() {
+  local path="$1"
+  local home_prefix="${HOME:-}"
+  [[ -n "${home_prefix}" ]] || return 1
+  [[ "${path}" == "${home_prefix}/"* ]]
+}
+
 python_path_satisfies_contract() {
   local candidate_path="$1"
   local -a probe=()
@@ -186,7 +193,8 @@ python_path_satisfies_contract() {
   [[ -n "${candidate_executable}" ]] || return 1
   (( ${probe[0]:-0} == 3 )) || return 1
   (( ${probe[1]:-0} >= 12 )) || return 1
-  [[ "${candidate_executable}" != "${HOME}/"* ]] || return 1
+  path_is_under_home "${candidate_executable}" && return 1
+  return 0
 }
 
 resolve_python_candidate_path() {
@@ -243,6 +251,7 @@ preflight_python() {
         log "Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}"
       fi
       PYTHON_BIN="${resolved_python_bin}"
+      PYTHON_REQUEST="${PYTHON_BIN}"
       log "Using system Python binary ${PYTHON_BIN}"
       return 0
     fi
@@ -261,13 +270,14 @@ preflight_python() {
 
 prepare_managed_python_install_dir() {
   [[ "${PYTHON_MODE}" == "managed" ]] || return 0
-  [[ "${MANAGED_PYTHON_INSTALL_DIR}" != "${HOME}/"* ]] \
+  ! path_is_under_home "${MANAGED_PYTHON_INSTALL_DIR}" \
     || fail "Managed Python install dir must not live under HOME: ${MANAGED_PYTHON_INSTALL_DIR}"
   run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"
 }
 
 normalize_managed_python_install_permissions() {
   [[ "${PYTHON_MODE}" == "managed" ]] || return 0
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
@@ -326,6 +336,7 @@ normalize_release_root_permissions() {
 }
 
 normalize_release_tree_permissions() {
+  run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +
   run_privileged find -P "${RELEASE_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
   run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +
   run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +

@@ -231,7 +231,7 @@ jobs:
           remote_incoming_root_q="$(quote_remote "${remote_incoming_root}")"
           remote_incoming_dir_q="$(quote_remote "${remote_incoming_dir}")"
           ssh "${ssh_options[@]}" "${EC2_USERNAME}@${EC2_HOST}" \
-            "set -euo pipefail
+            "set -eu
             remote_incoming_owner=${remote_incoming_owner_q}
             resolved_app_group=${resolved_app_group_q}
             remote_incoming_root=${remote_incoming_root_q}
@@ -241,6 +241,7 @@ jobs:
             sudo chown \"\${remote_incoming_owner}\" \"\${remote_incoming_dir}\"
             sudo chmod g+rx \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
             sudo chmod u+rwx \"\${remote_incoming_dir}\"
+            sudo chmod o-rwx \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\"
             sudo chmod g+s \"\${remote_incoming_root}\" \"\${remote_incoming_dir}\""
 
           scp "${ssh_options[@]}" \

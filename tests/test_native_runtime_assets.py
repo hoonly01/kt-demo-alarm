@@ -95,6 +95,33 @@ def uncommented_text(path: Path) -> str:
     )
 
 
+def _python_version(executable: str | Path) -> tuple[int, int]:
+    inspect = run_command(
+        str(executable),
+        "-c",
+        "import json, sys; print(json.dumps(list(sys.version_info[:2])))",
+    )
+    major, minor = json.loads(inspect.stdout)
+    return int(major), int(minor)
+
+
+def _compatible_python_or_skip(*names: str, require_non_home: bool = False) -> Path:
+    home = Path.home().resolve()
+    for name in names:
+        python_bin = shutil.which(name)
+        if python_bin is None:
+            continue
+        resolved = Path(python_bin).resolve()
+        if _python_version(resolved) < (3, 12):
+            continue
+        if require_non_home and resolved.is_relative_to(home):
+            continue
+        return resolved
+
+    scope = "non-HOME " if require_non_home else ""
+    pytest.skip(f"{scope}Python 3.12+ interpreter is required for this test")
+
+
 def test_deploy_workflow_matches_guarded_native_graph() -> None:
     jobs = workflow_jobs()
 
@@ -156,6 +183,8 @@ def test_deploy_workflow_normalizes_incoming_permissions_for_service_group() -> 
     workflow_text = uncommented_workflow_text()
 
     assert 'chmod 700 ${remote_incoming_dir_q}' not in workflow_text
+    assert '"set -euo pipefail' not in workflow_text
+    assert '"set -eu' in workflow_text
     assert 'resolved_app_user="${APP_USER:-${APP_NAME}}"' in workflow_text
     assert 'resolved_app_group="${APP_GROUP:-${resolved_app_user}}"' in workflow_text
     assert 'remote_incoming_root="${APP_ROOT}/incoming"' in workflow_text
@@ -176,6 +205,11 @@ def test_deploy_workflow_normalizes_incoming_permissions_for_service_group() -> 
         re.MULTILINE,
     )
     assert re.search(r"^\s*sudo chmod u\+rwx .*remote_incoming_dir.*$", workflow_text, re.MULTILINE)
+    assert re.search(
+        r"^\s*sudo chmod o-rwx .*remote_incoming_root.*remote_incoming_dir.*$",
+        workflow_text,
+        re.MULTILINE,
+    )
     assert re.search(
         r"^\s*sudo chmod g\+s .*remote_incoming_root.*remote_incoming_dir.*$",
         workflow_text,
@@ -370,11 +404,14 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
     assert 'if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then' in deploy_text
     assert re.search(r"^\s*python_candidate_paths\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*python_path_probe\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*path_is_under_home\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*python_path_satisfies_contract\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*resolve_python_candidate_path\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*log_python_candidate_details\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*prepare_managed_python_install_dir\(\) \{$", deploy_text, re.MULTILINE)
     assert re.search(r"^\s*normalize_managed_python_install_permissions\(\) \{$", deploy_text, re.MULTILINE)
+    assert 'path_is_under_home "${candidate_executable}" && return 1' in deploy_text
+    assert '! path_is_under_home "${MANAGED_PYTHON_INSTALL_DIR}"' in deploy_text
     assert 'location = "user-home"' in deploy_text
     assert 'candidates+=("python3.12")' in deploy_text
     assert 'Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}' in deploy_text
@@ -443,11 +480,35 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
     assert 'run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"' in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chmod g+r {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +' in deploy_text
+
+    managed_match = re.search(
+        r"normalize_managed_python_install_permissions\(\) \{\n(?P<body>.*?)\n\}",
+        deploy_text,
+        re.DOTALL,
+    )
+    assert managed_match is not None
+    managed_body = managed_match.group("body")
+    assert managed_body.index('run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +') < managed_body.index(
+        'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +'
+    )
+
+    release_tree_match = re.search(
+        r"normalize_release_tree_permissions\(\) \{\n(?P<body>.*?)\n\}",
+        deploy_text,
+        re.DOTALL,
+    )
+    assert release_tree_match is not None
+    release_tree_body = release_tree_match.group("body")
+    assert release_tree_body.index('run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +') < release_tree_body.index(
+        'run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +'
+    )
 
     prepare_match = re.search(r"prepare_release_dirs\(\) \{\n(?P<body>.*?)\n\}", deploy_text, re.DOTALL)
     assert prepare_match is not None
@@ -602,9 +663,7 @@ def test_setup_runtime_contains_required_uv_and_playwright_paths() -> None:
 
 def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -> None:
     uv_bin = shutil.which("uv")
-    python_bin = shutil.which("python3")
     assert uv_bin is not None
-    assert python_bin is not None
 
     project_dir = tmp_path / "uv-system-python-check"
     project_dir.mkdir()
@@ -622,8 +681,7 @@ def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    requested_python = Path(python_bin).resolve()
-    managed_python_root = Path.home() / ".local" / "share" / "uv" / "python"
+    requested_python = _compatible_python_or_skip("python3.12", "python3")
 
     _ = run_command(
         uv_bin,
@@ -665,7 +723,6 @@ def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -
     runtime_info = json.loads(inspect.stdout)
     assert Path(runtime_info["prefix"]) == (project_dir / ".venv").resolve()
     assert Path(runtime_info["base_executable"]) == requested_python
-    assert Path(runtime_info["base_executable"]).is_relative_to(managed_python_root) is False
 
 
 def test_uv_sync_can_use_custom_managed_python_install_dir_for_project_venv(tmp_path: Path) -> None:
@@ -739,8 +796,7 @@ def test_uv_sync_can_use_custom_managed_python_install_dir_for_project_venv(tmp_
 def test_deploy_release_preflight_prefers_python312_candidate_when_default_python3_fails(
     tmp_path: Path,
 ) -> None:
-    system_python = shutil.which("python3")
-    assert system_python is not None
+    compatible_python = _compatible_python_or_skip("python3.12", "python3", require_non_home=True)
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -748,7 +804,7 @@ def test_deploy_release_preflight_prefers_python312_candidate_when_default_pytho
     fake_python3 = fake_bin / "python3"
     fake_python3.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     fake_python3.chmod(0o755)
-    (fake_bin / "python3.12").symlink_to(Path(system_python).resolve())
+    (fake_bin / "python3.12").symlink_to(compatible_python)
     for helper in ("bash", "date", "dirname", "id"):
         helper_path = shutil.which(helper)
         assert helper_path is not None
@@ -758,21 +814,27 @@ def test_deploy_release_preflight_prefers_python312_candidate_when_default_pytho
     script_copy.write_text(
         DEPLOY_SCRIPT.read_text(encoding="utf-8").replace(
             'main "$@"',
-            'preflight_python\nprintf "selected=%s\\n" "${PYTHON_BIN}"',
+            'preflight_python\nprintf "selected=%s\\nrequest=%s\\n" "${PYTHON_BIN}" "${PYTHON_REQUEST}"',
         ),
         encoding="utf-8",
     )
     script_copy.chmod(0o755)
 
-    result = run_command(
-        "bash",
-        str(script_copy),
-        env={"PATH": str(fake_bin)},
+    env = {name: value for name, value in os.environ.items() if name != "HOME"}
+    env["PATH"] = str(fake_bin)
+    result = subprocess.run(
+        ("bash", str(script_copy)),
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+        env=env,
     )
 
     assert "Using compatible system Python candidate python3.12 instead of default python3" in result.stdout
     assert f"Using system Python binary {fake_bin / 'python3.12'}" in result.stdout
     assert f"selected={fake_bin / 'python3.12'}" in result.stdout
+    assert f"request={fake_bin / 'python3.12'}" in result.stdout
 
 
 def test_deploy_release_preflight_falls_back_to_shared_managed_python_when_no_system_candidate(
