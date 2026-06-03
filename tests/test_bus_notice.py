@@ -99,7 +99,8 @@ def test_get_notices_endpoint():
 
 def test_webhook_route_check():
     print("Testing POST /bus/webhook/route_check endpoint...")
-    with patch.object(BusNoticeService, 'get_route_controls', return_value=[]):
+    mock_response = {"version": "2.0", "template": {"outputs": []}}
+    with patch.object(BusNoticeService, 'get_route_check_response', return_value=mock_response) as mock_method:
         response = client.post("/bus/webhook/route_check", json={
             "userRequest": {},
             "action": {
@@ -109,3 +110,4 @@ def test_webhook_route_check():
         assert response.status_code == 200
         data = response.json()
         assert "template" in data
+        mock_method.assert_called_once_with("100", {"route_number": "100"})

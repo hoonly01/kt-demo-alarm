@@ -3,7 +3,7 @@ import os
 import asyncio
 from datetime import datetime
 import pytz
-from typing import List, Dict, Optional, Any
+from typing import Any
 
 from app.config.settings import settings
 from app.services.bus_logic.restricted_bus import TOPISCrawler
@@ -11,12 +11,15 @@ from app.services.bus_logic.position_checker import get_stations_by_position
 
 logger = logging.getLogger(__name__)
 KST = pytz.timezone('Asia/Seoul')
+TOPIS_CONTROL_INFO_URL = "https://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
+NoticePayload = dict[str, Any]
+CallbackPayload = dict[str, Any]
 
 class BusNoticeService:
-    crawler: Optional[TOPISCrawler] = None
-    cached_notices: Dict[str, Dict] = {}
-    last_update: Optional[datetime] = None
-    _image_task: Optional[asyncio.Task] = None  # GC 방지를 위한 태스크 참조 보관
+    crawler: TOPISCrawler | None = None
+    cached_notices: dict[str, NoticePayload] = {}
+    last_update: datetime | None = None
+    _image_task: asyncio.Task[None] | None = None  # GC 방지를 위한 태스크 참조 보관
     
     @classmethod
     async def initialize(cls):
@@ -42,7 +45,7 @@ class BusNoticeService:
             logger.info(f"✅ BusNoticeService 초기화 완료. {len(cls.cached_notices)}개 캐시 공지사항 로드됨")
             
             # 백그라운드 이미지 생성 시작 (참조 보관 → GC 방지 + 예외 로깅)
-            def _log_task_error(task: asyncio.Task):
+            def _log_task_error(task: asyncio.Task[None]) -> None:
                 if not task.cancelled() and task.exception():
                     logger.error(f"이미지 생성 태스크 오류: {task.exception()}")
 
@@ -84,7 +87,7 @@ class BusNoticeService:
             if cls._image_task and not cls._image_task.done():
                 cls._image_task.cancel()
 
-            def _log_image_error(task: asyncio.Task):
+            def _log_image_error(task: asyncio.Task[None]) -> None:
                 if not task.cancelled() and task.exception():
                     logger.error(f"이미지 재생성 오류: {task.exception()}")
 
@@ -140,9 +143,13 @@ class BusNoticeService:
             logger.error(f"이미지 사전 생성 중 오류: {e}")
 
     @classmethod
-    def _generate_image_sync(cls, route_number: str, notice: Dict) -> Optional[str]:
+    def _generate_image_sync(cls, route_number: str, notice: NoticePayload) -> str | None:
         """단일 이미지 생성 (동기 내부 메서드)"""
         try:
+            crawler = cls.crawler
+            if crawler is None:
+                return None
+
             attachments = notice.get('attachments', [])
             route_pages = notice.get('route_pages', {})
             
@@ -154,13 +161,13 @@ class BusNoticeService:
             
             # 첫 번째 첨부파일만 처리
             attachment = attachments[0]
-            file_path = cls.crawler._download_attachment(attachment, save_to_folder=True)
+            file_path = crawler._download_attachment(attachment, save_to_folder=True)
             
             if file_path:
-                converted_path = cls.crawler._convert_hwp_to_pdf(file_path)
+                converted_path = crawler._convert_hwp_to_pdf(file_path)
                 
                 if converted_path.lower().endswith('.pdf'):
-                    image_path = cls.crawler._convert_pdf_page_to_image(
+                    image_path = crawler._convert_pdf_page_to_image(
                         converted_path, page_num - 1, route_number, notice_seq
                     )
                     
@@ -172,7 +179,6 @@ class BusNoticeService:
                         
                         # URL 반환
                         filename = os.path.basename(image_path)
-                        # TODO: 호스트 도메인은 요청 컨텍스트나 설정에서 가져와야 함
                         return f"/static/{filename}"
             return None
         except Exception as e:
@@ -180,7 +186,7 @@ class BusNoticeService:
             return None
 
     @classmethod
-    def get_notices(cls, date_str: Optional[str] = None) -> List[Dict]:
+    def get_notices(cls, date_str: str | None = None) -> list[NoticePayload]:
         """공지사항 조회"""
         if not cls.crawler:
             return []
@@ -196,21 +202,21 @@ class BusNoticeService:
         return notices
 
     @classmethod
-    def get_route_controls(cls, route_number: str, date_str: str) -> List[Dict]:
+    def get_route_controls(cls, route_number: str, date_str: str) -> list[NoticePayload]:
         """노선별 통제 정보 조회"""
         if not cls.crawler:
             return []
         return cls.crawler.get_control_info_by_route(cls.cached_notices, date_str, route_number)
 
     @classmethod
-    def get_nearby_controls(cls, tm_x: float, tm_y: float, radius: int) -> List[Dict]:
+    def get_nearby_controls(cls, tm_x: float, tm_y: float, radius: int | float) -> list[NoticePayload]:
         """주변 정류소 조회"""
         if not cls.crawler:
             return []
-        return get_stations_by_position(cls.crawler.service_key, tm_x, tm_y, radius)
+        return get_stations_by_position(cls.crawler.service_key, tm_x, tm_y, int(radius))
 
     @classmethod
-    async def generate_route_image(cls, route_number: str, date_str: str) -> Optional[str]:
+    async def generate_route_image(cls, route_number: str, date_str: str) -> str | None:
         """실시간 이미지 생성 요청"""
         if not cls.crawler:
             return None
@@ -248,7 +254,182 @@ class BusNoticeService:
         return image_url
 
     @classmethod
-    async def process_route_check_background(cls, route_number: str, params: Dict, callback_url: str):
+    async def get_route_check_response(cls, route_number: str, params: dict[str, Any]) -> CallbackPayload:
+        """노선 통제 확인 후 카카오톡 동기 응답 템플릿 반환"""
+        try:
+            target_date = params.get('date', '').strip()
+            if not target_date:
+                target_date = cls.korean_date_string()
+
+            normalized_route = route_number.replace("-", "").strip()
+
+            if not cls.crawler:
+                return {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": f"❌ 노선 {normalized_route}번\n\n서비스를 사용할 수 없습니다."
+                                }
+                            }
+                        ]
+                    }
+                }
+
+            notices = cls.crawler.filter_by_date(cls.cached_notices, target_date)
+            if not notices:
+                return {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": (
+                                        f"🚌 노선 {normalized_route}번 안내\n\n"
+                                        f"문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n"
+                                        "현재 정상 운행 중인 것으로 파악됩니다.\n\n"
+                                        f"📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                }
+
+            target_notice = None
+            for notice in notices:
+                route_pages = notice.get('route_pages', {})
+                if normalized_route in route_pages:
+                    target_notice = notice
+                    break
+
+            if not target_notice:
+                for notice in notices:
+                    if normalized_route in notice.get('route_images', {}):
+                        target_notice = notice
+                        break
+
+            if not target_notice:
+                return {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleText": {
+                                    "text": (
+                                        f"🚌 노선 {normalized_route}번 안내\n\n"
+                                        f"문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n"
+                                        "현재 정상 운행 중인 것으로 파악됩니다.\n\n"
+                                        f"📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                }
+
+            image_url = await cls.generate_route_image(normalized_route, target_date)
+
+            if image_url:
+                notice_title = target_notice.get('title', '제목 없음')
+                detour_routes = target_notice.get('detour_routes', {})
+                detour_path = detour_routes.get(normalized_route, '')
+
+                control_periods = []
+                station_info = target_notice.get('station_info', {})
+                for _, info in station_info.items():
+                    if normalized_route in info.get('affected_routes', []):
+                        control_periods.extend(info.get('periods', []))
+                control_periods.extend(target_notice.get('general_periods', []))
+
+                info_text = f"🚌 노선 {normalized_route}번 우회 경로\n"
+                info_text += f"📅 {target_date}\n\n"
+
+                if control_periods:
+                    unique_periods = sorted(list(set(control_periods)))
+                    if len(unique_periods) == 1:
+                        info_text += f"⏰ 통제기간: {unique_periods[0]}\n"
+                    else:
+                        main_period = unique_periods[0]
+                        info_text += f"⏰ 통제기간: {main_period} 외 {len(unique_periods) - 1}개 구간\n"
+
+                if notice_title:
+                    title_short = notice_title[:50] + '...' if len(notice_title) > 50 else notice_title
+                    info_text += f"📄 {title_short}\n"
+                if detour_path:
+                    detour_short = detour_path[:60] + '...' if len(detour_path) > 60 else detour_path
+                    info_text += f"🔄 우회: {detour_short}\n"
+                info_text += (
+                    "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n"
+                    f"더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\n{TOPIS_CONTROL_INFO_URL}"
+                )
+
+                full_image_url = image_url
+                if image_url.startswith("/"):
+                    base_url = settings.RENDER_EXTERNAL_URL
+                    full_image_url = f"{base_url}{image_url}"
+
+                return {
+                    "version": "2.0",
+                    "template": {
+                        "outputs": [
+                            {
+                                "simpleImage": {
+                                    "imageUrl": full_image_url,
+                                    "altText": f"{normalized_route}번 버스 우회 경로"
+                                }
+                            },
+                            {
+                                "simpleText": {
+                                    "text": info_text
+                                }
+                            }
+                        ]
+                    }
+                }
+
+            notice_title = target_notice.get('title', '제목 없음')
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": (
+                                    f"ℹ️ 노선 {normalized_route}번 안내\n\n"
+                                    f"해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n"
+                                    "다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n"
+                                    f"📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
+                                )
+                            }
+                        }
+                    ]
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"노선 조회 중 오류: {e}")
+            return {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": f"❌ 노선 {route_number}번\n\n시스템 오류가 발생했습니다: {str(e)[:50]}"
+                            }
+                        }
+                    ]
+                }
+            }
+
+    @classmethod
+    async def process_route_check_background(
+        cls,
+        route_number: str,
+        params: dict[str, Any],
+        callback_url: str,
+    ) -> None:
         """백그라운드에서 노선 확인 및 콜백 전송"""
         try:
             target_date = params.get('date', '').strip()
@@ -271,7 +452,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 교통 통제나 우회 소식이 없습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
                                 }
                             }
                         ]
@@ -303,7 +484,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
+                                    "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 해당 노선의 특별한 통제 소식은 발견되지 않았습니다.\n현재 정상 운행 중인 것으로 파악됩니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
                                 }
                             }
                         ]
@@ -342,7 +523,7 @@ class BusNoticeService:
                         "outputs": [
                             {
                                 "simpleText": {
-                                    "text": f"ℹ️ 노선 {normalized_route}번 안내\n\n해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
+                                    "text": f"ℹ️ 노선 {normalized_route}번 안내\n\n해당 노선에 대한 임시 우회 공지('{notice_title}')가 있습니다.\n다만 현재 상세 지도 이미지를 준비하지 못했습니다.\n\n📍 더 자세한 교통 통제 정보는 아래 링크를 참고하세요.\n{TOPIS_CONTROL_INFO_URL}"
                                 }
                             }
                         ]
@@ -355,11 +536,17 @@ class BusNoticeService:
             await cls.send_error_callback(callback_url, route_number, f"시스템 오류: {str(e)[:50]}")
 
     @classmethod
-    async def send_success_callback(cls, callback_url: str, route_number: str, target_date: str, 
-                                  notice_title: str, detour_path: str, image_url: str, control_periods: List[str]):
+    async def send_success_callback(
+        cls,
+        callback_url: str,
+        route_number: str,
+        target_date: str,
+        notice_title: str,
+        detour_path: str,
+        image_url: str,
+        control_periods: list[str],
+    ) -> None:
         """성공 콜백 전송"""
-        import aiohttp
-        
         info_text = f"✅ 이미지 생성 완료!\n\n"
         info_text += f"🚌 노선 {route_number}번 우회 경로\n"
         info_text += f"📅 {target_date}\n\n"
@@ -379,7 +566,7 @@ class BusNoticeService:
         if detour_path:
             detour_short = detour_path[:60] + '...' if len(detour_path) > 60 else detour_path
             info_text += f"🔄 우회: {detour_short}\n"
-        info_text += "\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\nhttps://m.topis.seoul.go.kr/web/openTrfContolInfo.do"
+        info_text += f"\n📍 자세한 우회 경로는 아래 이미지를 확인하세요.\n\n더 자세한 교통 통제 정보는 아래 링크를 참고해주세요.\n{TOPIS_CONTROL_INFO_URL}"
         
         # 도메인 추가 (이미지 URL이 상대경로인 경우)
         full_image_url = image_url
@@ -405,7 +592,7 @@ class BusNoticeService:
         await cls._send_callback_request(callback_url, callback_message)
 
     @classmethod
-    async def send_error_callback(cls, callback_url: str, route_number: str, error_message: str):
+    async def send_error_callback(cls, callback_url: str, route_number: str, error_message: str) -> None:
         """오류 콜백 전송"""
         callback_message = {
             "version": "2.0",
@@ -422,7 +609,7 @@ class BusNoticeService:
         await cls._send_callback_request(callback_url, callback_message)
 
     @classmethod
-    async def _send_callback_request(cls, url: str, data: Dict):
+    async def _send_callback_request(cls, url: str, data: CallbackPayload) -> None:
         """실제 콜백 요청 전송 (aiohttp 사용)"""
         import aiohttp
         try:

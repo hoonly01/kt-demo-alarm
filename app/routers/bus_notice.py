@@ -1,7 +1,5 @@
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request
-from typing import Optional, Dict
+from fastapi import APIRouter, HTTPException, Query, Request
 import logging
-from datetime import datetime
 
 from app.services.bus_notice_service import BusNoticeService
 
@@ -28,8 +26,8 @@ async def webhook_bus_info():
     }
 
 @router.post("/webhook/route_check")
-async def webhook_route_check(request: Request, background_tasks: BackgroundTasks):
-    """노선 통제 확인 (콜백 지원)"""
+async def webhook_route_check(request: Request):
+    """노선 통제 확인 (동기 응답)"""
     try:
         body = await request.json()
         # 민감 정보(callbackUrl, user.id 등) 마스킹 후 로깅
@@ -43,7 +41,6 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
         action = body.get('action', {})
         params = action.get('params', {})
         
-        callback_url = user_request.get('callbackUrl')
         route_number = params.get('route_number')
         utterance = user_request.get('utterance', '')
         
@@ -71,38 +68,7 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
                 "template": {"outputs": [{"simpleText": {"text": "버스 노선 번호를 입력해주세요.\n(예: 100 또는 100번)"}}]}
             }
             
-        # 콜백 처리가 가능한 경우
-        if callback_url:
-            background_tasks.add_task(
-                BusNoticeService.process_route_check_background,
-                route_number, params, callback_url
-            )
-            return {
-                "version": "2.0",
-                "useCallback": True,
-                "data": {"text": "잠시만 기다려주세요... 이미지를 생성 중입니다."}
-            }
-        
-        # 콜백이 없는 경우 (동기 처리 - 타임아웃 위험)
-        # 간단히 텍스트 정보만 반환
-        date_str = params.get('date') or BusNoticeService.korean_date_string()
-        controls = BusNoticeService.get_route_controls(route_number, date_str)
-        
-        if not controls:
-            return {
-                "version": "2.0",
-                "template": {"outputs": [{"simpleText": {"text": f"📅 {date_str}\n노선 {route_number}에 대한 통제 정보가 없습니다."}}]}
-            }
-            
-        text = f"🚌 노선 {route_number} 통제 정보 ({len(controls)}건)\n📅 {date_str}\n\n"
-        for c in controls[:3]:
-            text += f"📄 {c.get('notice_title', '제목없음')[:20]}...\n"
-            text += f"🔄 {c.get('detour_route', '정보없음')[:30]}...\n\n"
-            
-        return {
-            "version": "2.0",
-            "template": {"outputs": [{"simpleText": {"text": text}}]}
-        }
+        return await BusNoticeService.get_route_check_response(route_number, params)
             
     except Exception as e:
         logger.error(f"Route Check Error: {e}")
@@ -112,9 +78,9 @@ async def webhook_route_check(request: Request, background_tasks: BackgroundTask
         }
 
 @router.post("/webhook/route_image")
-async def webhook_route_image(request: Request, background_tasks: BackgroundTasks):
+async def webhook_route_image(request: Request):
     """노선 이미지 요청 (route_check와 동일하게 처리)"""
-    return await webhook_route_check(request, background_tasks)
+    return await webhook_route_check(request)
 
 @router.post("/webhook/help")
 async def webhook_help():
@@ -144,7 +110,7 @@ async def get_bus_service_status():
     }
 
 @router.get("/notices")
-async def get_notices(date: Optional[str] = None):
+async def get_notices(date: str | None = None):
     """공지사항 목록"""
     return BusNoticeService.get_notices(date)
 
