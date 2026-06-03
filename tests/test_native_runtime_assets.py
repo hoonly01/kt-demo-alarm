@@ -354,8 +354,15 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
         deploy_text,
         re.MULTILINE,
     )
-    assert re.search(r'^\s*require_command "\$\{PYTHON_BIN\}"$', deploy_text, re.MULTILINE)
-    assert re.search(r'''^\s*"\$\{PYTHON_BIN\}" - <<'PY'$''', deploy_text, re.MULTILINE)
+    assert "PYTHON_BIN_WAS_EXPLICIT=0" in deploy_text
+    assert 'if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then' in deploy_text
+    assert re.search(r"^\s*python_candidate_satisfies_contract\(\) \{$", deploy_text, re.MULTILINE)
+    assert re.search(r"^\s*log_python_candidate_details\(\) \{$", deploy_text, re.MULTILINE)
+    assert '"${candidate}" - <<\'PY\'' in deploy_text
+    assert 'candidates+=("python3.12")' in deploy_text
+    assert 'Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}' in deploy_text
+    assert 'Using system Python binary ${PYTHON_BIN} ($(command -v "${PYTHON_BIN}"))' in deploy_text
+    assert 'log_python_candidate_details "python3.12"' in deploy_text
     assert "Python 3.12 or newer is required" in deploy_text
     assert re.search(
         r'^\s*"\$\{UV_BIN\}" sync --frozen --no-dev --python "\$\{PYTHON_BIN\}" --no-managed-python --no-python-downloads$',
@@ -635,6 +642,38 @@ def test_uv_sync_uses_requested_system_python_for_project_venv(tmp_path: Path) -
     assert Path(runtime_info["prefix"]) == (project_dir / ".venv").resolve()
     assert Path(runtime_info["base_executable"]) == requested_python
     assert Path(runtime_info["base_executable"]).is_relative_to(managed_python_root) is False
+
+
+def test_deploy_release_preflight_prefers_python312_candidate_when_default_python3_fails(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+
+    fake_python3 = fake_bin / "python3"
+    fake_python3.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    fake_python3.chmod(0o755)
+    (fake_bin / "python3.12").symlink_to(Path(sys.executable).resolve())
+
+    script_copy = tmp_path / "deploy-release-preflight.sh"
+    script_copy.write_text(
+        DEPLOY_SCRIPT.read_text(encoding="utf-8").replace(
+            'main "$@"',
+            'preflight_python\nprintf "selected=%s\\n" "${PYTHON_BIN}"',
+        ),
+        encoding="utf-8",
+    )
+    script_copy.chmod(0o755)
+
+    result = run_command(
+        "bash",
+        str(script_copy),
+        env={"PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+
+    assert "Using compatible system Python candidate python3.12 instead of default python3" in result.stdout
+    assert "Using system Python binary python3.12" in result.stdout
+    assert "selected=python3.12" in result.stdout
 
 
 def test_active_native_docs_retire_advisory_lane() -> None:

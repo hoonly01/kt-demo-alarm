@@ -32,6 +32,10 @@ ALLOW_PORT_TAKEOVER="${ALLOW_PORT_TAKEOVER:-false}"
 ALLOW_DOCKER_CUTOVER="${ALLOW_DOCKER_CUTOVER:-false}"
 CHOWN_SHARED_DIRS="${CHOWN_SHARED_DIRS:-true}"
 UV_BIN="${UV_BIN:-uv}"
+PYTHON_BIN_WAS_EXPLICIT=0
+if [[ -n "${PYTHON_BIN:-}" || -n "${KT_NATIVE_PYTHON_BIN:-}" ]]; then
+  PYTHON_BIN_WAS_EXPLICIT=1
+fi
 PYTHON_BIN="${PYTHON_BIN:-${KT_NATIVE_PYTHON_BIN:-python3}}"
 ENV_BIN="${ENV_BIN:-/usr/bin/env}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
@@ -123,7 +127,6 @@ preflight_commands() {
   require_command stat
   require_command sed
   require_command "${UV_BIN}"
-  require_command "${PYTHON_BIN}"
   require_command "${ENV_BIN}"
   require_command "${SYSTEMCTL_BIN}"
   require_command "${SYSTEMD_ANALYZE_BIN}"
@@ -133,13 +136,60 @@ preflight_commands() {
   fi
 }
 
-preflight_python() {
-  "${PYTHON_BIN}" - <<'PY'
+python_candidate_satisfies_contract() {
+  local candidate="$1"
+  command -v "${candidate}" >/dev/null 2>&1 || return 1
+  "${candidate}" - <<'PY' >/dev/null 2>&1
 import sys
 
 if sys.version_info < (3, 12):
-    raise SystemExit("Python 3.12 or newer is required")
+    raise SystemExit(1)
 PY
+}
+
+log_python_candidate_details() {
+  local candidate="$1"
+  local candidate_path
+  local candidate_summary
+  if ! command -v "${candidate}" >/dev/null 2>&1; then
+    log "Python candidate not found: ${candidate}"
+    return 0
+  fi
+
+  candidate_path="$(command -v "${candidate}")"
+  candidate_summary="$("${candidate}" - <<'PY'
+import pathlib
+import sys
+
+print(f"version={sys.version.split()[0]} executable={pathlib.Path(sys.executable).resolve()}")
+PY
+)" || candidate_summary="version-check failed"
+  log "Python candidate ${candidate} resolved to ${candidate_path} (${candidate_summary})"
+}
+
+preflight_python() {
+  local candidate
+  local -a candidates=("${PYTHON_BIN}")
+  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
+    candidates+=("python3.12")
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if python_candidate_satisfies_contract "${candidate}"; then
+      if [[ "${candidate}" != "${PYTHON_BIN}" ]]; then
+        log "Using compatible system Python candidate ${candidate} instead of default ${PYTHON_BIN}"
+      fi
+      PYTHON_BIN="${candidate}"
+      log "Using system Python binary ${PYTHON_BIN} ($(command -v "${PYTHON_BIN}"))"
+      return 0
+    fi
+  done
+
+  log_python_candidate_details "${PYTHON_BIN}"
+  if [[ "${PYTHON_BIN_WAS_EXPLICIT}" != "1" ]]; then
+    log_python_candidate_details "python3.12"
+  fi
+  fail "Python 3.12 or newer is required"
 }
 
 native_service_active() {
