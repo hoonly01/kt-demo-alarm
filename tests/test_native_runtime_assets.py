@@ -468,6 +468,10 @@ def test_deploy_release_script_contains_required_preflight_and_rollback_guards()
 
 def test_deploy_release_script_normalizes_release_permissions_for_service_group() -> None:
     deploy_text = uncommented_text(DEPLOY_SCRIPT)
+    safe_managed_chmod = (
+        'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" \\( -type d -o -type f \\) -exec chmod g-w {} +'
+    )
+    safe_release_chmod = 'run_privileged find -P "${RELEASE_DIR}" \\( -type d -o -type f \\) -exec chmod g-w {} +'
 
     assert re.search(r"^\s*normalize_release_root_permissions\(\) \{$", deploy_text, re.MULTILINE)
     assert 'run_privileged chgrp "${APP_GROUP}" "${RELEASES_DIR}" "${RELEASE_DIR}"' in deploy_text
@@ -480,13 +484,15 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -exec chmod g+r {} +' in deploy_text
     assert 'run_privileged find -P "${RELEASE_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
     assert 'run_privileged install -d -o "${MANAGED_PYTHON_INSTALL_OWNER}" -g "${APP_GROUP}" -m 2775 "${MANAGED_PYTHON_INSTALL_DIR}"' in deploy_text
-    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +' in deploy_text
+    assert safe_managed_chmod in deploy_text
+    assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +' not in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chmod g+r {} +' in deploy_text
     assert 'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -perm /111 -exec chmod g+rx {} +' in deploy_text
-    assert 'run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +' in deploy_text
+    assert safe_release_chmod in deploy_text
+    assert 'run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +' not in deploy_text
 
     managed_match = re.search(
         r"normalize_managed_python_install_permissions\(\) \{\n(?P<body>.*?)\n\}",
@@ -495,7 +501,7 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     )
     assert managed_match is not None
     managed_body = managed_match.group("body")
-    assert managed_body.index('run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +') < managed_body.index(
+    assert managed_body.index(safe_managed_chmod) < managed_body.index(
         'run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +'
     )
 
@@ -506,7 +512,7 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     )
     assert release_tree_match is not None
     release_tree_body = release_tree_match.group("body")
-    assert release_tree_body.index('run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +') < release_tree_body.index(
+    assert release_tree_body.index(safe_release_chmod) < release_tree_body.index(
         'run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +'
     )
 
@@ -531,6 +537,59 @@ def test_deploy_release_script_normalizes_release_permissions_for_service_group(
     assert sync_body.index("normalize_managed_python_install_permissions") < sync_body.index(
         "normalize_release_tree_permissions"
     )
+
+
+def test_safe_find_chmod_normalization_skips_symlink_targets_outside_root(tmp_path: Path) -> None:
+    normalization_root = tmp_path / "normalization-root"
+    normalization_root.mkdir()
+    inside_file = normalization_root / "inside-file.txt"
+    inside_dir = normalization_root / "inside-dir"
+    outside_file = tmp_path / "outside-file.txt"
+    outside_dir = tmp_path / "outside-dir"
+    link_to_outside_file = normalization_root / "outside-file-link"
+    link_to_outside_dir = normalization_root / "outside-dir-link"
+
+    inside_file.write_text("inside\n", encoding="utf-8")
+    inside_dir.mkdir()
+    outside_file.write_text("outside\n", encoding="utf-8")
+    outside_dir.mkdir()
+    link_to_outside_file.symlink_to(outside_file)
+    link_to_outside_dir.symlink_to(outside_dir, target_is_directory=True)
+
+    os.chmod(normalization_root, 0o775)
+    os.chmod(inside_file, 0o664)
+    os.chmod(inside_dir, 0o775)
+    os.chmod(outside_file, 0o664)
+    os.chmod(outside_dir, 0o775)
+
+    outside_file_mode_before = outside_file.stat().st_mode & 0o777
+    outside_dir_mode_before = outside_dir.stat().st_mode & 0o777
+
+    _ = run_command(
+        "find",
+        "-P",
+        str(normalization_root),
+        "(",
+        "-type",
+        "d",
+        "-o",
+        "-type",
+        "f",
+        ")",
+        "-exec",
+        "chmod",
+        "g-w",
+        "{}",
+        "+",
+    )
+
+    assert (normalization_root.stat().st_mode & 0o777) == 0o755
+    assert (inside_file.stat().st_mode & 0o777) == 0o644
+    assert (inside_dir.stat().st_mode & 0o777) == 0o755
+    assert (outside_file.stat().st_mode & 0o777) == outside_file_mode_before
+    assert (outside_dir.stat().st_mode & 0o777) == outside_dir_mode_before
+    assert link_to_outside_file.is_symlink()
+    assert link_to_outside_dir.is_symlink()
 
 
 def test_rendered_systemd_unit_has_required_directives() -> None:

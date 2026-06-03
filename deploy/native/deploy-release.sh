@@ -277,7 +277,7 @@ prepare_managed_python_install_dir() {
 
 normalize_managed_python_install_permissions() {
   [[ "${PYTHON_MODE}" == "managed" ]] || return 0
-  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -exec chmod g-w {} +
+  run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" \( -type d -o -type f \) -exec chmod g-w {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type d -exec chmod g+rx,g+s {} +
   run_privileged find -P "${MANAGED_PYTHON_INSTALL_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
@@ -336,7 +336,7 @@ normalize_release_root_permissions() {
 }
 
 normalize_release_tree_permissions() {
-  run_privileged find -P "${RELEASE_DIR}" -exec chmod g-w {} +
+  run_privileged find -P "${RELEASE_DIR}" \( -type d -o -type f \) -exec chmod g-w {} +
   run_privileged find -P "${RELEASE_DIR}" -type d -exec chgrp "${APP_GROUP}" {} +
   run_privileged find -P "${RELEASE_DIR}" -type d -exec chmod g+rx,g+s {} +
   run_privileged find -P "${RELEASE_DIR}" -type f -exec chgrp "${APP_GROUP}" {} +
