@@ -257,7 +257,8 @@ class BusNoticeService:
     async def get_route_check_response(cls, route_number: str, params: dict[str, Any]) -> CallbackPayload:
         """노선 통제 확인 후 카카오톡 동기 응답 템플릿 반환"""
         try:
-            target_date = params.get('date', '').strip()
+            raw_target_date: object = params.get("date")
+            target_date = raw_target_date.strip() if isinstance(raw_target_date, str) else ""
             if not target_date:
                 target_date = cls.korean_date_string()
 
@@ -408,15 +409,15 @@ class BusNoticeService:
                 }
             }
 
-        except Exception as e:
-            logger.error(f"노선 조회 중 오류: {e}")
+        except Exception:
+            logger.exception("노선 조회 중 오류")
             return {
                 "version": "2.0",
                 "template": {
                     "outputs": [
                         {
                             "simpleText": {
-                                "text": f"❌ 노선 {route_number}번\n\n시스템 오류가 발생했습니다: {str(e)[:50]}"
+                                "text": f"❌ 노선 {route_number}번\n\n시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                             }
                         }
                     ]
@@ -547,7 +548,7 @@ class BusNoticeService:
         control_periods: list[str],
     ) -> None:
         """성공 콜백 전송"""
-        info_text = f"✅ 이미지 생성 완료!\n\n"
+        info_text = "✅ 이미지 생성 완료!\n\n"
         info_text += f"🚌 노선 {route_number}번 우회 경로\n"
         info_text += f"📅 {target_date}\n\n"
         

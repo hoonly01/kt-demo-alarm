@@ -111,3 +111,43 @@ def test_webhook_route_check():
         data = response.json()
         assert "template" in data
         mock_method.assert_called_once_with("100", {"route_number": "100"})
+
+
+def test_webhook_route_check_allows_null_date_without_system_error(monkeypatch):
+    monkeypatch.setattr(BusNoticeService, "crawler", None)
+    monkeypatch.setattr(BusNoticeService, "cached_notices", {})
+
+    response = client.post(
+        "/bus/webhook/route_check",
+        json={
+            "userRequest": {},
+            "action": {
+                "params": {"route_number": "100", "date": None}
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "서비스를 사용할 수 없습니다." in text
+    assert "시스템 오류" not in text
+
+
+def test_webhook_route_check_hides_internal_error_details(monkeypatch):
+    monkeypatch.setattr(BusNoticeService, "crawler", object())
+    monkeypatch.setattr(BusNoticeService, "cached_notices", {})
+
+    response = client.post(
+        "/bus/webhook/route_check",
+        json={
+            "userRequest": {},
+            "action": {
+                "params": {"route_number": "100", "date": "2026-06-04"}
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert text == "❌ 노선 100번\n\n시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+    assert "filter_by_date" not in text
