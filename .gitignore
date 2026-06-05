@@ -170,7 +170,7 @@ backup_oldfiles/
 *.vuerd.json
 erd.json
 
-# Claude AI
+# AI
 .claude/
 CLAUDE.md
 .omx/
