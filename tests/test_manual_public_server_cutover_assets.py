@@ -15,7 +15,7 @@ NATIVE_DEFAULTS_SCRIPT = REPO_ROOT / "scripts" / "native" / "native-defaults.sh"
 PACKAGE_SCRIPT = REPO_ROOT / "deploy" / "native" / "package-source-bundle.sh"
 VERIFY_SCRIPT = REPO_ROOT / "deploy" / "native" / "verify-source-bundle.sh"
 MANUAL_GUIDE = REPO_ROOT / "docs" / "manual-public-server-cutover-guide.md"
-ROOT_README = REPO_ROOT / "README.md"
+NATIVE_GUIDE = REPO_ROOT / "docs" / "native-linux-deploy-guide.md"
 
 
 def run_command(
@@ -302,12 +302,12 @@ def test_manual_public_cutover_remote_dry_run_previews_commands(tmp_path: Path) 
 
 def test_manual_public_cutover_docs_keep_minimal_cutover_and_followup_split() -> None:
     guide_text = MANUAL_GUIDE.read_text(encoding="utf-8")
-    readme_text = ROOT_README.read_text(encoding="utf-8")
+    native_guide_text = NATIVE_GUIDE.read_text(encoding="utf-8")
 
     assert "minimal-cutover" in guide_text
     assert "## 8. follow-up checklist" in guide_text
     assert ".env" in guide_text
     assert "전송 금지" in guide_text
-    assert "docs/manual-public-server-cutover-guide.md" in readme_text
-    assert "Manual public-server migration lane" in readme_text
-    assert "follow-up" in readme_text
+    assert "native-live" in guide_text
+    assert "legacy/docker-deploy/" in native_guide_text
+    assert "scripts/setup-ec2.sh" in native_guide_text

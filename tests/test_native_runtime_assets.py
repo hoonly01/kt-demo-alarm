@@ -27,7 +27,6 @@ SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
 NATIVE_GUIDE_PATH = REPO_ROOT / "docs" / "native-linux-deploy-guide.md"
 RUNBOOK_PATH = REPO_ROOT / "docs" / "docker-free-fastapi-deploy-runbook.md"
 NATIVE_ASSET_README_PATH = REPO_ROOT / "deploy" / "native" / "README.md"
-ROOT_README_PATH = REPO_ROOT / "README.md"
 LEGACY_DOCKER_DIR = REPO_ROOT / "legacy" / "docker-deploy"
 LEGACY_BOOTSTRAP_README = REPO_ROOT / "legacy" / "bootstrap" / "README.md"
 SETUP_EC2_SCRIPT = REPO_ROOT / "scripts" / "setup-ec2.sh"
@@ -1076,14 +1075,16 @@ def test_legacy_docker_inventory_is_preserved_outside_root_active_path() -> None
 
 
 def test_root_operator_surfaces_redirect_to_native_path_and_mark_legacy_bootstrap() -> None:
-    readme_text = ROOT_README_PATH.read_text(encoding="utf-8")
+    native_guide_text = NATIVE_GUIDE_PATH.read_text(encoding="utf-8")
+    native_asset_readme_text = NATIVE_ASSET_README_PATH.read_text(encoding="utf-8")
     bootstrap_readme_text = LEGACY_BOOTSTRAP_README.read_text(encoding="utf-8")
     setup_script_text = SETUP_EC2_SCRIPT.read_text(encoding="utf-8")
     _ = run_command("bash", "-n", str(SETUP_EC2_SCRIPT))
 
-    assert "docs/native-linux-deploy-guide.md" in readme_text
-    assert "legacy/docker-deploy/" in readme_text
-    assert "scripts/setup-ec2.sh" in readme_text
+    assert "legacy/docker-deploy/" in native_guide_text
+    assert "scripts/setup-ec2.sh" in native_guide_text
+    assert "legacy/docker-deploy/" in native_asset_readme_text
+    assert "scripts/setup-ec2.sh" in native_asset_readme_text
 
     assert "legacy Docker bootstrap" in bootstrap_readme_text
     assert "docs/native-linux-deploy-guide.md" in bootstrap_readme_text
