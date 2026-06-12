@@ -19,17 +19,17 @@ def test_db():
 
     settings.DATABASE_PATH = test_db_path
     settings.API_KEY = "test-api-key"
-    init_db()
-
-    yield test_db_path
-
-    settings.DATABASE_PATH = original_database_path
-    settings.API_KEY = original_api_key
-
     try:
-        os.remove(test_db_path)
-    except FileNotFoundError:
-        pass
+        init_db()
+        yield test_db_path
+    finally:
+        settings.DATABASE_PATH = original_database_path
+        settings.API_KEY = original_api_key
+
+        try:
+            os.remove(test_db_path)
+        except FileNotFoundError:
+            pass
 
 
 @pytest.fixture(scope="function")

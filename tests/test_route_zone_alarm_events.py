@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import pytest
 import sqlite3
 
@@ -50,10 +51,14 @@ def insert_event(
     conn.commit()
 
 
-def connect_db(path: str) -> sqlite3.Connection:
+@contextmanager
+def connect_db(path: str):
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 @pytest.mark.asyncio
