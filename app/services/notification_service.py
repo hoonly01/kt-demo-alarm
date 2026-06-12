@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional, Iterator, Tuple
 from app.models.alarm import AlarmRequest, FilteredAlarmRequest
 from app.models.kakao import EventAPIRequest, Event, EventUser
 from app.config.settings import settings
+from app.services.notification_payload_assembler import NotificationEventPayload
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ KAKAO_EVENT_API_SUCCESS_STATUS = "SUCCESS"
 KAKAO_TASK_RESULT_POLL_ATTEMPTS = 5
 KAKAO_TASK_RESULT_POLL_DELAY_SECONDS = 0.5
 KAKAO_TASK_PENDING_STATUSES = {"PENDING", "PROCESSING", "RUNNING", "WAITING"}
-
 
 class NotificationService:
     """알림 전송 비즈니스 로직"""
@@ -58,27 +58,28 @@ class NotificationService:
             return value_text[:5] if len(value_text) >= 5 else value_text
 
     @staticmethod
-    def _format_event_time_range(event: Dict[str, Any]) -> str:
+    def _format_event_time_range(event: NotificationEventPayload) -> str:
         """집회 시작/종료 일시 범위 포맷팅"""
-        start_time = NotificationService._format_event_time(event.get("start_date"))
-        end_time = NotificationService._format_event_time(event.get("end_date"))
+        start_time = NotificationService._format_event_time(event.start_date)
+        end_time = NotificationService._format_event_time(event.end_date)
         return f"{start_time} ~ {end_time}"
 
     @staticmethod
-    def _format_event_block(index: int, event: Dict[str, Any]) -> str:
+    def _format_event_block(index: int, event: NotificationEventPayload) -> str:
         """단일 집회 정보를 사용자 알림용 번호 블록으로 포맷팅"""
-        attendees = str(event.get("attendees") or "").strip() or "미상"
-        if attendees != "미상" and attendees.isdigit() and not attendees.endswith("명"):
-            attendees = f"{attendees}명"
         return (
             f"{index}.\n"
             f"집회 일시 : {NotificationService._format_event_time_range(event)}\n"
-            f"집회 장소 : {event['location']}\n"
-            f"신고 인원 : {attendees}"
+            f"집회 장소 : {event.location}\n"
+            f"상세 내용 : {event.description}\n"
+            f"신고 인원 : {event.attendees}"
         )
 
     @staticmethod
-    def _format_event_collection_message(header: str, events: List[Dict[str, Any]]) -> str:
+    def format_event_collection_message(
+        header: str,
+        events: List[NotificationEventPayload],
+    ) -> str:
         """여러 집회 정보를 공통 번호형 템플릿으로 포맷팅"""
         blocks = [
             NotificationService._format_event_block(index, event)
@@ -87,7 +88,7 @@ class NotificationService:
         return f"{header}\n\n" + "\n\n".join(blocks)
 
     @staticmethod
-    def _format_event_message(events: List[Dict[str, Any]]) -> str:
+    def format_event_message(events: List[NotificationEventPayload]) -> str:
         """
         집회 정보를 텍스트 메시지로 포맷팅
 
@@ -97,13 +98,48 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        return NotificationService._format_event_collection_message(
+        return NotificationService.format_event_collection_message(
             "경로상 감지된 집회 안내입니다.",
             events,
         )
 
     @staticmethod
-    def _format_zone_message(zone_name: str, events: List[Dict[str, Any]]) -> str:
+    def first_event_image_url(events: List[NotificationEventPayload]) -> Optional[str]:
+        """이벤트 목록에서 첫 번째 이미지 URL을 추출한다."""
+        for event in events:
+            image_path = (event.image_path or "").lstrip("/")
+            if image_path:
+                base_url = (settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}").rstrip("/")
+                return f"{base_url}/{image_path}"
+
+        return None
+
+    @staticmethod
+    def build_event_alarm_data(events: List[NotificationEventPayload]) -> Dict[str, Any]:
+        """경로/정기 발송 공통 집회 본문 alarm payload 를 구성한다."""
+        alarm_data = {"message": NotificationService.format_event_message(events)}
+        image_url = NotificationService.first_event_image_url(events)
+        if image_url:
+            alarm_data["image_url"] = image_url
+        return alarm_data
+
+    @staticmethod
+    def build_zone_alarm_data(
+        zone_name: str,
+        events: List[NotificationEventPayload],
+    ) -> Dict[str, Any]:
+        """구역 알림 공통 본문 alarm payload 를 구성한다."""
+        alarm_data = {"message": NotificationService.format_zone_message(zone_name, events)}
+        image_url = NotificationService.first_event_image_url(events)
+        if image_url:
+            alarm_data["image_url"] = image_url
+        return alarm_data
+
+    @staticmethod
+    def format_zone_message(
+        zone_name: str,
+        events: List[NotificationEventPayload],
+    ) -> str:
         """
         구역 기반 집회 알림 메시지 포맷팅
 
@@ -114,7 +150,7 @@ class NotificationService:
         Returns:
             str: 포맷팅된 메시지 텍스트
         """
-        return NotificationService._format_event_collection_message(
+        return NotificationService.format_event_collection_message(
             f"설정하신 {zone_name}의 집회 안내입니다.",
             events,
         )
@@ -515,25 +551,16 @@ class NotificationService:
         return value if value >= 0 else None
 
     @staticmethod
-    async def send_route_alert(user_id: str, events: List[Dict[str, Any]], id_type: str = "plusfriendUserKey") -> Dict[str, Any]:
+    async def send_route_alert(
+        user_id: str,
+        events: List[NotificationEventPayload],
+        id_type: str = "plusfriendUserKey",
+    ) -> Dict[str, Any]:
         """경로 기반 집회 알림 전송"""
         if not events:
             return {"success": False, "error": "전송할 집회 정보가 없습니다"}
 
-        message_text = NotificationService._format_event_message(events)
-
-        # 첫 번째 집회 정보에서 이미지 경로 추출 (SMPA 집회들은 동일한 PDF 이미지를 공유함)
-        image_url = None
-        for event in events:
-            if event.get("image_path"):
-                base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
-                image_url = f"{base_url}/{event['image_path']}"
-                break
-
-        # 알림 전송
-        alarm_data = {"message": message_text}
-        if image_url:
-            alarm_data["image_url"] = image_url
+        alarm_data = NotificationService.build_event_alarm_data(events)
 
         alarm_request = AlarmRequest(
             user_id=user_id,
@@ -546,26 +573,14 @@ class NotificationService:
     @staticmethod
     async def send_bulk_alert(
         user_ids: List[str],
-        events_data: List[Dict[str, Any]],
+        events_data: List[NotificationEventPayload],
         id_type: str = "plusfriendUserKey"
     ) -> Dict[str, Any]:
         """조건부 일괄 알림 전송"""
         if not user_ids:
             return {"success": False, "error": "수신자가 없습니다"}
 
-        message_text = NotificationService._format_event_message(events_data)
-
-        # 이미지 URL 추출
-        image_url = None
-        for event in events_data:
-            if event.get("image_path"):
-                base_url = settings.RENDER_EXTERNAL_URL or f"http://localhost:{settings.PORT}"
-                image_url = f"{base_url}/{event['image_path']}"
-                break
-
-        alarm_data = {"message": message_text}
-        if image_url:
-            alarm_data["image_url"] = image_url
+        alarm_data = NotificationService.build_event_alarm_data(events_data)
 
         # Event API로 일괄 전송
         return await NotificationService.send_bulk_alarm(

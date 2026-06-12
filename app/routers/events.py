@@ -8,21 +8,12 @@ import asyncio
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.database.connection import get_db
 from app.services.event_service import EventService
+from app.services.notification_payload_assembler import NotificationPayloadAssembler
 from app.services.notification_service import NotificationService
 from app.services.auth_service import verify_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/events", tags=["events"])
-
-
-def _to_notification_event_data(event: EventResponse) -> dict:
-    """사용자 출력 템플릿에 필요한 집회 필드만 변환"""
-    return {
-        "attendees": event.attendees,
-        "location": event.location_name,
-        "start_date": event.start_date,
-        "end_date": event.end_date,
-    }
 
 
 @router.post("", response_model=EventResponse)
@@ -108,9 +99,10 @@ async def check_user_route_events(
             }
         }
 
-    message_text = NotificationService._format_event_collection_message(
+    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(result.events_found)
+    message_text = NotificationService.format_event_collection_message(
         "경로상 감지된 집회 안내입니다.",
-        [_to_notification_event_data(event) for event in result.events_found],
+        notification_events,
     )
 
     return {
@@ -234,9 +226,10 @@ async def get_upcoming_protests(
             }
         }
 
-    message_text = NotificationService._format_event_collection_message(
+    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(events)
+    message_text = NotificationService.format_event_collection_message(
         "예정된 집회 안내입니다.",
-        [_to_notification_event_data(event) for event in events],
+        notification_events,
     )
 
     return {
@@ -280,9 +273,10 @@ async def get_today_protests(
             }
         }
 
-    message_text = NotificationService._format_event_collection_message(
+    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(events)
+    message_text = NotificationService.format_event_collection_message(
         "오늘 예정된 집회 안내입니다.",
-        [_to_notification_event_data(event) for event in events],
+        notification_events,
     )
 
     return {
