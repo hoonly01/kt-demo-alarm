@@ -84,9 +84,11 @@ fi
 
 (
   cd "${staging_dir}"
-  find . -mindepth 1 -type f \
-    | sed 's#^\./##' \
-    | sort > bundle-manifest.txt
+  {
+    find . -mindepth 1 -type f ! -name 'bundle-manifest.txt' \
+      | sed 's#^\./##'
+    printf '%s\n' 'bundle-manifest.txt'
+  } | sort > bundle-manifest.txt
   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "${bundle_tmp_dir}/${BUNDLE_NAME}" .
 )
 

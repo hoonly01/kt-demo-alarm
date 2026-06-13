@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 from app.database.connection import get_db_connection
 from app.utils.geo_utils import haversine_distance, FAVORITE_ZONES
+from app.services.notification_payload_assembler import NotificationPayloadAssembler
 from app.services.notification_service import NotificationService
 from app.services.alarm_status_service import AlarmStatusService
 
@@ -46,7 +47,8 @@ class ZoneAlarmService:
                 # 2. 활성 집회 전체 조회
                 cursor.execute('''
                     SELECT id, title, description, attendees, location_name, location_address,
-                           latitude, longitude, start_date, end_date, category, severity_level
+                           latitude, longitude, start_date, end_date, category, severity_level,
+                           image_path
                     FROM events
                     WHERE status = 'active'
                       AND latitude IS NOT NULL
@@ -89,25 +91,13 @@ class ZoneAlarmService:
                     group_key = (zone_id, tuple(sorted(e["id"] for e in matched_events)))
 
                     if group_key not in grouped:
+                        notification_events = NotificationPayloadAssembler.event_payloads_from_rows(
+                            [dict(event_row) for event_row in matched_events]
+                        )
                         grouped[group_key] = {
                             "zone_name": zone["name"],
                             "user_ids": [],
-                            "events_data": [
-                                {
-                                    "id": e["id"],
-                                    "title": e["title"],
-                                    "description": e["description"],
-                                    "attendees": e["attendees"],
-                                    "location": e["location_name"],
-                                    "latitude": e["latitude"],
-                                    "longitude": e["longitude"],
-                                    "start_date": e["start_date"],
-                                    "end_date": e["end_date"],
-                                    "category": e["category"],
-                                    "severity_level": e["severity_level"],
-                                }
-                                for e in matched_events
-                            ],
+                            "events_data": notification_events,
                         }
                     grouped[group_key]["user_ids"].append(plusfriend_key)
 
@@ -122,14 +112,14 @@ class ZoneAlarmService:
                 zone_name = group_data["zone_name"]
                 user_ids = group_data["user_ids"]
                 events_data = group_data["events_data"]
-                message_text = NotificationService._format_zone_message(zone_name, events_data)
+                alarm_data = NotificationService.build_zone_alarm_data(zone_name, events_data)
 
                 logger.info(f"📢 [{zone_name}] {len(user_ids)}명에게 집회 {len(events_data)}건 알림 전송")
 
                 send_result = await NotificationService.send_bulk_alarm(
                     user_ids=user_ids,
                     event_name="morning_demo_alarm",
-                    data={"message": message_text},
+                    data=alarm_data,
                     id_type="plusfriendUserKey",
                 )
 

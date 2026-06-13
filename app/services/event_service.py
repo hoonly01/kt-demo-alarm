@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.utils.geo_utils import haversine_distance, get_route_coordinates, is_event_near_route_accurate, is_point_near_route
 from app.database.connection import get_db_connection
+from app.services.notification_payload_assembler import NotificationPayloadAssembler
 from app.services.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -243,23 +244,8 @@ class EventService:
             
             # 자동 알림 전송 (옵션)
             if auto_notify and route_events:
-                # auto_notify_route_events 함수 호출
-                events_data = []
-                for event in route_events:
-                    events_data.append({
-                        "id": event.id,
-                        "title": event.title,
-                        "description": event.description,
-                        "attendees": event.attendees,
-                        "location": event.location_name,
-                        "latitude": event.latitude,
-                        "longitude": event.longitude,
-                        "start_date": event.start_date.isoformat(),
-                        "end_date": event.end_date.isoformat() if event.end_date else None,
-                        "category": event.category,
-                        "severity_level": event.severity_level
-                    })
-                await NotificationService.send_route_alert(user_id, events_data)
+                notification_events = NotificationPayloadAssembler.event_payloads_from_responses(route_events)
+                await NotificationService.send_route_alert(user_id, notification_events)
                 logger.info(f"사용자 {user_id}에게 {len(route_events)}개 집회 자동 알림 전송")
             
             return RouteEventCheck(
@@ -330,26 +316,14 @@ class EventService:
                     if result.events_found:
                         # 해당 사용자에게 전달될 정확한 이벤트 집합을 키로 사용
                         event_key = tuple(sorted(event.id for event in result.events_found))
+                        notification_events = NotificationPayloadAssembler.event_payloads_from_responses(
+                            result.events_found
+                        )
 
                         if event_key not in grouped_users:
                             grouped_users[event_key] = {
                                 "user_ids": [],
-                                "events_data": [
-                                    {
-                                        "id": event.id,
-                                        "title": event.title,
-                                        "description": event.description,
-                                        "attendees": event.attendees,
-                                        "location": event.location_name,
-                                        "latitude": event.latitude,
-                                        "longitude": event.longitude,
-                                        "start_date": event.start_date.isoformat() if hasattr(event.start_date, 'isoformat') else str(event.start_date),
-                                        "end_date": event.end_date.isoformat() if event.end_date and hasattr(event.end_date, 'isoformat') else str(event.end_date) if event.end_date else None,
-                                        "category": event.category,
-                                        "severity_level": event.severity_level
-                                    }
-                                    for event in result.events_found
-                                ]
+                                "events_data": notification_events,
                             }
 
                         grouped_users[event_key]["user_ids"].append(plusfriend_key)

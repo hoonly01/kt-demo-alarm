@@ -4,27 +4,28 @@ import os
 import sqlite3
 import tempfile
 from fastapi.testclient import TestClient
+from app.config.settings import settings
 from app.database.connection import init_db
 
 
 @pytest.fixture(scope="session")
 def test_db():
     """Create a test database for the session"""
-    from unittest.mock import patch
-    
-    # Use a temporary database for testing
     fd, test_db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    
-    # Patch settings
-    with patch("app.config.settings.settings.DATABASE_PATH", test_db_path), \
-         patch("app.config.settings.settings.API_KEY", "test-api-key"):
-        # Initialize test database
+
+    original_database_path = settings.DATABASE_PATH
+    original_api_key = settings.API_KEY
+
+    settings.DATABASE_PATH = test_db_path
+    settings.API_KEY = "test-api-key"
+    try:
         init_db()
-        
         yield test_db_path
-        
-        # Cleanup
+    finally:
+        settings.DATABASE_PATH = original_database_path
+        settings.API_KEY = original_api_key
+
         try:
             os.remove(test_db_path)
         except FileNotFoundError:
@@ -85,3 +86,20 @@ def sample_user_data():
         "arrival_y": 37.5709,
         "active": True
     }
+
+
+@pytest.fixture
+def settings_overrides():
+    """테스트 중 settings 값을 직접 바꾸고 종료 시 복구한다."""
+    originals = {}
+
+    def apply(**overrides):
+        for key, value in overrides.items():
+            if key not in originals:
+                originals[key] = getattr(settings, key)
+            setattr(settings, key, value)
+
+    yield apply
+
+    for key, value in originals.items():
+        setattr(settings, key, value)
