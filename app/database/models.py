@@ -62,6 +62,7 @@ EVENTS_TABLE_SCHEMA = '''
 EVENTS_MIGRATION_COLUMNS = [
     ("attendees", "TEXT NOT NULL DEFAULT '미상'"),
     ("police_station", "TEXT"),
+    ("image_path", "TEXT"),
     ("source", "TEXT NOT NULL DEFAULT 'SMPA'"),
     ("source_id", "TEXT"),
     ("source_url", "TEXT"),
@@ -104,3 +105,39 @@ ROUTE_COLUMNS = [
     ('language', 'TEXT'),
     ('favorite_zone', 'INTEGER')  # 관심장소 구역 (1, 2, 3 또는 NULL)
 ]
+
+USERS_MIGRATION_COLUMNS = [
+    ("open_id", "TEXT"),
+    ("plusfriend_user_key", "TEXT"),
+    ("is_alarm_on", "BOOLEAN DEFAULT TRUE"),
+    ("favorite_zone", "INTEGER"),
+]
+
+BOOTSTRAP_TABLE_SCHEMAS = {
+    "users": USERS_TABLE_SCHEMA,
+    "events": EVENTS_TABLE_SCHEMA,
+    "alarm_tasks": ALARM_TASKS_TABLE_SCHEMA,
+}
+
+TABLE_MIGRATION_COLUMNS = {
+    "users": USERS_MIGRATION_COLUMNS,
+    "events": EVENTS_MIGRATION_COLUMNS,
+    "alarm_tasks": [],
+}
+
+USERS_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS idx_users_open_id ON users(open_id)",
+    "CREATE INDEX IF NOT EXISTS idx_users_plusfriend_key ON users(plusfriend_user_key)",
+)
+
+EVENTS_INDEX_STATEMENTS = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_source_record_hash "
+    "ON events(source_record_hash) "
+    "WHERE source_record_hash IS NOT NULL",
+)
+
+TABLE_INDEX_STATEMENTS = {
+    "users": USERS_INDEX_STATEMENTS,
+    "events": EVENTS_INDEX_STATEMENTS,
+    "alarm_tasks": (),
+}
