@@ -1,16 +1,9 @@
 """데이터베이스 연결 관리"""
 import sqlite3
-import logging
 from contextlib import contextmanager
-from app.config.settings import settings
-from app.database.models import (
-    USERS_TABLE_SCHEMA,
-    EVENTS_TABLE_SCHEMA,
-    ALARM_TASKS_TABLE_SCHEMA,
-    EVENTS_MIGRATION_COLUMNS,
-)
 
-logger = logging.getLogger(__name__)
+from app.config.settings import settings
+from app.database.bootstrap import bootstrap_database, ensure_events_contract
 
 
 def get_database_path() -> str:
@@ -41,72 +34,10 @@ def get_db_connection():
 
 def _ensure_events_contract(cursor: sqlite3.Cursor) -> None:
     """기존 events 테이블을 현재 SMPA 이벤트 계약으로 보강한다."""
-    existing_columns = {
-        row[1]
-        for row in cursor.execute("PRAGMA table_info(events)").fetchall()
-    }
-
-    for column_name, column_definition in EVENTS_MIGRATION_COLUMNS:
-        if column_name not in existing_columns:
-            cursor.execute(
-                f"ALTER TABLE events ADD COLUMN {column_name} {column_definition}"
-            )
-
-    cursor.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_events_source_record_hash "
-        "ON events(source_record_hash) "
-        "WHERE source_record_hash IS NOT NULL"
-    )
+    ensure_events_contract(cursor)
 
 
 def init_db():
     """데이터베이스 초기화 - 중앙집중식 스키마 사용"""
-    conn = sqlite3.connect(get_database_path(), check_same_thread=False)
-    cursor = conn.cursor()
-
-    # Users 테이블 생성 (통합 스키마 사용)
-    cursor.execute(USERS_TABLE_SCHEMA)
-
-    # Events 테이블 생성 (통합 스키마 사용)
-    cursor.execute(EVENTS_TABLE_SCHEMA)
-    _ensure_events_contract(cursor)
-
-    # Alarm Tasks 테이블 생성 (알림 상태 추적용)
-    cursor.execute(ALARM_TASKS_TABLE_SCHEMA)
-
-    # 컬럼 추가 로직 (이미 있으면 Exception 발생하므로 try-except로 무시)
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN open_id TEXT")
-        cursor.execute("ALTER TABLE users ADD COLUMN plusfriend_user_key TEXT")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_open_id ON users(open_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_plusfriend_key ON users(plusfriend_user_key)")
-        logger.info("✅ open_id, plusfriend_user_key 컬럼 추가 완료")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e).lower():
-            logger.warning(f"컬럼 갱신 실패 (무시됨): {str(e)}")
-
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN is_alarm_on BOOLEAN DEFAULT TRUE")
-        logger.info("✅ is_alarm_on 컬럼 추가 완료")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e).lower():
-            logger.warning(f"is_alarm_on 컬럼 갱신 실패 (무시됨): {str(e)}")
-
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN favorite_zone INTEGER")
-        logger.info("✅ favorite_zone 컬럼 추가 완료")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e).lower():
-            logger.warning(f"favorite_zone 컬럼 갱신 실패 (무시됨): {str(e)}")
-
-    try:
-        cursor.execute("ALTER TABLE events ADD COLUMN image_path TEXT")
-        logger.info("✅ events 테이블 image_path 컬럼 추가 완료")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e).lower():
-            logger.warning(f"events 테이블 image_path 컬럼 갱신 실패 (무시됨): {str(e)}")
-
-
-    conn.commit()
-    conn.close()
+    bootstrap_database(get_database_path(), path_source="settings")
     print("✅ 데이터베이스 초기화 완료")
