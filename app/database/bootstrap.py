@@ -51,7 +51,7 @@ def ensure_table_columns(
             column_name,
             column_definition,
         )
-        existing_columns = _existing_columns(cursor, table_name)
+        existing_columns.add(column_name)
 
 
 def ensure_table_indexes(

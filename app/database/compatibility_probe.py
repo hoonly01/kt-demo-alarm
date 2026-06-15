@@ -383,7 +383,7 @@ def _empty_schema_snapshot() -> dict[str, Any]:
 
 def _build_unreadable_database_reason(
     database_path: Path,
-    exc: sqlite3.DatabaseError,
+    exc: Exception,
 ) -> str:
     return f"unreadable database file: {database_path.resolve()} ({exc})"
 
@@ -401,7 +401,7 @@ def _load_actual_snapshot(target_database: Path) -> tuple[dict[str, Any], list[s
             return _collect_schema_snapshot(conn), []
         finally:
             conn.close()
-    except sqlite3.DatabaseError as exc:
+    except (sqlite3.DatabaseError, RuntimeError) as exc:
         return (
             _empty_schema_snapshot(),
             [_build_unreadable_database_reason(target_database, exc)],
