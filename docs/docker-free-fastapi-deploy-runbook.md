@@ -186,7 +186,8 @@ bash '${INCOMING_DIR}/deploy-release.sh'"
 
 ### 8.6 postcheck — 증빙 수집
 
-§6 Completion evidence와 동일한 항목을 원격에서 수집한다.
+§6 Completion evidence의 로컬 항목(active symlink, service, local health, logs)을
+원격에서 수집한다.
 
 ```bash
 ssh "${DEST_USER}@${DEST_HOST}" "\
@@ -194,4 +195,13 @@ readlink -f '${APP_ROOT}/current' && \
 systemctl status '${APP_NAME}' --no-pager && \
 curl -fsS 'http://127.0.0.1:8000/' && \
 journalctl -u '${APP_NAME}' -n 100 --no-pager"
+```
+
+§6의 public health 항목은 여기서 `&&` 체인에 넣지 않는다. 이 lane의 완료선은
+`minimal-cutover`이고, public 도메인·TLS 도달성은 후속 항목이라 재배포 시점에 아직
+열려 있지 않을 수 있다([이관 가이드 §7 완료선](manual-public-server-cutover-guide.md)).
+public 종단이 준비된 경우에만 별도로 확인한다.
+
+```bash
+ssh "${DEST_USER}@${DEST_HOST}" "curl -fsS 'https://<public-domain>/'"
 ```
