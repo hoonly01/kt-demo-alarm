@@ -1,5 +1,9 @@
 # Legacy Docker deploy inventory
 
+This README is the single narrative home for the legacy Docker rules
+(inactive status, reactivation gate). Active deploy docs link here instead of
+restating them.
+
 ## Status
 
 `legacy/docker-deploy/` is an inactive historical inventory for the pre-native deploy path.

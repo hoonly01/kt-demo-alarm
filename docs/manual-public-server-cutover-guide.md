@@ -1,5 +1,10 @@
 # 공공기관 서버 수동 이관 가이드
 
+> **📦 완료된 최초 이관 기록** — 이 문서의 이관 절차는 2026-06~07 서버 이관(#146, #165)으로
+> 완료되었다. **반복 수동 재배포는
+> [runbook의 Manual redeploy lane](docker-free-fastapi-deploy-runbook.md#manual-lane)을 사용한다.**
+> 본 문서는 최초 이관의 기록과 예외 경로 설계 근거로 보존한다.
+
 ## 0. 목적
 
 이 문서는 **GitHub guarded live gate를 서버 B용으로 재구성할 수 없고**, 대상 환경이 공공기관 정책 때문에
@@ -23,8 +28,8 @@
 
 | 구분 | 내용 | 근거 |
 |---|---|---|
-| Active deploy path | source bundle → server-side `uv sync --frozen --no-dev` → systemd-managed `uvicorn main:app` | `docs/native-linux-deploy-guide.md:5-21` |
-| Bundle safety | `.env`, `.venv`, DB, attachments, cache는 source bundle에 포함하지 않는다 | `deploy/native/README.md:24-33` |
+| Active deploy path | source bundle → server-side `uv sync --frozen --no-dev` → systemd-managed `uvicorn main:app` | [native-linux-deploy-guide.md의 결정 기록](native-linux-deploy-guide.md#decision) |
+| Bundle safety | `.env`, `.venv`, DB, attachments, cache는 source bundle에 포함하지 않는다 | [deploy/native/README.md의 Bundle rules](../deploy/native/README.md#bundle-rules) |
 | Remote activation | verify → unpack → shared symlink → `uv sync` → systemd install → current switch → local health | `deploy/native/deploy-release.sh:342-360` |
 | Non-goal | GitHub workflow, bundle allowlist/denylist, deploy-release activation flow는 바꾸지 않는다 | `.omx/plans/prd-server-migration-20260604T021812Z.md` |
 
@@ -71,6 +76,8 @@ INCOMING_DIR="${APP_ROOT}/incoming/${RELEASE_ID}"
 
 ## 5. source layout과 shared-state 범위
 
+> **[완료된 이관 기록 — 재사용 대상 아님]**
+
 ### 5.1 source layout 판별
 
 | source layout | 판별 기준 | destination restore target |
@@ -96,7 +103,11 @@ INCOMING_DIR="${APP_ROOT}/incoming/${RELEASE_ID}"
 
 ## 6. phase-by-phase 절차
 
+> 반복 사용 절차의 canonical 명령은 [runbook Manual redeploy lane](docker-free-fastapi-deploy-runbook.md#manual-lane)이 보유한다. 아래 본문은 최초 이관 당시의 기록이다.
+
 ### 6.1 `prepare-artifact`
+
+> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
 
 로컬 검증과 artifact 준비를 먼저 수행한다.
 
@@ -115,6 +126,8 @@ bash deploy/native/verify-source-bundle.sh \
 
 ### 6.2 `detect-source-layout`
 
+> **[완료된 이관 기록 — 재사용 대상 아님]**
+
 ```bash
 ssh "${SRC_USER}@${SRC_HOST}" "\
 if [ -d '${APP_ROOT}/shared' ]; then
@@ -125,6 +138,8 @@ fi"
 ```
 
 ### 6.3 `export-shared-state`
+
+> **[완료된 이관 기록 — 재사용 대상 아님]**
 
 #### A. `native-shared`
 
@@ -149,6 +164,8 @@ tar -C '${APP_ROOT}' -czf - \
 
 ### 6.4 `preflight-dest`
 
+> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
+
 최근 preflight baseline 에서는 `uv`, service account, `${APP_ROOT}/shared/.env`, Docker 중복, port 8000 takeover 위험이 blocker 였다.
 같은 계열 환경이면 아래 출력을 먼저 확보한다.
 
@@ -172,6 +189,8 @@ ss -ltn 'sport = :8000' || true"
 
 ### 6.5 `push`
 
+> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane) — 반복 재배포의 push 페이로드는 `shared-state.tar.gz`를 포함하지 않는다.
+
 remote upload는 `scp` 로만 수행한다.
 
 ```bash
@@ -186,6 +205,8 @@ scp \
 
 ### 6.6 `restore-shared`
 
+> **[완료된 이관 기록 — 재사용 대상 아님]**
+
 ```bash
 ssh "${DEST_USER}@${DEST_HOST}" "\
 mkdir -p \
@@ -197,6 +218,8 @@ tar -C '${APP_ROOT}/shared' -xzf '${INCOMING_DIR}/shared-state.tar.gz'"
 ```
 
 ### 6.7 `deploy`
+
+> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
 
 기본값은 승인 없는 cutover 를 막는 방향으로 유지한다.
 
@@ -227,6 +250,8 @@ bash '${INCOMING_DIR}/deploy-release.sh'"
 ```
 
 ### 6.8 `postcheck`
+
+> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
 
 ```bash
 ssh "${DEST_USER}@${DEST_HOST}" "\
@@ -284,7 +309,7 @@ systemctl restart '${APP_NAME}'"
 
 | 문서 | 역할 |
 |---|---|
-| `docs/native-linux-deploy-guide.md` | canonical native deploy 계약 |
-| `docs/docker-free-fastapi-deploy-runbook.md` | operator-owned cutover / manual dry-run / evidence |
-| `deploy/native/README.md` | bundle allowlist/denylist, env ownership, live gate |
+| `docs/native-linux-deploy-guide.md` | native-first 결정 기록 (ADR) |
+| `docs/docker-free-fastapi-deploy-runbook.md` | 배포 절차 — CI 레인, manual redeploy lane, 증빙 |
+| `deploy/native/README.md` | 배포 계약 — bundle allowlist/denylist, release flow, live gate, env ownership |
 | `.omx/logs/g076-user-host-preflight-20260602T1046Z.md` | 기존 host preflight blocker baseline |
