@@ -48,10 +48,14 @@ stages; the script is the source of truth for exact behavior.
 5. shared compatibility symlink creation
 6. `uv sync --frozen --no-dev`
 7. systemd candidate render + `systemd-analyze verify`
-8. current symlink switch
-9. service start/restart
-10. local health check
-11. old release prune
+8. capture previous current release (rollback anchor)
+9. current symlink switch
+10. service start/restart — on failure, roll back to the previous current
+11. local health check — on failure, roll back to the previous current
+12. old release prune
+
+On a first native deploy with no previous current, the post-switch rollback
+instead stops the service and unlinks the failed current.
 
 ## Live activation guard
 
