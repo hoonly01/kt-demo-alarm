@@ -163,6 +163,8 @@ backup_oldfiles/
 !docs/
 !docs/*.md
 !docs/**/*.md
+# Auto-generated agent docs stay untracked (repo-wide convention)
+docs/AGENTS.md
 !legacy/
 !legacy/**/README.md
 
