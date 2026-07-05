@@ -1,6 +1,18 @@
-# Native Linux Deploy Guide — first-pass canonical path
+# Native Linux Deploy Guide — native-first 결정 기록 (ADR)
 
-## 결론
+> 이 문서는 `kt-demo-alarm`이 Docker 기반 배포 대신 native Linux 배포를 canonical path로
+> 채택한 **결정 기록(ADR)** 이다. 계약과 절차의 현행 서술처는 [문서 맵](#doc-map)을 따른다.
+
+## 배경 (Context)
+
+- 운영 대상에 GitHub guarded live gate를 재구성할 수 없고 `scp` 중심 수동 전송만 허용되는
+  공공기관 서버가 포함된다 ([이관 기록](manual-public-server-cutover-guide.md) 참조).
+- 배포 경로가 보장해야 하는 조건: 시크릿이 CI를 경유하지 않을 것(server-owned config),
+  기존 Docker runtime·port와의 충돌을 사전에 차단할 것(preflight fail-fast), 이미지 반입
+  없이 소스 번들만으로 재현 가능할 것.
+
+<a id="decision"></a>
+## 결정 (Decision)
 
 `kt-demo-alarm`의 active deploy path는 Docker image/Compose가 아니라 아래 흐름이다.
 
@@ -20,109 +32,32 @@ blocking-tests
 | Runtime config ownership | server-owned `${APP_ROOT}/shared/.env` only |
 | Legacy Docker | `legacy/docker-deploy/` 아래에 보존하되 active workflow path에서는 사용하지 않음 |
 
-## Workflow jobs
+## 대안 (Alternatives considered)
 
-| Job | 역할 | Blocking 여부 |
-|---|---|---|
-| `blocking-tests` | lockfile freshness + full pytest | **Blocking** |
-| `package-native-release` | allowlisted source bundle + checksum 생성 | **Blocking** |
-| `deploy-native-preflight` | bundle verify, native static tests, non-mutating preflight | **Blocking** |
-| `deploy-native-live` | source bundle 업로드 + remote release deploy | Guarded |
-| `public-health` | live job 성공 후 public endpoint 검증 | Guarded |
-
-## Source bundle contract
-
-### Must include
-
-- `app/`
-- `main.py`
-- `pyproject.toml`
-- `uv.lock`
-- `.python-version`
-- `deploy/native/`
-- `docs/native-linux-deploy-guide.md`
-- `docs/docker-free-fastapi-deploy-runbook.md`
-- `nginx/` when present
-
-### Must exclude
-
-- `.env`, `.env.*`
-- `.venv/`
-- `.pytest_cache/`, `.ruff_cache/`, `__pycache__/`
-- `*.db`, `*.sqlite`, `*.sqlite3`
-- `attachments/`, `topis_attachments/`, `topis_cache/`
-- `*.key`, `*.pem`, `id_rsa`, `credentials.json`
-- Docker image tar/gzip artifacts
-
-`deploy/native/package-source-bundle.sh`가 `bundle-manifest.txt`를 생성하고,
-`deploy/native/verify-source-bundle.sh`가 checksum/allowlist/denylist/manifest 일치를
-검증한다.
-
-## Native release layout
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `APP_ROOT` | `/opt/kt-demo-alarm` | app home |
-| `RELEASES_DIR` | `${APP_ROOT}/releases` | immutable release directories |
-| `CURRENT_LINK` | `${APP_ROOT}/current` | active release symlink |
-| `SHARED_DIR` | `${APP_ROOT}/shared` | mutable shared state |
-| `ENV_FILE` | `${SHARED_DIR}/.env` | server-owned app secrets/config |
-| `DATA_DIR` | `${SHARED_DIR}/data` | SQLite and related data |
-| `LOG_DIR` | `${SHARED_DIR}/logs` | application logs |
-| `CACHE_DIR` | `${SHARED_DIR}/topis_cache` | TOPIS cache |
-| `ATTACHMENT_DIR` | `${SHARED_DIR}/topis_attachments` | attachment storage |
-
-The deploy script recreates compatibility symlinks inside each release:
-
-| Release path | Target |
+| 대안 | 기각 사유 |
 |---|---|
-| `${RELEASE_DIR}/topis_attachments` | `${SHARED_DIR}/topis_attachments` |
-| `${RELEASE_DIR}/topis_cache` | `${SHARED_DIR}/topis_cache` |
-| `${RELEASE_DIR}/data` | `${SHARED_DIR}/data` |
-| `${RELEASE_DIR}/logs` | `${SHARED_DIR}/logs` |
-| `${RELEASE_DIR}/attachments` | `${SHARED_DIR}/data/attachments` |
+| Docker image/Compose 경로 유지 | 이미지 반입이 불가능한 대상 서버에서 재현 불가, 기존 runtime과의 중복 실행 위험. 자산은 legacy로 보존하고 재활성화 게이트를 둠 |
+| CI runner 측 `.env` 렌더링/업로드 | 시크릿이 워크플로를 경유하게 됨 — server-owned `${APP_ROOT}/shared/.env` 단일 소유로 대체 |
+| live 배포 상시 활성화 | 운영자 승인 없는 cutover 위험 — repository variable + protected environment 이중 가드로 대체 |
 
-## Guarded live activation
+## 결과 (Consequences)
 
-`deploy-native-live`는 아래 두 조건이 동시에 만족될 때만 실행한다.
+- 배포 계약(번들 allowlist/denylist, release layout, activation guard, release flow)은
+  [`deploy/native/README.md`](../deploy/native/README.md)가 단일 서술처이며, 실질 소스는
+  packaging/verify 스크립트다.
+- CI 레인과 수동 재배포 절차는 [runbook](docker-free-fastapi-deploy-runbook.md)이 단일
+  서술처다.
+- live 배포는 이중 가드(repository variable + protected environment) 뒤에 있으며, 가드
+  조건과 동작의 서술처는 [`deploy/native/README.md`](../deploy/native/README.md)다.
+- 최초 서버 이관은 완료되었고(#165), 그 기록은
+  [이관 가이드](manual-public-server-cutover-guide.md)에 아카이브로 보존된다.
 
-1. repository variable `KT_NATIVE_DEPLOY_ENABLED=1`
-2. protected `native-live` environment approval
+<a id="doc-map"></a>
+## 문서 맵
 
-둘 중 하나라도 없으면 workflow는 preflight evidence까지만 남기고 종료한다.
-
-## Server preflight expectations
-
-| Gate | Default behavior |
+| 주제 | 서술처 |
 |---|---|
-| Port already listens on `${APP_PORT}` | active native service가 아니면 fail-fast (`ALLOW_PORT_TAKEOVER=true`가 있어야 예외) |
-| Existing Docker runtime for same app | fail-fast (`ALLOW_DOCKER_CUTOVER=true`가 있어야 예외) |
-| Missing `APP_USER`/`APP_GROUP` | release switch 전에 fail |
-| Missing or too-open env file | dependency sync 전에 fail |
-| Missing `uv`, `systemd`, `sha256sum`, `tar` | release switch 전에 fail |
-
-## Secret safety
-
-| Rule | Implementation |
-|---|---|
-| No runner-side app `.env` rendering | active workflow has no `.env` generation/upload step |
-| No app `.env` upload | live job uploads only source bundle, checksum, and deploy helper scripts |
-| No secret content logs | `stat`/mode/path evidence only |
-| Server-owned config | operators provision `${SHARED_DIR}/.env` before cutover |
-
-## Legacy inventory
-
-| Surface | Current status |
-|---|---|
-| `legacy/docker-deploy/` | historical Docker deploy files (`Dockerfile`, `docker-compose.yml`, `.dockerignore`) |
-| `legacy/docker-deploy/README.md` | inactive legacy asset notice + reactivation gate |
-| `scripts/setup-ec2.sh` | legacy Docker bootstrap helper; current canonical path 아님 |
-| `legacy/bootstrap/README.md` | bootstrap classification and native-path redirect |
-
-## Local verification
-
-```bash
-bash -n deploy/native/*.sh scripts/native/*.sh
-uv run pytest tests/test_native_runtime_assets.py -q
-uv run pytest -q
-```
+| 배포 계약 — 번들 allowlist/denylist, release layout, activation guard, release flow | [`deploy/native/README.md`](../deploy/native/README.md) |
+| 배포 절차 — CI 레인, 수동 재배포(manual lane), preflight, postcheck 증빙 | [`docker-free-fastapi-deploy-runbook.md`](docker-free-fastapi-deploy-runbook.md) |
+| 최초 이관 기록 (완료, 아카이브) | [`manual-public-server-cutover-guide.md`](manual-public-server-cutover-guide.md) |
+| Legacy 규칙 — Docker 자산 `legacy/docker-deploy/`, bootstrap helper `scripts/setup-ec2.sh` | [`legacy/docker-deploy/README.md`](../legacy/docker-deploy/README.md) |

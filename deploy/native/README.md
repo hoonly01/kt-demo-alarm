@@ -21,7 +21,10 @@ then allows a guarded native live job to upload that bundle to the target host.
 
 ## Bundle rules
 
-The package/verify scripts enforce the same source-bundle contract:
+The package/verify scripts are the source of truth for this contract: the
+exact allowlist is `source_paths` in `package-source-bundle.sh`, and the exact
+allow/deny matching lives in `path_is_allowed` / `path_is_denied` in
+`verify-source-bundle.sh`. The invariants they enforce:
 
 - allowed: `app/`, `main.py`, `pyproject.toml`, `uv.lock`, `.python-version`,
   `deploy/native/`, `docs/native-linux-deploy-guide.md`,
@@ -32,6 +35,23 @@ The package/verify scripts enforce the same source-bundle contract:
 
 `bundle-manifest.txt` must be present in the archive and must match the packaged
 file list exactly.
+
+## Release flow
+
+On the target host `deploy-release.sh` performs the release in the following
+stages; the script is the source of truth for exact behavior.
+
+1. checksum/manifest/allowlist verify
+2. port/Docker/user/group/env preflight
+3. release dir creation
+4. source bundle unpack
+5. shared compatibility symlink creation
+6. `uv sync --frozen --no-dev`
+7. systemd candidate render + `systemd-analyze verify`
+8. current symlink switch
+9. service start/restart
+10. local health check
+11. old release prune
 
 ## Live activation guard
 
@@ -54,11 +74,10 @@ native preflight.
 
 ## Legacy boundary
 
-- Historical Docker deploy files live under `legacy/docker-deploy/`.
-- `scripts/setup-ec2.sh` is a legacy Docker bootstrap helper and not part of the
-  active native workflow.
-- Re-enabling the legacy Docker path requires a new PRD and explicit operator
-  approval.
+Historical Docker deploy files live under `legacy/docker-deploy/`, and
+`scripts/setup-ec2.sh` is a legacy Docker bootstrap helper. The legacy rules
+(inactive status, reactivation gate) are documented in
+[`legacy/docker-deploy/README.md`](../../legacy/docker-deploy/README.md).
 
 ## Local verification
 
@@ -67,6 +86,3 @@ bash -n deploy/native/*.sh scripts/native/*.sh
 uv run pytest tests/test_native_runtime_assets.py -q
 uv run pytest -q
 ```
-
-Do not re-enable the legacy Docker graph from workflow comments without a new PRD
-and explicit operator approval.

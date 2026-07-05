@@ -30,6 +30,14 @@
 | Phase 2 — activation | `deploy-native-live`는 guard가 열렸을 때만 실행 |
 | Phase 3 — post-activation | `public-health`는 live success 뒤에만 blocking 수행 |
 
+| Job | 역할 | Blocking 여부 |
+|---|---|---|
+| `blocking-tests` | lockfile freshness + full pytest | **Blocking** |
+| `package-native-release` | allowlisted source bundle + checksum 생성 | **Blocking** |
+| `deploy-native-preflight` | bundle verify, native static tests, non-mutating preflight | **Blocking** |
+| `deploy-native-live` | source bundle 업로드 + remote release deploy | Guarded |
+| `public-health` | live job 성공 후 public endpoint 검증 | Guarded |
+
 ## 3. Remote release contract
 
 live job는 아래 파일만 target host의 incoming dir로 전송한다.
@@ -39,19 +47,8 @@ live job는 아래 파일만 target host의 incoming dir로 전송한다.
 - `deploy/native/deploy-release.sh`
 - `deploy/native/verify-source-bundle.sh`
 
-그 뒤 remote host에서 `deploy-release.sh`가 아래 순서로 동작한다.
-
-1. checksum/manifest/allowlist 검증
-2. port/Docker/user/group/env preflight
-3. release dir 생성
-4. source bundle unpack
-5. shared compatibility symlink 생성
-6. `uv sync --frozen --no-dev`
-7. systemd candidate render + `systemd-analyze verify`
-8. current symlink switch
-9. service start/restart
-10. local health check
-11. old release prune
+그 뒤 remote host에서 `deploy-release.sh`가 release를 수행한다. 내부 단계 순서와 계약은
+[`deploy/native/README.md`의 Release flow](../deploy/native/README.md#release-flow)를 참조한다.
 
 ## 4. Failure handling
 
@@ -95,7 +92,106 @@ bash /opt/kt-demo-alarm/incoming/<release-id>/deploy-release.sh
 
 ## 7. Legacy Docker note
 
-Docker assets are preserved for history and rollback planning under `legacy/docker-deploy/`,
-but the active workflow must not build, load, or start Docker images. `scripts/setup-ec2.sh`
-is also a legacy bootstrap helper only. Re-enabling a Docker runtime path requires a new
-PRD and explicit operator approval.
+Legacy Docker 자산과 재활성화 규칙은
+[`legacy/docker-deploy/README.md`](../legacy/docker-deploy/README.md)를 참조한다.
+
+<a id="manual-lane"></a>
+## 8. Manual redeploy lane (수동 재배포)
+
+GitHub live gate를 쓸 수 없는 서버(예: `scp`만 허용되는 공공기관 환경)에서 **반복 수동
+재배포**를 수행하는 절차다. 아래 raw 명령을 순서대로 따라 하면 재배포가 완료된다.
+최초 이관(shared-state 이전 포함)의 완료 기록은
+[manual-public-server-cutover-guide.md](manual-public-server-cutover-guide.md)를 참조한다.
+
+> **wrapper 경계**: `scripts/manual/public-server-cutover.sh`는 **최초 이관용** tracked
+> command surface다. wrapper의 `push` subcommand는 shared-state 아카이브가 없으면
+> hard-fail하고 이를 전송 페이로드에 포함하므로, shared state가 이미 서버에 존재하는
+> 반복 재배포에는 사용하지 않는다. subcommand 목록은 아카이브된
+> [이관 가이드 §3](manual-public-server-cutover-guide.md)을 참조한다.
+
+### 8.1 변수 규약
+
+```bash
+APP_NAME="kt-demo-alarm"
+APP_ROOT="/opt/kt-demo-alarm"
+DEST_HOST="<target-host>"
+DEST_USER="<target-user>"
+RELEASE_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+ARTIFACT_DIR="$PWD/release-artifact/manual-${RELEASE_ID}"
+INCOMING_DIR="${APP_ROOT}/incoming/${RELEASE_ID}"
+```
+
+### 8.2 prepare-artifact — 로컬 검증과 artifact 준비
+
+```bash
+mkdir -p "${ARTIFACT_DIR}"
+
+bash -n deploy/native/*.sh scripts/native/*.sh
+uv run pytest tests/test_native_runtime_assets.py -q
+uv run pytest -q
+
+bash deploy/native/package-source-bundle.sh "${ARTIFACT_DIR}"
+bash deploy/native/verify-source-bundle.sh \
+  "${ARTIFACT_DIR}/source-bundle.tar.gz" \
+  "${ARTIFACT_DIR}/source-bundle.sha256"
+```
+
+### 8.3 preflight-dest — 대상 서버 사전 확인
+
+§1 Guard prerequisites의 호스트 조건을 대상 서버에서 증빙으로 확보한다.
+
+```bash
+ssh "${DEST_USER}@${DEST_HOST}" "\
+systemctl --version && \
+uv --version && \
+id ${APP_NAME} && \
+stat -c '%a %U %G %n' '${APP_ROOT}/shared/.env' && \
+docker ps --format '{{.Names}}' || true && \
+ss -ltn 'sport = :8000' || true"
+```
+
+### 8.4 push — artifact 전송
+
+반복 재배포에서는 shared state가 이미 서버에 있으므로 **`shared-state.tar.gz`를 전송하지
+않는다** (최초 이관 시의 shared-state 이전은 아카이브 문서 참조). 아래 4개 파일만 보낸다.
+
+```bash
+ssh "${DEST_USER}@${DEST_HOST}" "mkdir -p '${INCOMING_DIR}'"
+
+scp \
+  "${ARTIFACT_DIR}/source-bundle.tar.gz" \
+  "${ARTIFACT_DIR}/source-bundle.sha256" \
+  deploy/native/deploy-release.sh \
+  deploy/native/verify-source-bundle.sh \
+  "${DEST_USER}@${DEST_HOST}:${INCOMING_DIR}/"
+```
+
+### 8.5 deploy — deploy-release 실행
+
+기본값은 승인 없는 cutover를 막는 방향으로 유지한다.
+
+```bash
+ssh "${DEST_USER}@${DEST_HOST}" "\
+APP_NAME='${APP_NAME}' \
+APP_ROOT='${APP_ROOT}' \
+RELEASE_ID='${RELEASE_ID}' \
+BUNDLE_PATH='${INCOMING_DIR}/source-bundle.tar.gz' \
+CHECKSUM_PATH='${INCOMING_DIR}/source-bundle.sha256' \
+VERIFY_SOURCE_BUNDLE_BIN='${INCOMING_DIR}/verify-source-bundle.sh' \
+bash '${INCOMING_DIR}/deploy-release.sh'"
+```
+
+명시적으로 승인된 경우에만 §5의 override(`ALLOW_PORT_TAKEOVER`, `ALLOW_DOCKER_CUTOVER`)를
+추가한다.
+
+### 8.6 postcheck — 증빙 수집
+
+§6 Completion evidence와 동일한 항목을 원격에서 수집한다.
+
+```bash
+ssh "${DEST_USER}@${DEST_HOST}" "\
+readlink -f '${APP_ROOT}/current' && \
+systemctl status '${APP_NAME}' --no-pager && \
+curl -fsS 'http://127.0.0.1:8000/' && \
+journalctl -u '${APP_NAME}' -n 100 --no-pager"
+```
