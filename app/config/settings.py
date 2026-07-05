@@ -52,11 +52,12 @@ class Settings(BaseSettings):
     ATTACHMENT_FOLDER: str = "topis_attachments"
 
     # --- Scheduling ---
-    CRAWLING_HOUR: int = 8
-    CRAWLING_MINUTE: int = 0
-    ROUTE_CHECK_HOUR: int = 13
+    # 운영 서버 담당자가 확정한 발송 시각 (2026-06-26 서버 반영값과 동일하게 유지할 것)
+    CRAWLING_HOUR: int = 7
+    CRAWLING_MINUTE: int = 50
+    ROUTE_CHECK_HOUR: int = 8
     ROUTE_CHECK_MINUTE: int = 0
-    ZONE_CHECK_HOUR: int = 13
+    ZONE_CHECK_HOUR: int = 8
     ZONE_CHECK_MINUTE: int = 0
 
     # --- SMPA Crawling ---
