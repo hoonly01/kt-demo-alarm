@@ -13,6 +13,8 @@
 ## Operator note
 
 Before using `scripts/setup-ec2.sh`, confirm that you intentionally need the legacy Docker bootstrap path.
+The legacy Docker rules (inactive status, reactivation gate) are documented in
+[`../docker-deploy/README.md`](../docker-deploy/README.md).
 
 For the current canonical flow, use:
 
