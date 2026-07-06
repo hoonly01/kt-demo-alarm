@@ -4,7 +4,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.routers import events as event_router
 from app.routers import kakao_skills
 from app.services.notification_payload_assembler import NotificationEventPayload
 from app.services.notification_service import NotificationService
@@ -122,7 +121,7 @@ def test_zone_alert_template_uses_zone_header_and_unknown_description_default():
 
 
 @pytest.mark.asyncio
-async def test_events_today_protests_uses_four_line_contract_from_db(clean_test_db):
+async def test_kakao_skills_today_protests_uses_four_line_contract_from_db(clean_test_db):
     conn = sqlite3.connect(clean_test_db, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     today_kst = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
@@ -137,7 +136,7 @@ async def test_events_today_protests_uses_four_line_contract_from_db(clean_test_
             start_date=f"{today_kst} 11:30:00",
             end_date=f"{today_kst} 13:00:00",
         )
-        response = await event_router.get_today_protests({}, conn)
+        response = await kakao_skills.get_today_protests({}, conn)
     finally:
         conn.close()
 

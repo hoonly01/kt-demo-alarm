@@ -3,7 +3,7 @@ import pytest
 import sqlite3
 
 from app.config.settings import settings
-from app.routers import events as event_router
+from app.routers import kakao_skills as skill_router
 from app.services.event_service import EventService
 from app.services.notification_payload_assembler import NotificationPayloadAssembler
 from app.services.notification_service import NotificationService
@@ -101,7 +101,7 @@ async def test_check_route_uses_same_four_line_contract_from_db(clean_test_db):
             end_date="2999-05-15 13:00:00",
         )
 
-        response = await event_router.check_user_route_events(
+        response = await skill_router.check_user_route_events(
             {
                 "userRequest": {
                     "user": {

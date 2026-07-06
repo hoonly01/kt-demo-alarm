@@ -8,8 +8,6 @@ import asyncio
 from app.models.event import EventCreate, EventResponse, RouteEventCheck
 from app.database.connection import get_db
 from app.services.event_service import EventService
-from app.services.notification_payload_assembler import NotificationPayloadAssembler
-from app.services.notification_service import NotificationService
 from app.services.auth_service import verify_api_key
 
 logger = logging.getLogger(__name__)
@@ -54,69 +52,6 @@ async def get_events(
 ):
     """집회 목록 조회"""
     return EventService.get_events(category, status, limit, db)
-
-
-@router.post("/check-route")
-async def check_user_route_events(
-    request: dict,
-    db: sqlite3.Connection = Depends(get_db)
-):
-    """
-    사용자의 경로상에 있는 집회들을 확인 (카카오톡 Skill Block)
-    """
-    logger.info(f"🔍 /check-route 요청: {request}")
-
-    # Skill Block에서 사용자 ID 추출 (plusfriendUserKey 우선)
-    user_request = request.get('userRequest', {})
-    user_info = user_request.get('user', {})
-    properties = user_info.get('properties', {})
-    plusfriend_key = properties.get('plusfriendUserKey')
-    bot_user_key = user_info.get('id')
-
-    # plusfriend_key가 있으면 우선 사용, 없으면 bot_user_key 사용
-    user_id = plusfriend_key if plusfriend_key else bot_user_key
-
-    logger.info(f"📝 경로 확인 - user_id: {user_id}")
-
-    # 경로 집회 확인 (알림은 보내지 않음)
-    result = await EventService.check_route_events(user_id, auto_notify=False, db=db)
-
-    if not result.events_found:
-        return {
-            "version": "2.0",
-            "template": {
-                "outputs": [
-                    {
-                        "simpleText": {
-                            "text": (
-                                "✅ 좋은 소식입니다!\n\n"
-                                "등록하신 경로에 예정된 집회가 없습니다.\n"
-                                "안전한 이동 되세요! 😊"
-                            )
-                        }
-                    }
-                ]
-            }
-        }
-
-    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(result.events_found)
-    message_text = NotificationService.format_event_collection_message(
-        "경로상 감지된 집회 안내입니다.",
-        notification_events,
-    )
-
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
-        }
-    }
 
 
 @router.post("/auto-check-all-routes")
@@ -192,102 +127,4 @@ async def auto_check_all_routes(
         "success_count": success_count,
         "total_events_found": total_events,
         "results": results
-    }
-
-
-@router.post("/upcoming-protests")
-async def get_upcoming_protests(
-    request: dict,
-    db: sqlite3.Connection = Depends(get_db)
-):
-    """
-    다가오는 집회 정보 조회 (카카오톡 Skill Block)
-    """
-    logger.info(f"🔍 /upcoming-protests 요청: {request}")
-
-    # Skill Block 형식에서 파라미터 추출 (필요시)
-    params = request.get('action', {}).get('params', {})
-    limit = params.get('limit', 5)
-
-    # 다가오는 집회 조회
-    events = EventService.get_upcoming_events(limit, db)
-
-    if not events:
-        return {
-            "version": "2.0",
-            "template": {
-                "outputs": [
-                    {
-                        "simpleText": {
-                            "text": "📅 현재 예정된 집회가 없습니다."
-                        }
-                    }
-                ]
-            }
-        }
-
-    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(events)
-    message_text = NotificationService.format_event_collection_message(
-        "예정된 집회 안내입니다.",
-        notification_events,
-    )
-
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
-        }
-    }
-
-
-@router.post("/today-protests")
-async def get_today_protests(
-    request: dict,
-    db: sqlite3.Connection = Depends(get_db)
-):
-    """
-    오늘 집회 정보 조회 (카카오톡 Skill Block)
-    """
-    logger.info(f"🔍 /today-protests 요청: {request}")
-
-    # 오늘 집회 조회
-    events = EventService.get_today_events(db)
-
-    if not events:
-        return {
-            "version": "2.0",
-            "template": {
-                "outputs": [
-                    {
-                        "simpleText": {
-                            "text": "📅 오늘 예정된 집회가 없습니다."
-                        }
-                    }
-                ]
-            }
-        }
-
-    notification_events = NotificationPayloadAssembler.event_payloads_from_responses(events)
-    message_text = NotificationService.format_event_collection_message(
-        "오늘 예정된 집회 안내입니다.",
-        notification_events,
-    )
-
-    return {
-        "version": "2.0",
-        "template": {
-            "outputs": [
-                {
-                    "simpleText": {
-                        "text": message_text
-                    }
-                }
-            ]
-        }
     }
