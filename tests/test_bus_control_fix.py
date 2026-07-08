@@ -102,3 +102,34 @@ async def test_route_check_says_normal_when_no_notice(tmp_path, monkeypatch):
     resp = await BusNoticeService.get_route_check_response("162", {"date": "2026-07-16"})
     text = resp["template"]["outputs"][0]["simpleText"]["text"]
     assert "정상 운행" in text
+
+
+@pytest.mark.asyncio
+async def test_background_callback_degrades_when_extraction_incomplete(tmp_path, monkeypatch):
+    # 비동기 콜백 경로(process_route_check_background)도 동기 경로와 동일하게
+    # 추출 실패 공지를 "정상 운행"으로 단정하지 않아야 한다.
+    crawler = TOPISCrawler(cache_file=str(tmp_path / "c.json"), download_folder=str(tmp_path / "dl"))
+    notice = {
+        "seq": "9999",
+        "title": "테스트 통제 공지",
+        "create_date": "2026-07-15 00:00:00",
+        "general_periods": ["2026-07-15 00:00 ~ 2026-07-20 23:59"],
+        "route_pages": {},
+        "route_images": {},
+        "extraction_incomplete": True,
+    }
+    monkeypatch.setattr(BusNoticeService, "crawler", crawler)
+    monkeypatch.setattr(BusNoticeService, "cached_notices", {"9999": notice})
+
+    sent = {}
+
+    async def fake_send(cls_url, message):
+        sent["text"] = message["template"]["outputs"][0]["simpleText"]["text"]
+
+    monkeypatch.setattr(BusNoticeService, "_send_callback_request", classmethod(
+        lambda cls, url, message: fake_send(url, message)
+    ))
+
+    await BusNoticeService.process_route_check_background("162", {"date": "2026-07-16"}, "http://callback.test")
+    assert "확인하지 못했습니다" in sent["text"]
+    assert "정상 운행" not in sent["text"]
