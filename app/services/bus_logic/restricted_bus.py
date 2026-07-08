@@ -442,32 +442,57 @@ class TOPISCrawler:
         
         return None
 
+    # 버스 관련 통제/우회 공지가 걸리는 TOPIS 카테고리
+    #   0201 = 통제안내(도로·버스 임시우회 대부분이 여기 올라옴)
+    #   0202 = 버스안내(집회 무정차 등)
+    BUS_NOTICE_CATEGORY_CODES = ('0201', '0202')
+
     def _get_bus_notices(self, page=1, per_page=5, max_retries=3):
-        """버스 공지사항 목록 가져오기 (재시도 로직 포함)"""
-        data = {
-            'pageIndex': str(page),
-            'recordPerPage': str(per_page),
-            'pageSize': '5',
-            'bdwrSeq': '',
-            'blbdDivCd': '02',
-            'bdwrDivCd': '0202',
-            'tabGubun': 'B'
-        }
-        
+        """버스 공지사항 목록 가져오기 (통제안내 0201 + 버스안내 0202 병합)"""
+        merged = {}
+        fetched_any = False
+        for divcd in self.BUS_NOTICE_CATEGORY_CODES:
+            data = {
+                'pageIndex': str(page),
+                'recordPerPage': str(per_page),
+                'pageSize': '5',
+                'bdwrSeq': '',
+                'blbdDivCd': '02',
+                'bdwrDivCd': divcd,
+                'tabGubun': 'B'
+            }
+            rows = self._post_notice_list(data, max_retries=max_retries)
+            if rows is None:
+                continue
+            fetched_any = True
+            for row in rows:
+                seq = str(row.get('bdwrSeq'))
+                merged[seq] = row
+
+        if not fetched_any:
+            return None
+
+        # 두 카테고리를 seq 내림차순(최신순)으로 병합
+        ordered = sorted(
+            merged.values(),
+            key=lambda r: int(str(r.get('bdwrSeq') or 0)) if str(r.get('bdwrSeq') or 0).isdigit() else 0,
+            reverse=True
+        )
+        return {'rows': ordered}
+
+    def _post_notice_list(self, data, max_retries=3):
+        """공지 목록 POST (재시도 포함). 성공 시 rows 리스트, 실패 시 None."""
         for attempt in range(max_retries):
             try:
                 response = self.session.post(f"{self.base_url}/notice/selectNoticeList.do", data=data, verify=False)
                 response.raise_for_status()
-                return response.json()
+                return response.json().get('rows', [])
             except Exception as e:
-                print(f"목록 가져오기 오류 (시도 {attempt + 1}/{max_retries}): {e}")
+                print(f"목록 가져오기 오류 (bdwrDivCd={data.get('bdwrDivCd')}, 시도 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 2
-                    print(f"{wait_time}초 후 재시도...")
-                    time.sleep(wait_time)
+                    time.sleep((attempt + 1) * 2)
                 else:
                     print("최대 재시도 횟수 초과")
-        
         return None
 
     def _get_notice_detail(self, blbd_div_cd, bdwr_seq, max_retries=3):
@@ -756,10 +781,11 @@ JSON 형식:
                 "route_pages": {}
             }
             
+            any_chunk_ok = False
             if total_pages > 0:
                 num_chunks = (total_pages + chunk_size - 1) // chunk_size
                 print(f"  - 총 {total_pages}개의 페이지를 {num_chunks}개의 청크로 정밀 분석합니다.")
-                
+
                 for i in range(0, total_pages, chunk_size):
                     chunk_index = i // chunk_size + 1
                     chunk_pages = page_map[i : i + chunk_size]
@@ -800,8 +826,9 @@ JSON 형식:
                     
                     print(f"    - 청크 {chunk_index}/{num_chunks} 분석 중...")
                     chunk_data = self._call_works_ai_api(content_parts, is_multimodal=True, max_retries=max_retries)
-                    
+
                     if chunk_data:
+                        any_chunk_ok = True
                         # 데이터 병합
                         if chunk_data.get("station_info"):
                             for sid, info in chunk_data["station_info"].items():
@@ -821,6 +848,15 @@ JSON 형식:
                                 norm_k = re.sub(r'[^0-9a-zA-Z]', '', str(route))
                                 # 청크 내 상대 페이지를 전체 절대 페이지 번호로 변환하여 저장
                                 final_data["route_pages"][norm_k] = i + page
+
+            # Layer 5(안전 강등): 첨부는 있으나 모든 청크 추출이 실패해 노선/정류소 정보를
+            # 전혀 못 얻은 경우를 표시. 조회 시 "통제 없음"으로 오인시키지 않기 위한 신호.
+            extraction_incomplete = (
+                total_pages > 0
+                and not any_chunk_ok
+                and not final_data["route_pages"]
+                and not final_data["station_info"]
+            )
 
             # 최종 데이터 보강 및 이미지 생성
             enriched_station_info = self._enrich_station_info(final_data["station_info"])
@@ -862,7 +898,8 @@ JSON 형식:
                 "station_info": enriched_station_info,
                 "detour_routes": final_data["detour_routes"],
                 "route_pages": final_data["route_pages"],
-                "route_images": route_images
+                "route_images": route_images,
+                "extraction_incomplete": extraction_incomplete
             }
 
         except Exception as e:
@@ -888,36 +925,81 @@ JSON 형식:
         }
         
         messages = [{"role": "user", "content": [{"type": "text", "text": str(content)}]}] if not is_multimodal else [{"role": "user", "content": content}]
-        payload = {
-            "model": self.works_ai_model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "temperature": 0.0,
-            "thinking_level": "high",
-            "include_thoughts": False
-        }
 
+        last_raw = None
         for attempt in range(max_retries):
+            # Layer 3/4: 재시도는 payload 를 바꿔 결정론적 동일 실패를 피한다.
+            #  - 1차: temperature 0.0 + thinking high (정확도 우선)
+            #  - 재시도: temperature 상향 + thinking 하향(출력 예산 확보 → 잘림 완화)
+            payload = {
+                "model": self.works_ai_model,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0 if attempt == 0 else 0.3,
+                "thinking_level": "high" if attempt == 0 else "low",
+                "include_thoughts": False,
+                "max_tokens": 16384,
+            }
             try:
                 response = requests.post(f"{self.works_ai_base_url}/chat/completions", headers=headers, json=payload, timeout=300)
                 response.raise_for_status()
                 result = response.json()
                 content_str = result['choices'][0]['message']['content']
+                last_raw = content_str
                 data = json.loads(self._clean_json_response(content_str))
                 return data if isinstance(data, dict) else (data[0] if isinstance(data, list) and data else {})
             except Exception as e:
                 if attempt < max_retries - 1:
                     time.sleep(2)
                 else:
-                    logger.error(f"Works AI API 최종 호출 실패: {e}")
+                    # Layer 0: 실패 시 원본 출력 일부를 남겨 회귀 픽스처/원인 분석을 가능케 한다.
+                    logger.error(f"Works AI API 최종 호출 실패: {e} | raw_head={str(last_raw)[:600]!r}")
         return None
 
     def _clean_json_response(self, text):
-        """JSON 응답 마크다운 제거"""
-        if not text: return "{}"
+        """LLM 응답에서 JSON 본문만 안전 추출.
+
+        - 마크다운 펜스 제거
+        - 바깥쪽 첫 `{` 부터 균형 잡힌 `}` 까지만 잘라냄 → 앞뒤 잡문/사고흔적으로 인한
+          'Extra data' 방어
+        - 닫히지 않은 채 잘린 경우(truncation) 부족한 만큼 `}` 를 채워 복구 시도
+        """
+        if not text:
+            return "{}"
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*', '', text).strip()
-        return text
+
+        start = text.find('{')
+        if start == -1:
+            return text
+
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:i + 1]
+
+        # 여기까지 왔으면 닫는 괄호가 부족(잘림) → 남은 depth 만큼 닫아 복구
+        recovered = text[start:]
+        if depth > 0:
+            recovered += '}' * depth
+        return recovered
 
     def _get_default_extraction_result(self):
         """기본 추출 결과 반환"""
