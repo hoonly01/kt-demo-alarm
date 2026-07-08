@@ -312,6 +312,27 @@ class BusNoticeService:
                         break
 
             if not target_notice:
+                # Layer 5(안전 강등): 이 날짜에 통제 공지는 있으나 추출이 실패해 노선 정보를
+                # 확보하지 못한 경우, "정상 운행"으로 단정하지 않고 상세 미확보로 안내한다.
+                if any(n.get("extraction_incomplete") for n in notices):
+                    return {
+                        "version": "2.0",
+                        "template": {
+                            "outputs": [
+                                {
+                                    "simpleText": {
+                                        "text": (
+                                            f"🚌 노선 {normalized_route}번 안내\n\n"
+                                            f"문의하신 {target_date}에 교통 통제/우회 공지가 있으나, "
+                                            "해당 노선의 상세 영향 정보를 확인하지 못했습니다.\n"
+                                            "아래 링크에서 직접 확인해주세요.\n\n"
+                                            f"📍 {TOPIS_CONTROL_INFO_URL}"
+                                        )
+                                    }
+                                }
+                            ]
+                        }
+                    }
                 return {
                     "version": "2.0",
                     "template": {
@@ -478,6 +499,23 @@ class BusNoticeService:
                         break
             
             if not target_notice:
+                # Layer 5(안전 강등): 추출 실패 공지가 있으면 "정상 운행"으로 단정하지 않는다.
+                # (동기 경로 get_route_check_response 와 동일한 가드)
+                if any(n.get("extraction_incomplete") for n in notices):
+                    callback_message = {
+                        "version": "2.0",
+                        "template": {
+                            "outputs": [
+                                {
+                                    "simpleText": {
+                                        "text": f"🚌 노선 {normalized_route}번 안내\n\n문의하신 {target_date}에 교통 통제/우회 공지가 있으나, 해당 노선의 상세 영향 정보를 확인하지 못했습니다.\n아래 링크에서 직접 확인해주세요.\n\n📍 {TOPIS_CONTROL_INFO_URL}"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                    await cls._send_callback_request(callback_url, callback_message)
+                    return
                 # 해당 날짜에 공지는 있으나, 요청한 노선은 통제 대상이 아닌 경우
                 callback_message = {
                     "version": "2.0",
