@@ -28,7 +28,7 @@ allow/deny matching lives in `path_is_allowed` / `path_is_denied` in
 
 - allowed: `app/`, `main.py`, `pyproject.toml`, `uv.lock`, `.python-version`,
   `deploy/native/`, `docs/native-linux-deploy-guide.md`,
-  `docs/docker-free-fastapi-deploy-runbook.md`, and `nginx/` when present
+  `docs/deploy-runbook.md`, and `nginx/` when present
 - denied: `.env*`, `.venv/`, cache directories, SQLite/DB files, attachments,
   `*.key`, `*.pem`, `id_rsa`, `credentials.json`, Docker image archives, and
   path-traversal entries

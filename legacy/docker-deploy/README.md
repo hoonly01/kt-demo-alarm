@@ -25,7 +25,7 @@ restating them.
 The canonical operator path for this repository is the native deploy flow documented in:
 
 - `docs/native-linux-deploy-guide.md`
-- `docs/docker-free-fastapi-deploy-runbook.md`
+- `docs/deploy-runbook.md`
 
 `legacy/docker-deploy/` exists so historical Docker assets do not influence the active service/deploy path.
 

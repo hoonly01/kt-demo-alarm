@@ -19,5 +19,5 @@ The legacy Docker rules (inactive status, reactivation gate) are documented in
 For the current canonical flow, use:
 
 - `docs/native-linux-deploy-guide.md`
-- `docs/docker-free-fastapi-deploy-runbook.md`
+- `docs/deploy-runbook.md`
 
