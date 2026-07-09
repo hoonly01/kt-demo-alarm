@@ -25,7 +25,7 @@ HEALTHCHECK_SCRIPT = REPO_ROOT / "deploy" / "native" / "healthcheck.sh"
 TEMPLATE_PATH = REPO_ROOT / "deploy" / "native" / "kt-demo-alarm.service.template"
 SCRIPT_DIR = REPO_ROOT / "scripts" / "native"
 NATIVE_GUIDE_PATH = REPO_ROOT / "docs" / "native-linux-deploy-guide.md"
-RUNBOOK_PATH = REPO_ROOT / "docs" / "docker-free-fastapi-deploy-runbook.md"
+RUNBOOK_PATH = REPO_ROOT / "docs" / "deploy-runbook.md"
 NATIVE_ASSET_README_PATH = REPO_ROOT / "deploy" / "native" / "README.md"
 LEGACY_DOCKER_DIR = REPO_ROOT / "legacy" / "docker-deploy"
 LEGACY_BOOTSTRAP_README = REPO_ROOT / "legacy" / "bootstrap" / "README.md"
@@ -255,7 +255,7 @@ def test_package_and_verify_source_bundle_contract(tmp_path: Path) -> None:
         "deploy/native/healthcheck.sh",
         "deploy/native/kt-demo-alarm.service.template",
         "docs/native-linux-deploy-guide.md",
-        "docs/docker-free-fastapi-deploy-runbook.md",
+        "docs/deploy-runbook.md",
     }
     for entry in required_entries:
         assert entry in names
@@ -309,7 +309,7 @@ def test_package_source_bundle_rejects_symlinks(tmp_path: Path) -> None:
     (temp_repo / "uv.lock").write_text("version = 1\nrevision = 1\n", encoding="utf-8")
     (temp_repo / ".python-version").write_text("3.12\n", encoding="utf-8")
     (temp_repo / "docs" / "native-linux-deploy-guide.md").write_text("# guide\n", encoding="utf-8")
-    (temp_repo / "docs" / "docker-free-fastapi-deploy-runbook.md").write_text(
+    (temp_repo / "docs" / "deploy-runbook.md").write_text(
         "# runbook\n",
         encoding="utf-8",
     )
@@ -1041,7 +1041,7 @@ def test_healthcheck_bounds_each_curl_attempt_to_remaining_deadline() -> None:
 def test_required_docs_are_not_gitignored() -> None:
     docs = [
         "docs/native-linux-deploy-guide.md",
-        "docs/docker-free-fastapi-deploy-runbook.md",
+        "docs/deploy-runbook.md",
         "legacy/docker-deploy/README.md",
         "legacy/bootstrap/README.md",
     ]

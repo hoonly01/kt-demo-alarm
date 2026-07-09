@@ -29,7 +29,7 @@ source_paths=(
   .python-version
   deploy/native
   docs/native-linux-deploy-guide.md
-  docs/docker-free-fastapi-deploy-runbook.md
+  docs/deploy-runbook.md
 )
 
 if [[ -d "${REPO_ROOT}/nginx" ]]; then

@@ -10,7 +10,7 @@ import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANUAL_CUTOVER_SCRIPT = REPO_ROOT / "scripts" / "manual" / "public-server-cutover.sh"
+MANUAL_CUTOVER_SCRIPT = REPO_ROOT / "deploy" / "manual" / "public-server-cutover.sh"
 NATIVE_DEFAULTS_SCRIPT = REPO_ROOT / "scripts" / "native" / "native-defaults.sh"
 PACKAGE_SCRIPT = REPO_ROOT / "deploy" / "native" / "package-source-bundle.sh"
 VERIFY_SCRIPT = REPO_ROOT / "deploy" / "native" / "verify-source-bundle.sh"
@@ -44,11 +44,11 @@ def _build_prepare_artifact_repo(tmp_path: Path) -> Path:
     (repo / "app").mkdir(parents=True)
     (repo / "deploy" / "native").mkdir(parents=True)
     (repo / "docs").mkdir(parents=True)
-    (repo / "scripts" / "manual").mkdir(parents=True)
+    (repo / "deploy" / "manual").mkdir(parents=True)
     (repo / "scripts" / "native").mkdir(parents=True)
     (repo / "tests").mkdir(parents=True)
 
-    shutil.copy2(MANUAL_CUTOVER_SCRIPT, repo / "scripts" / "manual" / "public-server-cutover.sh")
+    shutil.copy2(MANUAL_CUTOVER_SCRIPT, repo / "deploy" / "manual" / "public-server-cutover.sh")
     shutil.copy2(NATIVE_DEFAULTS_SCRIPT, repo / "scripts" / "native" / "native-defaults.sh")
     shutil.copy2(PACKAGE_SCRIPT, repo / "deploy" / "native" / "package-source-bundle.sh")
     shutil.copy2(VERIFY_SCRIPT, repo / "deploy" / "native" / "verify-source-bundle.sh")
@@ -62,7 +62,7 @@ def _build_prepare_artifact_repo(tmp_path: Path) -> Path:
     (repo / "uv.lock").write_text("version = 1\n", encoding="utf-8")
     (repo / ".python-version").write_text("3.12\n", encoding="utf-8")
     (repo / "docs" / "native-linux-deploy-guide.md").write_text("# Native Guide\n", encoding="utf-8")
-    (repo / "docs" / "docker-free-fastapi-deploy-runbook.md").write_text("# Runbook\n", encoding="utf-8")
+    (repo / "docs" / "deploy-runbook.md").write_text("# Runbook\n", encoding="utf-8")
     (repo / "tests" / "test_native_runtime_assets.py").write_text(
         "def test_native_assets_placeholder() -> None:\n    assert True\n",
         encoding="utf-8",
@@ -125,7 +125,7 @@ def test_manual_public_cutover_prepare_artifact_creates_bundle_and_checksum(tmp_
 
     _ = run_command(
         "bash",
-        str(repo / "scripts" / "manual" / "public-server-cutover.sh"),
+        str(repo / "deploy" / "manual" / "public-server-cutover.sh"),
         "prepare-artifact",
         cwd=repo,
         env={
@@ -149,7 +149,7 @@ def test_manual_public_cutover_prepare_artifact_creates_bundle_and_checksum(tmp_
     assert "deploy/native/package-source-bundle.sh" in names
     assert "deploy/native/verify-source-bundle.sh" in names
     assert "docs/native-linux-deploy-guide.md" in names
-    assert "docs/docker-free-fastapi-deploy-runbook.md" in names
+    assert "docs/deploy-runbook.md" in names
 
 
 @pytest.mark.parametrize("layout", ["native-shared", "legacy-flat"])

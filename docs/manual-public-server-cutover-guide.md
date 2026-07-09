@@ -2,7 +2,7 @@
 
 > **📦 완료된 최초 이관 기록** — 이 문서의 이관 절차는 2026-06~07 서버 이관(#146, #165)으로
 > 완료되었다. **반복 수동 재배포는
-> [runbook의 Manual redeploy lane](docker-free-fastapi-deploy-runbook.md#manual-lane)을 사용한다.**
+> [runbook의 Manual redeploy lane](deploy-runbook.md#manual-lane)을 사용한다.**
 > 본 문서는 최초 이관의 기록과 예외 경로 설계 근거로 보존한다.
 
 ## 0. 목적
@@ -35,7 +35,7 @@
 
 ## 3. operator-local wrapper contract
 
-이 manual lane의 tracked command surface는 `scripts/manual/public-server-cutover.sh` 를 기준으로 정의한다.
+이 manual lane의 tracked command surface는 `deploy/manual/public-server-cutover.sh` 를 기준으로 정의한다.
 wrapper는 **default one-shot `all` 동작 없이**, phase-based / rerunnable subcommand만 제공해야 한다.
 
 | Phase | 목적 | 기대 side effect |
@@ -103,11 +103,11 @@ INCOMING_DIR="${APP_ROOT}/incoming/${RELEASE_ID}"
 
 ## 6. phase-by-phase 절차
 
-> 반복 사용 절차의 canonical 명령은 [runbook Manual redeploy lane](docker-free-fastapi-deploy-runbook.md#manual-lane)이 보유한다. 아래 본문은 최초 이관 당시의 기록이다.
+> 반복 사용 절차의 canonical 명령은 [runbook Manual redeploy lane](deploy-runbook.md#manual-lane)이 보유한다. 아래 본문은 최초 이관 당시의 기록이다.
 
 ### 6.1 `prepare-artifact`
 
-> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
+> [현행 절차: runbook Manual redeploy lane 참조](deploy-runbook.md#manual-lane)
 
 로컬 검증과 artifact 준비를 먼저 수행한다.
 
@@ -164,7 +164,7 @@ tar -C '${APP_ROOT}' -czf - \
 
 ### 6.4 `preflight-dest`
 
-> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
+> [현행 절차: runbook Manual redeploy lane 참조](deploy-runbook.md#manual-lane)
 
 최근 preflight baseline 에서는 `uv`, service account, `${APP_ROOT}/shared/.env`, Docker 중복, port 8000 takeover 위험이 blocker 였다.
 같은 계열 환경이면 아래 출력을 먼저 확보한다.
@@ -189,7 +189,7 @@ ss -ltn 'sport = :8000' || true"
 
 ### 6.5 `push`
 
-> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane) — 반복 재배포의 push 페이로드는 `shared-state.tar.gz`를 포함하지 않는다.
+> [현행 절차: runbook Manual redeploy lane 참조](deploy-runbook.md#manual-lane) — 반복 재배포의 push 페이로드는 `shared-state.tar.gz`를 포함하지 않는다.
 
 remote upload는 `scp` 로만 수행한다.
 
@@ -219,7 +219,7 @@ tar -C '${APP_ROOT}/shared' -xzf '${INCOMING_DIR}/shared-state.tar.gz'"
 
 ### 6.7 `deploy`
 
-> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
+> [현행 절차: runbook Manual redeploy lane 참조](deploy-runbook.md#manual-lane)
 
 기본값은 승인 없는 cutover 를 막는 방향으로 유지한다.
 
@@ -251,7 +251,7 @@ bash '${INCOMING_DIR}/deploy-release.sh'"
 
 ### 6.8 `postcheck`
 
-> [현행 절차: runbook Manual redeploy lane 참조](docker-free-fastapi-deploy-runbook.md#manual-lane)
+> [현행 절차: runbook Manual redeploy lane 참조](deploy-runbook.md#manual-lane)
 
 ```bash
 ssh "${DEST_USER}@${DEST_HOST}" "\
@@ -310,6 +310,6 @@ systemctl restart '${APP_NAME}'"
 | 문서 | 역할 |
 |---|---|
 | `docs/native-linux-deploy-guide.md` | native-first 결정 기록 (ADR) |
-| `docs/docker-free-fastapi-deploy-runbook.md` | 배포 절차 — CI 레인, manual redeploy lane, 증빙 |
+| `docs/deploy-runbook.md` | 배포 절차 — CI 레인, manual redeploy lane, 증빙 |
 | `deploy/native/README.md` | 배포 계약 — bundle allowlist/denylist, release flow, live gate, env ownership |
 | `.omx/logs/g076-user-host-preflight-20260602T1046Z.md` | 기존 host preflight blocker baseline |

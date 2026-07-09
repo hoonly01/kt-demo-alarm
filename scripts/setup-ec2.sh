@@ -28,7 +28,7 @@ if ! [[ "$DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2
 fi
 
 echo "⚠️  scripts/setup-ec2.sh 는 legacy Docker bootstrap 입니다."
-echo "⚠️  active native deploy path는 docs/native-linux-deploy-guide.md 와 docs/docker-free-fastapi-deploy-runbook.md 를 따릅니다."
+echo "⚠️  active native deploy path는 docs/native-linux-deploy-guide.md 와 docs/deploy-runbook.md 를 따릅니다."
 echo ""
 
 # OS 감지

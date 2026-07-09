@@ -21,7 +21,7 @@ path_is_allowed() {
     ""|bundle-manifest.txt|app|deploy|deploy/native|docs|nginx) return 0 ;;
     app/*|deploy/native/*|nginx/*) return 0 ;;
     main.py|pyproject.toml|uv.lock|.python-version) return 0 ;;
-    docs/native-linux-deploy-guide.md|docs/docker-free-fastapi-deploy-runbook.md) return 0 ;;
+    docs/native-linux-deploy-guide.md|docs/deploy-runbook.md) return 0 ;;
     *) return 1 ;;
   esac
 }

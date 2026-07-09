@@ -45,7 +45,7 @@ blocking-tests
 - 배포 계약(번들 allowlist/denylist, release layout, activation guard, release flow)은
   [`deploy/native/README.md`](../deploy/native/README.md)가 단일 서술처이며, 실질 소스는
   packaging/verify 스크립트다.
-- CI 레인과 수동 재배포 절차는 [runbook](docker-free-fastapi-deploy-runbook.md)이 단일
+- CI 레인과 수동 재배포 절차는 [runbook](deploy-runbook.md)이 단일
   서술처다.
 - live 배포는 이중 가드(repository variable + protected environment) 뒤에 있으며, 가드
   조건과 동작의 서술처는 [`deploy/native/README.md`](../deploy/native/README.md)다.
@@ -58,6 +58,6 @@ blocking-tests
 | 주제 | 서술처 |
 |---|---|
 | 배포 계약 — 번들 allowlist/denylist, release layout, activation guard, release flow | [`deploy/native/README.md`](../deploy/native/README.md) |
-| 배포 절차 — CI 레인, 수동 재배포(manual lane), preflight, postcheck 증빙 | [`docker-free-fastapi-deploy-runbook.md`](docker-free-fastapi-deploy-runbook.md) |
+| 배포 절차 — CI 레인, 수동 재배포(manual lane), preflight, postcheck 증빙 | [`deploy-runbook.md`](deploy-runbook.md) |
 | 최초 이관 기록 (완료, 아카이브) | [`manual-public-server-cutover-guide.md`](manual-public-server-cutover-guide.md) |
 | Legacy 규칙 — Docker 자산 `legacy/docker-deploy/`, bootstrap helper `scripts/setup-ec2.sh` | [`legacy/docker-deploy/README.md`](../legacy/docker-deploy/README.md) |

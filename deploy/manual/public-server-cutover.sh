@@ -3,8 +3,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/native/native-defaults.sh
-source "${SCRIPT_DIR}/../native/native-defaults.sh"
+# shellcheck source=../../scripts/native/native-defaults.sh
+source "${SCRIPT_DIR}/../../scripts/native/native-defaults.sh"
 
 REPO_ROOT="$(native_repo_root)"
 
@@ -197,7 +197,7 @@ manual_copy_to_destination() {
 
 manual_show_help() {
   cat <<'USAGE'
-Usage: scripts/manual/public-server-cutover.sh <subcommand> [options]
+Usage: deploy/manual/public-server-cutover.sh <subcommand> [options]
 
 Phase-based manual migration wrapper for public/scp-constrained environments.
 This script intentionally has no default "all" or one-shot cutover action.
@@ -211,6 +211,11 @@ Subcommands:
   restore-shared        Restore shared-state tar into the destination shared directory
   deploy                Execute deploy-release.sh once on the destination host
   postcheck             Gather minimal-cutover evidence from the destination host
+  refresh-cache         Trigger the server-side bus notice re-crawl (crawl/extraction changes)
+  smoke                 App-level smoke via /bus/webhook/route_check (SMOKE_ROUTE/SMOKE_DATE)
+  redeploy              Repeat-deploy convenience: prepare-artifact -> push (no shared state)
+                        -> deploy -> postcheck [-> refresh-cache if REFRESH_CACHE=true]
+                        [-> smoke if SMOKE_ROUTE set]
   followup-checklist    Print the public/TLS/Playwright/outbound follow-up checklist
   help                  Show this help
 
@@ -231,6 +236,12 @@ Variable conventions:
   RELEASE_ID=$(date -u +%Y%m%dT%H%M%SZ)
   ARTIFACT_DIR=$PWD/release-artifact/manual-${RELEASE_ID}
   INCOMING_DIR=${DEST_APP_ROOT}/incoming/${RELEASE_ID}
+
+Redeploy variables:
+  SKIP_SHARED_STATE=true   push omits the shared-state archive (repeat redeploy)
+  REFRESH_CACHE=true       redeploy also runs refresh-cache after postcheck
+  SMOKE_ROUTE=<route>      redeploy/smoke query this bus route
+  SMOKE_DATE=<YYYY-MM-DD>  date used for the smoke route check (control period)
 
 Transport notes:
   - Production path uses ssh/scp.
@@ -404,9 +415,28 @@ EOF
 
 manual_cmd_push() {
   manual_require_value "${DEST_HOST}" "DEST_HOST"
-  [[ -f "$(manual_bundle_path)" ]] || manual_fail "Missing source bundle: $(manual_bundle_path)"
-  [[ -f "$(manual_checksum_path)" ]] || manual_fail "Missing source bundle checksum: $(manual_checksum_path)"
-  [[ -f "$(manual_shared_state_path)" ]] || manual_fail "Missing shared state archive: $(manual_shared_state_path)"
+  # dry-run 은 미리보기이므로 아직 만들어지지 않은 아티팩트로 실패시키지 않는다.
+  if ! manual_is_truthy "${DRY_RUN}"; then
+    [[ -f "$(manual_bundle_path)" ]] || manual_fail "Missing source bundle: $(manual_bundle_path)"
+    [[ -f "$(manual_checksum_path)" ]] || manual_fail "Missing source bundle checksum: $(manual_checksum_path)"
+  fi
+
+  local -a copy_files=(
+    "$(manual_bundle_path)"
+    "$(manual_checksum_path)"
+  )
+  # 재배포(SKIP_SHARED_STATE=true)는 공유 상태를 전송하지 않는다. 대상 서버에 이미 존재하며
+  # DB/첨부/캐시는 shared/ 에서 릴리스와 분리되어 유지된다. 최초 이관에서만 shared state 를 보낸다.
+  if ! manual_is_truthy "${SKIP_SHARED_STATE:-false}"; then
+    if ! manual_is_truthy "${DRY_RUN}"; then
+      [[ -f "$(manual_shared_state_path)" ]] || manual_fail "Missing shared state archive: $(manual_shared_state_path)"
+    fi
+    copy_files+=("$(manual_shared_state_path)")
+  fi
+  copy_files+=(
+    "${REPO_ROOT}/deploy/native/deploy-release.sh"
+    "${REPO_ROOT}/deploy/native/verify-source-bundle.sh"
+  )
 
   local mkdir_script
   mkdir_script=$(
@@ -417,12 +447,7 @@ EOF
   )
   manual_run_host_script "${DEST_USER}" "${DEST_HOST}" "${mkdir_script}"
 
-  manual_copy_to_destination "${DEST_HOST}" "${INCOMING_DIR}" \
-    "$(manual_bundle_path)" \
-    "$(manual_checksum_path)" \
-    "$(manual_shared_state_path)" \
-    "${REPO_ROOT}/deploy/native/deploy-release.sh" \
-    "${REPO_ROOT}/deploy/native/verify-source-bundle.sh"
+  manual_copy_to_destination "${DEST_HOST}" "${INCOMING_DIR}" "${copy_files[@]}"
 }
 
 manual_cmd_restore_shared() {
@@ -501,6 +526,78 @@ minimal-cutover 이후 follow-up checklist
 EOF
 }
 
+manual_cmd_refresh_cache() {
+  manual_require_value "${DEST_HOST}" "DEST_HOST"
+
+  local base_url env_file
+  # health path(KT_NATIVE_HEALTH_PATH)가 '/' 가 아닐 수 있으므로 health URL 이 아니라
+  # host:port 로 앱 base URL 을 직접 구성한다.
+  base_url="http://${KT_NATIVE_HEALTH_HOST}:${KT_NATIVE_PORT}"
+  env_file="${DEST_APP_ROOT}/shared/.env"
+
+  local refresh_script
+  refresh_script=$(
+    cat <<EOF
+set -euo pipefail
+# API_KEY 는 서버 소유 env 에서만 로드한다. 값은 절대 출력하지 않는다.
+set -a; . $(manual_quote "${env_file}"); set +a
+curl -fsS --connect-timeout 5 --max-time 120 -X POST $(manual_quote "${base_url}/admin/trigger-bus-notice") -H "x-api-key: \${API_KEY}"
+echo
+echo "재크롤은 백그라운드로 수행된다. 완료 확인:"
+echo "  journalctl -u ${APP_NAME} --since '15 min ago' --no-pager | grep '재갱신 완료'"
+EOF
+  )
+
+  manual_run_host_script "${DEST_USER}" "${DEST_HOST}" "${refresh_script}"
+}
+
+manual_cmd_smoke() {
+  manual_require_value "${DEST_HOST}" "DEST_HOST"
+  if [[ -z "${SMOKE_ROUTE:-}" ]]; then
+    echo "smoke: SMOKE_ROUTE 가 설정되지 않아 건너뜁니다." >&2
+    echo "  예) SMOKE_ROUTE=162 SMOKE_DATE=2026-07-12 DEST_HOST=... $(basename "$0") smoke" >&2
+    return 0
+  fi
+  # JSON payload 로 직접 보간되므로 JSON 을 깨거나 주입할 수 있는 문자를 거부한다.
+  case "${SMOKE_ROUTE}${SMOKE_DATE:-}" in
+    *'"'*|*'\'*) manual_fail "SMOKE_ROUTE/SMOKE_DATE 에 허용되지 않는 문자(\" 또는 \\)가 있습니다" ;;
+  esac
+
+  local base_url payload
+  # health path(KT_NATIVE_HEALTH_PATH)가 '/' 가 아닐 수 있으므로 health URL 이 아니라
+  # host:port 로 앱 base URL 을 직접 구성한다.
+  base_url="http://${KT_NATIVE_HEALTH_HOST}:${KT_NATIVE_PORT}"
+  payload="{\"action\":{\"params\":{\"route_number\":\"${SMOKE_ROUTE}\",\"date\":\"${SMOKE_DATE:-}\"}},\"userRequest\":{\"utterance\":\"${SMOKE_ROUTE}번\"}}"
+
+  local smoke_script
+  smoke_script=$(
+    cat <<EOF
+set -euo pipefail
+curl -fsS --connect-timeout 5 --max-time 120 -X POST $(manual_quote "${base_url}/bus/webhook/route_check") \
+  -H 'Content-Type: application/json' \
+  -d $(manual_quote "${payload}")
+echo
+EOF
+  )
+
+  manual_run_host_script "${DEST_USER}" "${DEST_HOST}" "${smoke_script}"
+}
+
+manual_cmd_redeploy() {
+  # 반복 재배포 편의 경로: 공유 상태(DB/첨부/캐시) 전송 없이 4단계를 순차 실행한다.
+  # 크롤/추출 로직 변경 배포는 REFRESH_CACHE=true 로 캐시 갱신을, SMOKE_ROUTE 로 스모크를 켠다.
+  manual_cmd_prepare_artifact
+  SKIP_SHARED_STATE=true manual_cmd_push
+  manual_cmd_deploy
+  manual_cmd_postcheck
+  if manual_is_truthy "${REFRESH_CACHE:-false}"; then
+    manual_cmd_refresh_cache
+  fi
+  if [[ -n "${SMOKE_ROUTE:-}" ]]; then
+    manual_cmd_smoke
+  fi
+}
+
 main() {
   if [[ $# -eq 0 ]]; then
     manual_show_help
@@ -538,6 +635,15 @@ main() {
       ;;
     postcheck)
       manual_cmd_postcheck
+      ;;
+    refresh-cache)
+      manual_cmd_refresh_cache
+      ;;
+    smoke)
+      manual_cmd_smoke
+      ;;
+    redeploy)
+      manual_cmd_redeploy
       ;;
     followup-checklist)
       manual_cmd_followup_checklist
