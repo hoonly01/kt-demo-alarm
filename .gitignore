@@ -170,6 +170,7 @@ docs/AGENTS.md
 
 # Design files
 *.vuerd.json
+!docs/erd.vuerd.json
 erd.json
 
 # AI
