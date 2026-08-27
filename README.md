@@ -5,7 +5,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![KakaoTalk](https://img.shields.io/badge/KakaoTalk-FFCD00?style=flat-square&logo=kakaotalk&logoColor=black)](https://developers.kakao.com)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![Status](https://img.shields.io/badge/Status-ClosedBeta-orange?style=flat-square)]()
+[![Status](https://img.shields.io/badge/Status-Pilot-orange?style=flat-square)]()
 
 KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 집회 알리미 서비스의 개발 저장소입니다.
 > 🔗 Link: [카카오톡 채널 추가하기](https://pf.kakao.com/_gmJNn)
@@ -14,8 +14,8 @@ KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 �
 <br />
 
 ## 📰 KTx종로구청 2026년 협력사업 선정 프로젝트
+> [**종로구·KT, 27일부터 '시위·집회 알림톡' 시범운영** | 연합뉴스](https://www.yna.co.kr/view/AKR20260721081200004)<br />
 > [**종로구, 시위·집회 알림톡 서비스 연내 상용화 추진** | 연합뉴스](https://www.yna.co.kr/view/AKR20260212070500004)  
-> [**"시위·집회 정보, 미리 알려준다” 종로구·KT 상용화 착수** | 종로구청](https://www.jongno.go.kr/mayor/bbs/selectBoardArticle.do?bbsId=BBSMSTR_000000001618&menuNo=388338&menuId=388338&nttId=250457)  
 
 
 <br />
@@ -34,7 +34,7 @@ KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 �
 ## 📮 개요
 > 등록만 하시고, 까먹으세요! 저희가 먼저 알려드릴게요.  
 
-서울경찰청과 서울시 교통정보 시스템의 데이터를 수집해 사용자가 사전 설정한 이동경로나 관심 장소에 집회로 인한 영향이 예상되면 카카오톡으로 알림을 보내 사전에 대비할 수 있도록 돕습니다.  
+서울경찰청이 공개하는 집회 정보와 서울교통정보센터(TOPIS)의 교통 통제 정보를 수집해 사용자가 사전 설정한 이동경로나 관심 구역에 집회로 인한 영향이 예상되면 카카오톡으로 알림을 보내 사전에 대비할 수 있도록 돕습니다.
 
 <br />
 
@@ -53,8 +53,8 @@ KT디지털인재장학생 지역사회 문제해결 프로젝트 - 종로구 �
 <a id="solution"></a>
 ### 💡 해결책
 **별도 앱 설치 없이**, 카카오톡으로 집회 정보를 받아보는 서비스입니다.
-- 서울경찰청 집회 신고 데이터, 서울시 교통정보 시스템 정보 수집
-- 사용자가 등록한 **이동경로**와 **관심 장소**의 집회 탐지
+- 서울경찰청(SMPA) 집회 신고 데이터, 서울교통정보센터(TOPIS) 교통 통제 정보 수집
+- 사용자가 등록한 **이동경로**와 **관심 구역**의 집회 탐지
 - 카카오톡 기반 **개인 맞춤형 알림** 발송
 
 <br />
